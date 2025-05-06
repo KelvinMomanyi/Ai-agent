@@ -40,15 +40,19 @@ if (host === "localhost") {
 export default defineConfig({
   server: {
     allowedHosts: [host],
-    cors: {
-      preflightContinue: true,
-    },
     port: Number(process.env.PORT || 3000),
     hmr: hmrConfig,
     fs: {
       // See https://vitejs.dev/config/server-options.html#server-fs-allow for more information
       allow: ["app", "node_modules"],
     },
+    cors: {
+      origin: true, // Allow all origins
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'X-Requested-With', 'X-Shopify-Shop-Domain'],
+      credentials: true,
+      maxAge: 86400 // 24 hours
+  }, // This is what you add
   },
   plugins: [
     remix({

@@ -1,7 +1,7 @@
 import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from 'app/shopify.server';
-import { fetchProductCatalog } from 'app/utils/fetchProductCatalog';
+import { fetchProducts} from 'app/utils/fetchProductCatalog';
 import { console } from 'inspector';
 import shopify from '../shopify.server';
 import { useLoaderData } from '@remix-run/react';
@@ -9,13 +9,13 @@ import { IndexTable, ButtonGroup, Button } from '@shopify/polaris';
 import { useState } from 'react';
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // or restrict to specific Shopify shop domain
+  'Access-Control-Allow-Origin': 'https://teretret.myshopify.com', // or restrict to specific Shopify shop domain
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
 export const loader = async () => {
- 
+
 
   return json({ message: "Use POST method to get upsell suggestion." },{ headers: corsHeaders });
 };
@@ -33,7 +33,9 @@ export const loader = async () => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { cartItems } = await request.json();
-  const { admin } = await authenticate.admin(request);
+  const { admin} = await authenticate.admin(request);
+  // const products = await fetchProducts(request);
+  // console.log(products,'fetchedProducts')
   const graphqlQuery = `
   query {
     products(first: 50) {
@@ -54,21 +56,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
   }
-`;
-
-const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
-const result = await response.json();
-
-const products = result.data.products.edges.map(({ node }) => ({
+  `;
+  
+  const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
+  const result = await response.json();
+  
+  const products = result.data.products.edges.map(({ node }) => ({
   id: node.id,
   title: node.title,
   image: {
     src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
     alt: node.featuredImage?.altText || node.title,
   },
-}));
+  }));
 
-  try {
+
+   try {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -93,16 +96,10 @@ const products = result.data.products.edges.map(({ node }) => ({
     const data = await response.json();
     return json({ suggestion: data.choices[0].message.content }, { headers: corsHeaders });
 
-  } catch (error) {
-    console.error("Upsell generation error:", error);
-    return json({ error: 'Internal Server Error' }, { status: 500, headers: corsHeaders });
-  }
+   } catch (error) {
+      console.error("Upsell generation error:", error);
+      return  json({ error: 'Internal Server Error' }, { status: 500, headers: corsHeaders });
+   }
 };
 
 
-export const options = () => {
-  return new Response(null, {
-    status: 204,
-    headers: corsHeaders,
-  });
-};

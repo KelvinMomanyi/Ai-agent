@@ -3,7 +3,7 @@
 client_id = "b314197727859b8c244255e176f8b2af"
 name = "ai-agent"
 handle = "ai-agent-21"
-application_url = "https://removable-dutch-shoe-passive.trycloudflare.com"
+application_url = "https://donna-chuck-electricity-currently.trycloudflare.com"
 embedded = true
 
 [build]
@@ -17,9 +17,9 @@ scopes = "read_products"
 
 [auth]
 redirect_urls = [
-  "https://removable-dutch-shoe-passive.trycloudflare.com/auth/callback",
-  "https://removable-dutch-shoe-passive.trycloudflare.com/auth/shopify/callback",
-  "https://removable-dutch-shoe-passive.trycloudflare.com/api/auth/callback"
+  "https://ai-agent-plum-eight.vercel.app/auth/callback",
+  "https://ai-agent-plum-eight.vercel.app/auth/shopify/callback",
+  "https://ai-agent-plum-eight.vercel.app/api/auth/callback"
 ]
 
 [webhooks]

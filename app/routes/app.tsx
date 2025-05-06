@@ -23,8 +23,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       scope: session.scope ?? '',
     },
   });
-return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 
+
+return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
 
 
