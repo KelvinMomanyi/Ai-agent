@@ -1,0 +1,51 @@
+<div id="chatbot-container" style="margin: 20px 0;">
+  <div id="chatbot-messages"></div>
+  <button id="chatbot-button" style="margin-top: 10px; padding: 10px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 5px;">
+    Suggest an Upsell
+  </button>
+</div>
+
+<script>
+  const button = document.getElementById('chatbot-button');
+  const messages = document.getElementById('chatbot-messages');
+
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Thinking...';
+
+    try {
+      const cart = await fetch('/cart.js').then(res => res.json());
+      console.log(cart.items, 'cartt')
+      const response = await fetch('https://removable-dutch-shoe-passive.trycloudflare.com/api/upsell', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cartItems: cart.items }),
+      });
+
+      const data = await response.json();
+      console.log(data, 'dataii')
+      const msg = document.createElement('p');
+      msg.textContent = data.suggestion;
+      messages.appendChild(msg);
+    } catch (err) {
+      console.error('Error:', err);
+      alert('Something went wrong. Try again.');
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Suggest an Upsell';
+    }
+  });
+</script>
+
+
+
+{% schema %}
+  {
+    "name": "AI Agent",
+    "target": "section",
+    "class": "chatbot-section",
+    "settings": []
+  }
+  {% endschema %}
+
+
