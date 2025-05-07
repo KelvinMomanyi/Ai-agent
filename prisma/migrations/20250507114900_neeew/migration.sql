@@ -25,6 +25,7 @@ CREATE TABLE "Shop" (
     "accessToken" TEXT NOT NULL,
     "scope" TEXT,
     "installedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "productCatalog" JSONB,
 
     CONSTRAINT "Shop_pkey" PRIMARY KEY ("shopDomain")
 );

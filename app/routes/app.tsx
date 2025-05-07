@@ -58,7 +58,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     create: {
       shopDomain: session.shop,
       accessToken: session.accessToken,
-      scope: session.scope ?? '',
+      scope: session.scope,
       productCatalog:productCatalog,
     },
   });
