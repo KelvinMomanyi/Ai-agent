@@ -31,14 +31,12 @@ model Session {
 
 
 model Shop {
-  shopDomain   String   @id
-  accessToken  String
-  scope        String?
-  installedAt  DateTime @default(now())
+  shopDomain     String   @id
+  accessToken    String
+  scope          String?
+  installedAt    DateTime @default(now())
+  productCatalog String?  // JSON string of product data
 }
 
 
-model CachedData {
-  key   String @id
-  value String
-}
+

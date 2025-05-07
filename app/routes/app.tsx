@@ -39,7 +39,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
   const result = await response.json();
   
-  const products = result.data.products.edges.map(({ node }) => ({
+  const productCatalog = result.data.products.edges.map(({ node }) => ({
   id: node.id,
   title: node.title,
   image: {
@@ -48,22 +48,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   },
   }));
 
-  await prisma.cachedData.upsert({
-    where: { key: 'productCatalog' },
-    update: { value: JSON.stringify(products) },
-    create: { key: 'productCatalog', value: JSON.stringify(products) },
-  });
-
-  //return cors(json({ products }, { headers: corsHeaders }));
+  
   await prisma.shop.upsert({
     where: { shopDomain: session.shop },
-    update: { accessToken: session.accessToken },
+    update: {
+      accessToken: session.accessToken,
+      productCatalog: JSON.stringify(productCatalog),
+    },
     create: {
       shopDomain: session.shop,
       accessToken: session.accessToken,
       scope: session.scope ?? '',
+      productCatalog: JSON.stringify(productCatalog),
     },
   });
+  
 
 
 

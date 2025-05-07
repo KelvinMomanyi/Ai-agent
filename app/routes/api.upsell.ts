@@ -34,15 +34,19 @@ export const loader = async () => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { cartItems, productItems } = await request.json();
-  const { admin} = await authenticate.admin(request);
+  const { admin, session} = await authenticate.admin(request);
   // const products = await fetchProducts(request);
   // console.log(products,'fetchedProducts')
-  const cache = await prisma.cachedData.findUnique({
-    where: { key: 'productCatalog' },
+  // const cache = await prisma.cachedData.findUnique({
+  //   where: { key: 'productCatalog' },
+  // });
+
+  // const productData = cache ? JSON.parse(cache.value) : [];
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain: session.shop },
   });
-
-  const productData = cache ? JSON.parse(cache.value) : [];
-
+  
+  const products = shop?.productCatalog ? JSON.parse(shop.productCatalog) : [];
 
    try {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -60,7 +64,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
           {
             role: 'user',
-            content: `Cart: ${JSON.stringify(cartItems)} Available products:${productData}`,
+            content: `Cart: ${JSON.stringify(cartItems)} Available products:${products}`,
           },
         ],
       }),
