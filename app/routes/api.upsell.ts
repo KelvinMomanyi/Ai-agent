@@ -7,6 +7,7 @@ import shopify from '../shopify.server';
 import { useLoaderData } from '@remix-run/react';
 import { IndexTable, ButtonGroup, Button } from '@shopify/polaris';
 import { useState } from 'react';
+import prisma from 'app/db.server';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://teretret.myshopify.com', // or restrict to specific Shopify shop domain
@@ -36,7 +37,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin} = await authenticate.admin(request);
   // const products = await fetchProducts(request);
   // console.log(products,'fetchedProducts')
- 
+  const cache = await prisma.cachedData.findUnique({
+    where: { key: 'productCatalog' },
+  });
+
+  const productData = cache ? JSON.parse(cache.value) : [];
 
 
    try {
@@ -55,7 +60,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
           {
             role: 'user',
-            content: `Cart: ${JSON.stringify(cartItems)} Available products:${JSON.stringify(productItems)}`,
+            content: `Cart: ${JSON.stringify(cartItems)} Available products:${productData}`,
           },
         ],
       }),

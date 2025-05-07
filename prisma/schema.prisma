@@ -36,3 +36,9 @@ model Shop {
   scope        String?
   installedAt  DateTime @default(now())
 }
+
+
+model CachedData {
+  key   String @id
+  value String
+}

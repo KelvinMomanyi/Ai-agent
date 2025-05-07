@@ -13,7 +13,48 @@ export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
-   
+  
+  const graphqlQuery = `
+  query {
+    products(first: 50) {
+      edges {
+        node {
+          id
+          title
+          handle
+          featuredImage {
+            originalSrc
+            altText
+          }
+        }
+        cursor
+      }
+      pageInfo {
+        hasNextPage
+      }
+    }
+  }
+  `;
+  
+  const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
+  const result = await response.json();
+  
+  const products = result.data.products.edges.map(({ node }) => ({
+  id: node.id,
+  title: node.title,
+  image: {
+    src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
+    alt: node.featuredImage?.altText || node.title,
+  },
+  }));
+
+  await prisma.cachedData.upsert({
+    where: { key: 'productCatalog' },
+    update: { value: JSON.stringify(products) },
+    create: { key: 'productCatalog', value: JSON.stringify(products) },
+  });
+
+  //return cors(json({ products }, { headers: corsHeaders }));
   await prisma.shop.upsert({
     where: { shopDomain: session.shop },
     update: { accessToken: session.accessToken },
@@ -25,6 +66,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
 
+
+
 return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
 
@@ -32,7 +75,7 @@ return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
-
+   
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
       <NavMenu>
