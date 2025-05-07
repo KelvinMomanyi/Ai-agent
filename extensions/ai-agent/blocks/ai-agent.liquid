@@ -16,7 +16,7 @@
     try {
       const cart = await fetch('/cart.js').then(res => res.json());
       console.log(cart.items, 'cartt')
-      const productResponse = await fetch('/apps/products', {
+      const productResponse = await fetch('https://ai-agent-plum-eight.vercel.app/apps/products', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json'
