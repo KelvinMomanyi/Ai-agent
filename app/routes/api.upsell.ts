@@ -42,12 +42,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // });
 
   // const productData = cache ? JSON.parse(cache.value) : [];
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
+  // const shop = await prisma.shop.findUnique({
+  //   where: { shopDomain: session.shop },
+  // });
   
-  const products = shop?.productCatalog ? JSON.parse(shop.productCatalog) : [];
-
+  // const products = shop?.productCatalog ? JSON.parse(shop.productCatalog) : [];
+  const products = []
    try {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
