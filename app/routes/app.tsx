@@ -53,13 +53,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { shopDomain: session.shop },
     update: {
       accessToken: session.accessToken,
-      productCatalog: JSON.stringify(productCatalog),
+      productCatalog: productCatalog,
     },
     create: {
       shopDomain: session.shop,
       accessToken: session.accessToken,
       scope: session.scope ?? '',
-      productCatalog: JSON.stringify(productCatalog),
+      productCatalog:productCatalog,
     },
   });
   
