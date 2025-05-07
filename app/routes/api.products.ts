@@ -9,8 +9,8 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'Content-Type',
   };
   
-  export const loader = async () => {
-    const { cors} = await authenticate.admin(request);
+  export const loader = async ({request}) => {
+    const { cors} = await authenticate.admin(request)
   
     return cors(json({ message: "Use POST method to get upsell suggestion." },{ headers: corsHeaders }));
   };
