@@ -42,42 +42,49 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // });
 
   // const productData = cache ? JSON.parse(cache.value) : [];
-  const { admin } = await authenticate.public.appProxy(request); 
+ // const { admin } = await authenticate.public.appProxy(request); 
   // const products = await fetchProducts(request);
   // console.log(products,'fetchedProducts')
-  const graphqlQuery = `
-  query {
-    products(first: 50) {
-      edges {
-        node {
-          id
-          title
-          handle
-          featuredImage {
-            originalSrc
-            altText
-          }
-        }
-        cursor
-      }
-      pageInfo {
-        hasNextPage
-      }
-    }
-  }
-  `;
+  // const graphqlQuery = `
+  // query {
+  //   products(first: 50) {
+  //     edges {
+  //       node {
+  //         id
+  //         title
+  //         handle
+  //         featuredImage {
+  //           originalSrc
+  //           altText
+  //         }
+  //       }
+  //       cursor
+  //     }
+  //     pageInfo {
+  //       hasNextPage
+  //     }
+  //   }
+  // }
+  // `;
   
-  const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
-  const result = await cors(response.json());
+  // const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
+  // const result = await cors(response.json());
   
-  const products = result.data.products.edges.map(({ node }) => ({
-  id: node.id,
-  title: node.title,
-  image: {
-    src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
-    alt: node.featuredImage?.altText || node.title,
-  },
-  }));
+  // const products = result.data.products.edges.map(({ node }) => ({
+  // id: node.id,
+  // title: node.title,
+  // image: {
+  //   src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
+  //   alt: node.featuredImage?.altText || node.title,
+  // },
+  // }));
+  const url = new URL(request.url);
+  const shop = url.searchParams.get('shop');
+
+  const products = await prisma.product.findMany({
+      where: { shop },
+      select: { productId: true, type: true },
+  });
 
    try {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
