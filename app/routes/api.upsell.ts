@@ -34,7 +34,7 @@ export const loader = async () => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { cartItems, productItems } = await request.json();
-  const { admin, session} = await authenticate.admin(request);
+  const { admin, session, cors} = await authenticate.admin(request);
   // const products = await fetchProducts(request);
   // console.log(products,'fetchedProducts')
   // const cache = await prisma.cachedData.findUnique({
@@ -71,11 +71,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     const data = await response.json();
-    return json({ suggestion: data.choices[0].message.content }, { headers: corsHeaders });
+    return cors(json({ suggestion: data.choices[0].message.content }, { headers: corsHeaders }));
 
    } catch (error) {
       console.error("Upsell generation error:", error);
-      return  json({ error: 'Internal Server Error' }, { status: 500, headers: corsHeaders });
+      return  cors(json({ error: 'Internal Server Error' }, { status: 500, headers: corsHeaders }));
    }
 };
 

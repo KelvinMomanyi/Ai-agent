@@ -17,8 +17,42 @@ const corsHeaders = {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { cartItems } = await request.json();
-    const { admin, cors} = await authenticate.admin(request);
+    const { admin } = await authenticate.public.appProxy(request); 
     // const products = await fetchProducts(request);
     // console.log(products,'fetchedProducts')
+    const graphqlQuery = `
+    query {
+      products(first: 50) {
+        edges {
+          node {
+            id
+            title
+            handle
+            featuredImage {
+              originalSrc
+              altText
+            }
+          }
+          cursor
+        }
+        pageInfo {
+          hasNextPage
+        }
+      }
+    }
+    `;
+    
+    const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
+    const result = await response.json();
+    
+    const products = result.data.products.edges.map(({ node }) => ({
+    id: node.id,
+    title: node.title,
+    image: {
+      src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
+      alt: node.featuredImage?.altText || node.title,
+    },
+    }));
   
+    return cors(json({ products }, { headers: corsHeaders }));
   };
