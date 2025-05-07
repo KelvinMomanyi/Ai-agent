@@ -55,12 +55,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       accessToken: session.accessToken,
       productCatalog: productCatalog,
     },
-    create: {
-      shopDomain: session.shop,
-      accessToken: session.accessToken,
-      scope: session.scope,
-      productCatalog:productCatalog,
-    },
   });
   
 
