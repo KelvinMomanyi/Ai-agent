@@ -34,7 +34,7 @@ export const loader = async () => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { cartItems, productItems } = await request.json();
-  const { admin, session, cors} = await authenticate.admin(request);
+  // const { admin, session, cors} = await authenticate.admin(request);
   // const products = await fetchProducts(request);
   // console.log(products,'fetchedProducts')
   // const cache = await prisma.cachedData.findUnique({
@@ -42,11 +42,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // });
 
   // const productData = cache ? JSON.parse(cache.value) : [];
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
+  const { admin } = await authenticate.public.appProxy(request); 
+  // const products = await fetchProducts(request);
+  // console.log(products,'fetchedProducts')
+  const graphqlQuery = `
+  query {
+    products(first: 50) {
+      edges {
+        node {
+          id
+          title
+          handle
+          featuredImage {
+            originalSrc
+            altText
+          }
+        }
+        cursor
+      }
+      pageInfo {
+        hasNextPage
+      }
+    }
+  }
+  `;
   
-  const products = shop?.productCatalog ? JSON.parse(shop.productCatalog) : [];
+  const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
+  const result = await response.json();
+  
+  const products = result.data.products.edges.map(({ node }) => ({
+  id: node.id,
+  title: node.title,
+  image: {
+    src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
+    alt: node.featuredImage?.altText || node.title,
+  },
+  }));
 
    try {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -71,11 +102,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     const data = await response.json();
-    return cors(json({ suggestion: data.choices[0].message.content }, { headers: corsHeaders }));
+    return json({ suggestion: data.choices[0].message.content }, { headers: corsHeaders });
 
    } catch (error) {
       console.error("Upsell generation error:", error);
-      return  cors(json({ error: 'Internal Server Error' }, { status: 500, headers: corsHeaders }));
+      return  json({ error: 'Internal Server Error' }, { status: 500, headers: corsHeaders });
    }
 };
 
