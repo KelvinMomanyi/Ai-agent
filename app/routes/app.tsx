@@ -60,7 +60,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       accessToken: session.accessToken,
       scope: session.scope,
       productCatalog:session.productCatalog,
-    },
+    }
   });
   
 
