@@ -33,7 +33,7 @@ export const loader = async () => {
 
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { cartItems, productItems } = await request.json();
+  const { cartItems} = await request.json();
   // const { admin, session, cors} = await authenticate.admin(request);
   // const products = await fetchProducts(request);
   // console.log(products,'fetchedProducts')
@@ -68,7 +68,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   `;
   
   const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
-  const result = await response.json();
+  const result = await cors(response.json());
   
   const products = result.data.products.edges.map(({ node }) => ({
   id: node.id,
@@ -101,8 +101,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }),
     });
 
-    const data = await response.json();
-    return cors(json({ suggestion: data.choices[0].message.content }, { headers: corsHeaders }));
+    const data = await cors(response.json());
+    return json({ suggestion: data.choices[0].message.content }, { headers: corsHeaders });
 
    } catch (error) {
       console.error("Upsell generation error:", error);
