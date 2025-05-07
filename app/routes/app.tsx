@@ -51,9 +51,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   
   await prisma.shop.upsert({
     where: { shopDomain: session.shop },
-    update: {
+    create: {
+      shopDomain: session.shop,
       accessToken: session.accessToken,
-      productCatalog: productCatalog,
+      scope: session.scope,
+      productCatalog:productCatalog,
     },
   });
   
