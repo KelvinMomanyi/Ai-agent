@@ -13,7 +13,7 @@ export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
-  
+
   const graphqlQuery = `
   query {
     products(first: 50) {
@@ -48,7 +48,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   },
   }));
 
-  await prisma.cachedData.upsert({
+  await prisma.shop.upsert({
     where: { key: 'productCatalog' },
     update: { value: JSON.stringify(products) },
     create: { key: 'productCatalog', value: JSON.stringify(products) },
