@@ -10,7 +10,7 @@ import { useState } from 'react';
 import prisma from 'app/db.server';
 import { cors } from "remix-utils/cors";
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://teretret.myshopify.com', // or restrict to specific Shopify shop domain
+  'Access-Control-Allow-Origin': '*', // or restrict to specific Shopify shop domain
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
