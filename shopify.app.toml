@@ -6,6 +6,10 @@ handle = "ai-agent-21"
 application_url = "https://ai-agent-plum-eight.vercel.app/"
 embedded = true
 
+[extensions.capabilities]
+network_access = true
+
+
 [build]
 automatically_update_urls_on_dev = true
 dev_store_url = "teretret.myshopify.com"
