@@ -8,7 +8,7 @@ import { useLoaderData } from '@remix-run/react';
 import { IndexTable, ButtonGroup, Button } from '@shopify/polaris';
 import { useState } from 'react';
 import prisma from 'app/db.server';
-
+import { cors } from "remix-utils/cors";
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://teretret.myshopify.com', // or restrict to specific Shopify shop domain
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
@@ -18,7 +18,7 @@ const corsHeaders = {
 export const loader = async () => {
 
 
-  return json({ message: "Use POST method to get upsell suggestion." },{ headers: corsHeaders });
+  return cors(json({ message: "Use POST method to get upsell suggestion." },{ headers: corsHeaders }));
 };
 
 
@@ -102,11 +102,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     const data = await response.json();
-    return json({ suggestion: data.choices[0].message.content }, { headers: corsHeaders });
+    return cors(json({ suggestion: data.choices[0].message.content }, { headers: corsHeaders }));
 
    } catch (error) {
       console.error("Upsell generation error:", error);
-      return  json({ error: 'Internal Server Error' }, { status: 500, headers: corsHeaders });
+      return  cors(json({ error: 'Internal Server Error' }, { status: 500, headers: corsHeaders }));
    }
 };
 
