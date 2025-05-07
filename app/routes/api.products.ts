@@ -2,6 +2,19 @@ import { authenticate } from "app/shopify.server";
 import { ActionFunctionArgs } from "node_modules/@remix-run/node/dist/index";
 import { json } from '@remix-run/node';
 
+
+const corsHeaders = {
+    'Access-Control-Allow-Origin': 'https://teretret.myshopify.com', // or restrict to specific Shopify shop domain
+    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+  
+  export const loader = async () => {
+  
+  
+    return json({ message: "Use POST method to get upsell suggestion." },{ headers: corsHeaders });
+  };
+
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { cartItems } = await request.json();
     const { admin} = await authenticate.admin(request);
@@ -41,11 +54,5 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     },
     }));
   
-    return json({ products }, {
-        headers: {
-          'Access-Control-Allow-Origin': '*', // or limit to your store domain
-          'Access-Control-Allow-Methods': 'GET',
-          'Access-Control-Allow-Headers': 'Content-Type',
-        }
-      });
+    return json({ products }, { headers: corsHeaders });
   };
