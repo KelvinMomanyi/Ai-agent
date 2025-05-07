@@ -10,14 +10,14 @@ const corsHeaders = {
   };
   
   export const loader = async () => {
+    const { cors} = await authenticate.admin(request);
   
-  
-    return json({ message: "Use POST method to get upsell suggestion." },{ headers: corsHeaders });
+    return cors(json({ message: "Use POST method to get upsell suggestion." },{ headers: corsHeaders }));
   };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { cartItems } = await request.json();
-    const { admin} = await authenticate.admin(request);
+    const { admin, cors} = await authenticate.admin(request);
     // const products = await fetchProducts(request);
     // console.log(products,'fetchedProducts')
     const graphqlQuery = `
@@ -54,5 +54,5 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     },
     }));
   
-    return json({ products }, { headers: corsHeaders });
+    return cors(json({ products }, { headers: corsHeaders }));
   };
