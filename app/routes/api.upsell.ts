@@ -15,10 +15,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-// export const loader = async ({request}: LoaderFunctionArgs) => {
+export const loader = async ({request}: LoaderFunctionArgs) => {
 
-//     return json({ message: "Use POST method to get upsell suggestion." }, { headers: corsHeaders });
-// };
+    return json({ message: "Use POST method to get upsell suggestion." }, { headers: corsHeaders });
+};
   
 
 
@@ -35,39 +35,39 @@ const corsHeaders = {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { cartItems} = await request.json();
   const { session, admin } = await authenticate.public.appProxy(request); 
-//  const graphqlQuery = `
-//   query {
-//     products(first: 50) {
-//       edges {
-//         node {
-//           id
-//           title
-//           handle
-//           featuredImage {
-//             originalSrc
-//             altText
-//           }
-//         }
-//         cursor
-//       }
-//       pageInfo {
-//         hasNextPage
-//       }
-//     }
-//   }
-//   `;
+ const graphqlQuery = `
+  query {
+    products(first: 50) {
+      edges {
+        node {
+          id
+          title
+          handle
+          featuredImage {
+            originalSrc
+            altText
+          }
+        }
+        cursor
+      }
+      pageInfo {
+        hasNextPage
+      }
+    }
+  }
+  `;
   
-//   const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
-//   const result = await cors(response.json());
+  const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
+  const result = await cors(response.json());
   
-//   const products = result.data.products.edges.map(({ node }) => ({
-//   id: node.id,
-//   title: node.title,
-//   image: {
-//     src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
-//     alt: node.featuredImage?.altText || node.title,
-//   },
-//   }));
+  const products = result.data.products.edges.map(({ node }) => ({
+  id: node.id,
+  title: node.title,
+  image: {
+    src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
+    alt: node.featuredImage?.altText || node.title,
+  },
+  }));
   
    try {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -86,7 +86,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
           {
             role: 'user',
-            content: `Cart: ${JSON.stringify(cartItems)} Available products`,
+            content: `Cart: ${JSON.stringify(cartItems)} Available products${JSON.stringify(products)}`,
           },
         ],
       }),
