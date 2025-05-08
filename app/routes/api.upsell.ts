@@ -15,10 +15,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-export const loader = async ({request}: LoaderFunctionArgs) => {
+// export const loader = async ({request}: LoaderFunctionArgs) => {
 
-    return json({ message: "Use POST method to get upsell suggestion." }, { headers: corsHeaders });
-};
+//     return json({ message: "Use POST method to get upsell suggestion." }, { headers: corsHeaders });
+// };
   
 
 
