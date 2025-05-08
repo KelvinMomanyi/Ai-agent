@@ -70,6 +70,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }));
   
    try {
+    console.log(products, 'products')
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
