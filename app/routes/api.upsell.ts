@@ -34,7 +34,7 @@ const corsHeaders = {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { cartItems} = await request.json();
-//  const { admin } = await authenticate.public.appProxy(request); 
+  const { session, admin } = await authenticate.public.appProxy(request); 
 //  const graphqlQuery = `
 //   query {
 //     products(first: 50) {
