@@ -34,39 +34,52 @@ export const loader = async ({request}: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { cartItems} = await request.json();
   const { session, admin } = await authenticate.public.appProxy(request); 
- const graphqlQuery = `
-  query {
-    products(first: 50) {
-      edges {
-        node {
-          id
-          title
-          handle
-          featuredImage {
-            originalSrc
-            altText
-          }
-        }
-        cursor
-      }
-      pageInfo {
-        hasNextPage
-      }
-    }
-  }
-  `;
-  
-  const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
-  const result = await cors(response.json());
-  
-  const products = result.data.products.edges.map(({ node }) => ({
-  id: node.id,
-  title: node.title,
-  image: {
-    src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
-    alt: node.featuredImage?.altText || node.title,
-  },
+ const productResponse = await admin.rest.resources.Product.all({
+    session: session
+  });
+
+  const products = productResponse.map(product => ({
+    id: product.id,
+    title: product.title,
+    handle: product.handle,
+    status: product.status,
+    variants: product.variants,
+    images: product.images
   }));
+  
+//  const graphqlQuery = `
+//   query {
+//     products(first: 50) {
+//       edges {
+//         node {
+//           id
+//           title
+//           handle
+//           featuredImage {
+//             originalSrc
+//             altText
+//           }
+//         }
+//         cursor
+//       }
+//       pageInfo {
+//         hasNextPage
+//       }
+//     }
+//   }
+//   `;
+  
+//   const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
+//   const result = await cors(response.json());
+  
+//   const products = result.data.products.edges.map(({ node }) => ({
+//   id: node.id,
+//   title: node.title,
+//   image: {
+//     src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
+//     alt: node.featuredImage?.altText || node.title,
+//   },
+//   }));
 
    try {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
