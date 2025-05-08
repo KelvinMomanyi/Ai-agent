@@ -2,7 +2,6 @@ import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from 'app/shopify.server';
 import { fetchProducts} from 'app/utils/fetchProductCatalog';
-import { console } from 'inspector';
 import shopify from '../shopify.server';
 import { useLoaderData } from '@remix-run/react';
 import { IndexTable, ButtonGroup, Button } from '@shopify/polaris';
@@ -68,9 +67,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     alt: node.featuredImage?.altText || node.title,
   },
   }));
-  
+  console.log(products, 'products')
    try {
-    console.log(products, 'products')
+    
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
