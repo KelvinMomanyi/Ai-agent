@@ -1,9 +1,63 @@
-<div id="chatbot-container" style="margin: 20px 0;">
+{% comment %} <div id="chatbot-container" style="margin: 20px 0;">
   <div id="chatbot-messages" ></div>
   <button id="chatbot-button" style="margin-top: 10px; padding: 10px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 5px;">
     Suggest an Upsell
   </button>
+</div> {% endcomment %}
+
+<!-- Chatbot Trigger Container -->
+<div id="chatbot-container" style="margin: 20px 0;">
+  <button id="chatbot-button" style="
+    margin-top: 10px;
+    padding: 10px 20px;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 5px;
+  ">
+    Suggest an Upsell
+  </button>
 </div>
+
+<!-- Modal Backdrop -->
+<div id="chatbot-backdrop" style="
+  display: none;
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 9998;
+"></div>
+
+<!-- Modal -->
+<div id="chatbot-messages" style="
+  display: none;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  padding: 25px 30px;
+  border-radius: 10px;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 15px 30px rgba(0,0,0,0.2);
+  z-index: 9999;
+  font-family: sans-serif;
+">
+  <p id="chatbot-text" style="margin-bottom: 20px;"></p>
+  <button onclick="closeChatbotModal()" style="
+    background: #000;
+    color: #fff;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+  ">Close</button>
+</div>
+
+
+
+
 {% comment %} <script>
 
   const button = document.getElementById('chatbot-button');
@@ -114,6 +168,16 @@ document.body.addEventListener('submit', function (e) {
   }
 });
 
+function showChatbotModal(message) {
+  textContainer.textContent = message;
+  document.getElementById('chatbot-messages').style.display = 'block';
+  document.getElementById('chatbot-backdrop').style.display = 'block';
+}
+
+function closeChatbotModal() {
+  document.getElementById('chatbot-messages').style.display = 'none';
+  document.getElementById('chatbot-backdrop').style.display = 'none';
+}
 
 </script>
 
