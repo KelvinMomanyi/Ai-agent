@@ -32,41 +32,48 @@
 
 <script>
   function showPopup() {
+    console.log('[Popup] Showing popup...');
     const popup = document.getElementById('product-popup');
     if (popup) popup.style.display = 'block';
   }
   
   function closePopup() {
+    console.log('[Popup] Closing popup...');
     const popup = document.getElementById('product-popup');
     if (popup) popup.style.display = 'none';
   }
   
   function isProductPage() {
-    // Match URLs like https://yourshop.com/products/anything
-    return /^\/products\/[^\/]+\/?$/.test(window.location.pathname);
+    const match = /^\/products\/[^\/]+\/?$/.test(window.location.pathname);
+    console.log(`[Popup] Checking if current path is product page: ${window.location.pathname} → ${match}`);
+    return match;
   }
   
   function triggerPopupIfProductPage() {
     if (isProductPage()) {
-      setTimeout(showPopup, 1500); // Delay the popup a bit
+      console.log('[Popup] Detected product page. Popup will appear shortly...');
+      setTimeout(showPopup, 1500); // delay for better UX
+    } else {
+      console.log('[Popup] Not a product page. No popup shown.');
     }
   }
   
-  // Standard navigation trigger
+  // On regular load
   window.addEventListener('DOMContentLoaded', () => {
+    console.log('[Popup] DOM fully loaded.');
     triggerPopupIfProductPage();
   });
   
-  // SPA navigation (MutationObserver or route detection)
+  // Detect route changes in SPAs
   let lastPath = location.pathname;
   const observer = new MutationObserver(() => {
     if (location.pathname !== lastPath) {
+      console.log(`[Popup] Route changed from ${lastPath} to ${location.pathname}`);
       lastPath = location.pathname;
       triggerPopupIfProductPage();
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });
-  // Add to cart listener
   function listenForAddToCart() {
     // For button with class .add-to-cart
     document.body.addEventListener('click', function (e) {
