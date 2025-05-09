@@ -1,86 +1,11 @@
 <div id="chatbot-container" style="margin: 20px 0;">
-  <div id="chatbot-messages" style=" position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: white;
-  padding: 25px 30px;
-  border-radius: 10px;
-  width: 90%;
-  max-width: 400px;
-  box-shadow: 0 15px 30px rgba(0,0,0,0.2);
-  z-index: 9999;
-  font-family: sans-serif;"></div>
+  <div id="chatbot-messages" ></div>
   <button id="chatbot-button" style="margin-top: 10px; padding: 10px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 5px;">
     Suggest an Upsell
   </button>
 </div>
-<script>
-  function showPopup() {
-    console.log('[Popup] Showing popup...');
-    const popup = document.getElementById('product-popup');
-    if (popup) popup.style.display = 'block';
-  }
-  
-  function closePopup() {
-    console.log('[Popup] Closing popup...');
-    const popup = document.getElementById('product-popup');
-    if (popup) popup.style.display = 'none';
-  }
-  
-  function isProductPage() {
-    const match = /^\/products\/[^\/]+\/?$/.test(window.location.pathname);
-    console.log(`[Popup] Checking if current path is product page: ${window.location.pathname} → ${match}`);
-    return match;
-  }
-  
-  function triggerPopupIfProductPage() {
-    if (isProductPage()) {
-      console.log('[Popup] Detected product page. Popup will appear shortly...');
-      setTimeout(showPopup, 1500); // delay for better UX
-    } else {
-      console.log('[Popup] Not a product page. No popup shown.');
-    }
-  }
-  
-  // On regular load
-  window.addEventListener('DOMContentLoaded', () => {
-    console.log('[Popup] DOM fully loaded.');
-    triggerPopupIfProductPage();
-  });
-  
-  // Detect route changes in SPAs
-  let lastPath = location.pathname;
-  const observer = new MutationObserver(() => {
-    if (location.pathname !== lastPath) {
-      console.log(`[Popup] Route changed from ${lastPath} to ${location.pathname}`);
-      lastPath = location.pathname;
-      triggerPopupIfProductPage();
-    }
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-  function listenForAddToCart() {
-    // For button with class .add-to-cart
-    document.body.addEventListener('click', function (e) {
-      if (e.target.closest('.add-to-cart')) {
-        setTimeout(showPopup, 1000); // show popup 1s after add
-      }
-    });
-  
-    // For form submission (if using form-based Add to Cart)
-    document.body.addEventListener('submit', function (e) {
-      if (e.target.matches('form[action*="/cart/add"]')) {
-        setTimeout(showPopup, 1000); // show popup 1s after form submit
-      }
-    });
-  }
-    
+{% comment %} <script>
 
-
-
-
-
-  //AI
   const button = document.getElementById('chatbot-button');
   const messages = document.getElementById('chatbot-messages');
 
@@ -117,9 +42,61 @@
       button.textContent = 'Suggest an Upsell';
     }
   });
+</script> {% endcomment %}
+
+<script>
+  const button = document.getElementById('chatbot-button');
+const messages = document.getElementById('chatbot-messages');
+const textContainer = document.getElementById('chatbot-text');
+
+async function fetchUpsellSuggestion() {
+  try {
+    const cart = await fetch('/cart.js').then(res => res.json());
+    const response = await fetch('/apps/upsell', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        "Access-Control-Allow-Origin": "*",
+      },
+      body: JSON.stringify({
+        cartItems: cart.items,
+      }),
+    });
+
+    const data = await response.json();
+    console.log(data, 'upsell response');
+    showChatbotModal(data.suggestion);
+  } catch (err) {
+    console.error('Upsell API error:', err);
+    showChatbotModal("Something went wrong. Please try again.");
+  }
+}
+
+// Button-triggered manual upsell request
+button.addEventListener('click', async () => {
+  button.disabled = true;
+  button.textContent = 'Thinking...';
+
+  await fetchUpsellSuggestion();
+
+  button.disabled = false;
+  button.textContent = 'Suggest an Upsell';
+});
+
+// Auto-trigger upsell on add-to-cart events
+document.body.addEventListener('click', function (e) {
+  if (e.target.closest('.add-to-cart')) {
+    setTimeout(fetchUpsellSuggestion, 1000); // delay to allow cart to update
+  }
+});
+
+document.body.addEventListener('submit', function (e) {
+  if (e.target.matches('form[action*="/cart/add"]')) {
+    setTimeout(fetchUpsellSuggestion, 1000);
+  }
+});
+
 </script>
-
-
 
 {% schema %}
   {
