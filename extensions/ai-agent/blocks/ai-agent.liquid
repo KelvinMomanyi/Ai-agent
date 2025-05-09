@@ -85,16 +85,22 @@ button.addEventListener('click', async () => {
 
 // Auto-trigger upsell on add-to-cart events
 document.body.addEventListener('click', function (e) {
-  if (e.target.closest('.add-to-cart')) {
-    setTimeout(fetchUpsellSuggestion, 1000); // delay to allow cart to update
+  const btn = e.target.closest('button, a, input');
+  if (btn && JSON.stringify(btn).includes('/cart/add')) {
+    console.log('[Add to Cart] AJAX-style button click detected');
+    setTimeout(fetchCartAndTriggerUpsell, 1000);
   }
 });
 
+
 document.body.addEventListener('submit', function (e) {
-  if (e.target.matches('form[action*="/cart/add"]')) {
-    setTimeout(fetchUpsellSuggestion, 1000);
+  const form = e.target;
+  if (form.matches('form[action*="/cart/add"]')) {
+    console.log('[Add to Cart] Form submission detected');
+    setTimeout(fetchCartAndTriggerUpsell, 1000);
   }
 });
+
 
 </script>
 
