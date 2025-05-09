@@ -42,22 +42,22 @@
   }
   
   function isProductPage() {
-    return window.location.pathname.startsWith('/products/');
+    // Match URLs like https://yourshop.com/products/anything
+    return /^\/products\/[^\/]+\/?$/.test(window.location.pathname);
   }
   
   function triggerPopupIfProductPage() {
     if (isProductPage()) {
-      setTimeout(showPopup, 1500); // 1.5s delay
+      setTimeout(showPopup, 1500); // Delay the popup a bit
     }
   }
   
-  // Observe page load
+  // Standard navigation trigger
   window.addEventListener('DOMContentLoaded', () => {
     triggerPopupIfProductPage();
-    listenForAddToCart();
   });
   
-  // Observe route changes (for SPAs)
+  // SPA navigation (MutationObserver or route detection)
   let lastPath = location.pathname;
   const observer = new MutationObserver(() => {
     if (location.pathname !== lastPath) {
@@ -66,7 +66,6 @@
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });
-  
   // Add to cart listener
   function listenForAddToCart() {
     // For button with class .add-to-cart
