@@ -83,6 +83,19 @@ button.addEventListener('click', async () => {
   button.textContent = 'Suggest an Upsell';
 });
 
+
+
+if (typeof Shopify !== 'undefined' && Shopify.onItemAdded) {
+  const oldCallback = Shopify.onItemAdded;
+  Shopify.onItemAdded = function (line_item) {
+    console.log('[Add to Cart] Shopify AJAX item added');
+    fetchCartAndTriggerUpsell();
+    if (typeof oldCallback === 'function') oldCallback(line_item);
+  };
+}
+
+
+
 // Auto-trigger upsell on add-to-cart events
 document.body.addEventListener('click', function (e) {
   const btn = e.target.closest('button, a, input');
