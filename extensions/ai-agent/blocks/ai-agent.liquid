@@ -3,9 +3,94 @@
   <button id="chatbot-button" style="margin-top: 10px; padding: 10px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 5px;">
     Suggest an Upsell
   </button>
+
+    <!-- Popup Modal -->
+    <div id="product-popup" style="
+      display: none;
+      position: fixed;
+      top: 20%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: white;
+      padding: 20px 30px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+      z-index: 9999;
+    ">
+      <p>🔥 Customers also chose items that go perfectly with this product!</p>
+      <button onclick="closePopup()" style="
+        margin-top: 10px;
+        padding: 8px 16px;
+        background: #000;
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      ">Close</button>
+    </div>
 </div>
 
 <script>
+  function showPopup() {
+    const popup = document.getElementById('product-popup');
+    if (popup) popup.style.display = 'block';
+  }
+  
+  function closePopup() {
+    const popup = document.getElementById('product-popup');
+    if (popup) popup.style.display = 'none';
+  }
+  
+  function isProductPage() {
+    return window.location.pathname.startsWith('/products/');
+  }
+  
+  function triggerPopupIfProductPage() {
+    if (isProductPage()) {
+      setTimeout(showPopup, 1500); // 1.5s delay
+    }
+  }
+  
+  // Observe page load
+  window.addEventListener('DOMContentLoaded', () => {
+    triggerPopupIfProductPage();
+    listenForAddToCart();
+  });
+  
+  // Observe route changes (for SPAs)
+  let lastPath = location.pathname;
+  const observer = new MutationObserver(() => {
+    if (location.pathname !== lastPath) {
+      lastPath = location.pathname;
+      triggerPopupIfProductPage();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  
+  // Add to cart listener
+  function listenForAddToCart() {
+    // For button with class .add-to-cart
+    document.body.addEventListener('click', function (e) {
+      if (e.target.closest('.add-to-cart')) {
+        setTimeout(showPopup, 1000); // show popup 1s after add
+      }
+    });
+  
+    // For form submission (if using form-based Add to Cart)
+    document.body.addEventListener('submit', function (e) {
+      if (e.target.matches('form[action*="/cart/add"]')) {
+        setTimeout(showPopup, 1000); // show popup 1s after form submit
+      }
+    });
+  }
+    
+
+
+
+
+
+  //AI
   const button = document.getElementById('chatbot-button');
   const messages = document.getElementById('chatbot-messages');
 
