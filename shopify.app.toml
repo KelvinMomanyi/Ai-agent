@@ -3,7 +3,7 @@
 client_id = "b314197727859b8c244255e176f8b2af"
 name = "ai-agent"
 handle = "ai-agent-21"
-application_url = "https://deposit-menu-skin-challenges.trycloudflare.com"
+application_url = "https://unsigned-midwest-harvest-za.trycloudflare.com"
 embedded = true
 
 [build]
@@ -17,9 +17,9 @@ scopes = "read_products,write_products"
 
 [auth]
 redirect_urls = [
-  "https://deposit-menu-skin-challenges.trycloudflare.com/auth/callback",
-  "https://deposit-menu-skin-challenges.trycloudflare.com/auth/shopify/callback",
-  "https://deposit-menu-skin-challenges.trycloudflare.com/api/auth/callback"
+  "https://unsigned-midwest-harvest-za.trycloudflare.com/auth/callback",
+  "https://unsigned-midwest-harvest-za.trycloudflare.com/auth/shopify/callback",
+  "https://unsigned-midwest-harvest-za.trycloudflare.com/api/auth/callback"
 ]
 
 [webhooks]
