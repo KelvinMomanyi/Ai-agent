@@ -29,7 +29,7 @@
 "></div>
 
 <!-- Modal -->
-<div id="chatbot-messages" style="
+{% comment %} <div id="chatbot-messages" style="
   display: none;
   position: fixed;
   top: 50%;
@@ -53,8 +53,45 @@
     border-radius: 5px;
     cursor: pointer;
   ">Close</button>
-</div>
+</div> {% endcomment %}
 
+<div id="chatbot-messages" style="
+  display: none;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  padding: 25px 30px;
+  border-radius: 10px;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 15px 30px rgba(0,0,0,0.2);
+  z-index: 9999;
+  font-family: sans-serif;
+  text-align: center;
+">
+  <img id="chatbot-image" src="" alt="" style="width:40px; height:40px" />
+  <h3 id="chatbot-title" style="margin: 10px 0;"></h3>
+  <p id="chatbot-price" style="font-weight: bold; margin-bottom: 10px;"></p>
+  <p id="chatbot-text" style="margin-bottom: 20px;"></p>
+  
+  <form method="POST" action="/cart/add">
+    <input type="hidden" name="id" id="upsell-variant-id" />
+    <button type="submit">Add to Cart</button>
+  </form>
+  
+  
+
+  <button onclick="closeChatbotModal()" style="
+    background: #000;
+    color: #fff;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+  ">Close</button>
+</div>
 
 
 
@@ -119,10 +156,22 @@ async function fetchUpsellSuggestion() {
 
     const data = await response.json();
     console.log(data, 'upsell response');
-    showChatbotModal(data.suggestion);
+   // showChatbotModal(data.suggestion);
+
+   const modelMessage = data.suggestion
+   const upsellData = JSON.parse(modelMessage.match(/{[\s\S]*}/)[0]);
+
+  // const { title, image, price, message } = upsellData;
+   
+  // console.log('title', title)
+  // Now you can use them in your UI
+
+  // showChatbotModal({ title, image, price, message });
+   showChatbotModal(upsellData)
+
   } catch (err) {
     console.error('Upsell API error:', err);
-    showChatbotModal("Something went wrong. Please try again.");
+   // showChatbotModal("Something went wrong. Please try again.");
   }
 }
 
@@ -139,7 +188,7 @@ button.addEventListener('click', async () => {
 
 
 
-if (typeof Shopify !== 'undefined' && Shopify.onItemAdded) {
+/*if (typeof Shopify !== 'undefined' && Shopify.onItemAdded) {
   const oldCallback = Shopify.onItemAdded;
   Shopify.onItemAdded = function (line_item) {
     console.log('[Add to Cart] Shopify AJAX item added');
@@ -157,27 +206,251 @@ document.body.addEventListener('click', function (e) {
     console.log('[Add to Cart] AJAX-style button click detected');
     setTimeout(fetchCartAndTriggerUpsell, 1000);
   }
-});
+});*/
 
 
-document.body.addEventListener('submit', function (e) {
-  const form = e.target;
-  if (form.matches('form[action*="/cart/add"]')) {
-    console.log('[Add to Cart] Form submission detected');
-    setTimeout(fetchCartAndTriggerUpsell, 1000);
+//let previousCartItems = [];
+
+//async function checkCartChange() {
+ // try {
+   // const cart = await fetch('/cart.js').then(res => res.json());
+   // const currentItems = cart.items;
+
+   // // Get all current product IDs
+   // const previousIds = previousCartItems.map(item => item.id);
+   // const currentIds = currentItems.map(item => item.id);
+
+   // // Find if there's any ID in current that's not in previous → NEW item
+   // const newItem = currentItems.find(item => !previousIds.includes(item.id));
+
+    //if (newItem) {
+   //   console.log('New item added to cart:', newItem);
+  //    fetchUpsellSuggestion()
+   //   //showChatbotModal(); // Trigger modal only on new product
+   // }
+
+   // previousCartItems = currentItems;
+  //} catch (err) {
+  //  console.error('Failed to check cart.js:', err);
+ // }
+//}
+
+// Start polling every 2 seconds
+//setInterval(checkCartChange, 2000);
+//let previousCartItems = [];
+//let hasCartChanged = false;
+//let isNavigatingAway = false;
+
+// Detect navigation or tab switch
+//window.addEventListener('beforeunload', () => {
+  //isNavigatingAway = true;
+//});
+
+//document.addEventListener('visibilitychange', () => {
+//  if (document.visibilityState === 'hidden') {
+//    isNavigatingAway = true;
+//  }
+//});
+
+{% comment %} async function checkCartChange() {
+  try {
+    const cart = await fetch('/cart.js').then(res => res.json());
+    const currentItems = cart.items;
+
+    let newItem = null;
+
+    for (const currentItem of currentItems) {
+      const previousItem = previousCartItems.find(item => item.id === currentItem.id);
+
+      if (!previousItem) {
+        newItem = currentItem;
+        break;
+      } else if (currentItem.quantity > previousItem.quantity) {
+        newItem = currentItem;
+        break;
+      }
+    }
+
+    if (newItem && !isNavigatingAway) {
+      console.log('New item added or quantity increased:', newItem);
+      hasCartChanged = true;
+      fetchUpsellSuggestion();
+      // showChatbotModal();
+    }
+
+    previousCartItems = currentItems;
+  } catch (err) {
+    console.error('Failed to check cart.js:', err);
   }
-});
+}
+
+// Start polling
+setInterval(checkCartChange, 2000); {% endcomment %}
+
+
+//function showChatbotModal(message) {
+//  textContainer.textContent = message;
+//  document.getElementById('chatbot-messages').style.display = 'block';
+//  document.getElementById('chatbot-backdrop').style.display = 'block';
+//}
 
 function showChatbotModal(message) {
-  textContainer.textContent = message;
+ const modal = document.getElementById('chatbot-messages');
+ const titleEl = document.getElementById('chatbot-title');
+ const imageEl = document.getElementById('chatbot-image');
+ const priceEl = document.getElementById('chatbot-price');
+ const textEl = document.getElementById('chatbot-text');
+ const variantInput = document.getElementById('upsell-variant-id');
+
+
+  titleEl.textContent = message.title || '';
+  priceEl.textContent = message.price ? `$${message.price}` : '';
+  textEl.textContent = message.message || '';
+  imageEl.src = message.image;
+  variantInput.value = message.id;
+  console.log('Image URL:', message.image);
+
+
+  // Store product title in button for later use
+  const addButton = document.getElementById('chatbot-add-to-cart');
+  addButton.dataset.productTitle = message.title;
+
+
+  //textContainer.textContent = message;
   document.getElementById('chatbot-messages').style.display = 'block';
   document.getElementById('chatbot-backdrop').style.display = 'block';
 }
+
+//function showChatbotModal(suggestion) {
+//  const modal = document.getElementById('chatbot-messages');
+//  const titleEl = document.getElementById('chatbot-title');
+//  const imageEl = document.getElementById('chatbot-image');
+//  const priceEl = document.getElementById('chatbot-price');
+//  const textEl = document.getElementById('chatbot-text');
+
+//  if (suggestion) {
+//    titleEl.textContent = suggestion.title || '';
+//    priceEl.textContent = suggestion.price ? `$${suggestion.price}` : '';
+//    textEl.textContent = suggestion.message || '';
+
+//    if (suggestion.image) {
+//      imageEl.src = suggestion.image;
+//      imageEl.style.display = 'block';
+//    } else {
+//      imageEl.style.display = 'none';
+//    }
+//  }
+
+//  modal.style.display = 'block';
+//}
+
+function closeChatbotModal() {
+  document.getElementById('chatbot-messages').style.display = 'none';
+}
+
 
 function closeChatbotModal() {
   document.getElementById('chatbot-messages').style.display = 'none';
   document.getElementById('chatbot-backdrop').style.display = 'none';
 }
+
+
+
+
+
+
+// Hook into all fetch calls to detect /cart/add.js usage
+(function () {
+  const originalFetch = window.fetch;
+
+  window.fetch = async (...args) => {
+    const response = await originalFetch(...args);
+
+    const url = args[0];
+
+    if (typeof url === 'string' && url.includes('/cart/add')) {
+      console.log('[Cart Alert] Add to cart triggered via fetch:', url);
+
+      // Use .clone() if you need to read the body here
+      try {
+        const clonedResponse = response.clone();
+        const data = await clonedResponse.json();
+        console.log('[Cart Alert] Added item:', data);
+        fetchUpsellSuggestion(); // Custom logic
+      } catch (err) {
+        console.error('Error reading response:', err);
+      }
+    }
+
+    return response; // 🚨 Always return the response
+  };
+})();
+
+
+
+//(function() {
+//  const originalFetch = window.fetch;
+
+//  window.fetch = async (...args) => {
+//    const response = await originalFetch(...args);
+
+//    const url = args[0];
+//    const options = args[1] || {};
+
+    // Detect cart add API call
+//    if (typeof url === 'string' && url.includes('/cart/add')) {
+//      console.log('[Cart Alert] Add to cart triggered via fetch:', url);
+
+//      try {
+//        const clone = response.clone();
+//        const addedItem = await clone.json();
+
+//        alert(`🛒 "${addedItem.title}" has been added to your cart!`);
+//        console.log('[Cart Alert] Added item:', addedItem);
+
+        // 🔁 Trigger upsell fetch
+//        fetchUpsellSuggestion();
+//      } catch (e) {
+//        console.warn('Failed to parse cart add response:', e);
+//      }
+//   }
+
+//    return response;
+//  };
+//})(); 
+
+
+
+document.addEventListener('DOMContentLoaded', function () {
+  const form = document.getElementById('add-to-cart-form');
+
+  if (form) {
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault();
+
+      const formData = new FormData(form);
+
+      try {
+        const response = await fetch('/cart/add.js', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ Added to cart:', data);
+          alert(`🛒 "${data.title}" was added to your cart.`);
+        } else {
+          alert('❌ Failed to add to cart.');
+        }
+      } catch (error) {
+        console.error('Add to cart error:', error);
+        alert('❌ Error adding item to cart.');
+      }
+    });
+  }
+});
+
 
 </script>
 

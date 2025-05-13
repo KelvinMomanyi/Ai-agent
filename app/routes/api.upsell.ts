@@ -67,25 +67,50 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
       body: JSON.stringify({
         model: 'llama3-70b-8192',
+        // messages: [
+        //   // {
+        //   //   role: 'system',
+        //   //   content: `You are an AI sales agent. Suggest ONE upsell product from this list that complements the cart.`,
+        //   // },
+        //   // {
+        //   //   role: 'user',
+        //   //   content: `Cart: ${JSON.stringify(cartItems)} Available products: ${JSON.stringify(products)}`,
+        //   // },
+        //   {
+        //     role: 'system',
+        //     content: `You are an AI sales agent. From the available products, suggest ONE upsell item that complements the cart contents. Respond in a friendly, persuasive marketing tone. Say something like: "Customers who bought [cart item] also loved [upsell product] because it perfectly complements their purchase." Keep the tone helpful and convincing, like a seasoned salesperson offering great advice.`,
+        //   },
+        //   {
+        //     role: 'user',
+        //     content: `Cart: ${JSON.stringify(cartItems)} Available products: ${JSON.stringify(products)}`,
+        //   }
+          
+        // ],
         messages: [
-          // {
-          //   role: 'system',
-          //   content: `You are an AI sales agent. Suggest ONE upsell product from this list that complements the cart.`,
-          // },
-          // {
-          //   role: 'user',
-          //   content: `Cart: ${JSON.stringify(cartItems)} Available products: ${JSON.stringify(products)}`,
-          // },
           {
             role: 'system',
-            content: `You are an AI sales agent. From the available products, suggest ONE upsell item that complements the cart contents. Respond in a friendly, persuasive marketing tone. Say something like: "Customers who bought [cart item] also loved [upsell product] because it perfectly complements their purchase." Keep the tone helpful and convincing, like a seasoned salesperson offering great advice.`,
+            content: `
+              You are an AI sales agent. From the available products, suggest ONE upsell item that complements the cart contents.
+              Respond in a friendly, persuasive marketing tone.
+              Say something like: "Customers who bought [cart item] also loved [upsell product] because it perfectly complements their purchase."
+        
+              In addition to the marketing message, return a JSON object with the following structure:
+              {
+                "id": "[Variant ID of the upsell product]",
+                "title": "[Product title]",
+                "image": "[Image URL or path]",
+                "price": "[Price as a number]",
+                "message": "[Persuasive upsell message]"
+              }
+        
+              This will be used to show the upsell product visually on the frontend. Keep the tone helpful and convincing, like a seasoned salesperson offering great advice.
+            `,
           },
           {
             role: 'user',
             content: `Cart: ${JSON.stringify(cartItems)} Available products: ${JSON.stringify(products)}`,
           }
-          
-        ],
+        ]         
       }),
     });
 
