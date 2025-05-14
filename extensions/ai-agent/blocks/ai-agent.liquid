@@ -1,23 +1,3 @@
-{% comment %} <div id="chatbot-container" style="margin: 20px 0;">
-  <div id="chatbot-messages" ></div>
-  <button id="chatbot-button" style="margin-top: 10px; padding: 10px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 5px;">
-    Suggest an Upsell
-  </button>
-</div> {% endcomment %}
-
-<!-- Chatbot Trigger Container -->
-<div id="chatbot-container" style="margin: 20px 0;">
-  <button id="chatbot-button" style="
-    margin-top: 10px;
-    padding: 10px 20px;
-    background-color: #3b82f6;
-    color: white;
-    border: none;
-    border-radius: 5px;
-  ">
-    Suggest an Cross-sell
-  </button>
-</div>
 
 <!-- Modal Backdrop -->
 <div id="chatbot-backdrop" style="
@@ -27,74 +7,6 @@
   background-color: rgba(0, 0, 0, 0.5);
   z-index: 9998;
 "></div>
-
-<!-- Modal -->
-{% comment %} <div id="chatbot-messages" style="
-  display: none;
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: white;
-  padding: 25px 30px;
-  border-radius: 10px;
-  width: 90%;
-  max-width: 400px;
-  box-shadow: 0 15px 30px rgba(0,0,0,0.2);
-  z-index: 9999;
-  font-family: sans-serif;
-">
-  <p id="chatbot-text" style="margin-bottom: 20px;"></p>
-  <button onclick="closeChatbotModal()" style="
-    background: #000;
-    color: #fff;
-    padding: 10px 20px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-  ">Close</button>
-</div> {% endcomment %}
-
-{% comment %} <div id="chatbot-messages" style="
-  display: none;
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: white;
-  padding: 25px 30px;
-  border-radius: 10px;
-  width: 90%;
-  max-width: 400px;
-  box-shadow: 0 15px 30px rgba(0,0,0,0.2);
-  z-index: 9999;
-  font-family: sans-serif;
-  text-align: center;
-">
-  <img id="chatbot-image" src="" alt="" style="width:40px; height:40px" />
-  <h3 id="chatbot-title" style="margin: 10px 0;"></h3>
-  <p id="chatbot-price" style="font-weight: bold; margin-bottom: 10px;"></p>
-  <p id="chatbot-text" style="margin-bottom: 20px;"></p>
-  
-  <form method="POST" action="/cart/add">
-    <input type="hidden" name="id" id="upsell-variant-id" />
-    <button type="submit">Add to Cart</button>
-  </form>
-  
-  
-
-  <button onclick="closeChatbotModal()" style="
-    background: #000;
-    color: #fff;
-    padding: 10px 20px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-  ">Close</button>
-</div> {% endcomment %}
-
-
-
 
 
 <!-- NEW Modal -->
@@ -170,48 +82,10 @@
 
 
 
-{% comment %} <script>
 
-  const button = document.getElementById('chatbot-button');
-  const messages = document.getElementById('chatbot-messages');
-
-  button.addEventListener('click', async () => {
-    button.disabled = true;
-    button.textContent = 'Thinking...';
-
-    try {
-      const cart = await fetch('/cart.js').then(res => res.json());
-      console.log(cart.items, 'cartt')
-
-
-      const response = await fetch('/apps/upsell', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          "Access-Control-Allow-Origin": "*",
-          },
-        body: JSON.stringify({
-           cartItems: cart.items,
-         }),
-      });
-
-      const data = await response.json();
-      console.log(data, 'dataii')
-      const msg = document.createElement('p');
-      msg.textContent = data.suggestion;
-      messages.appendChild(msg);
-    } catch (err) {
-      console.error('Error:', err);
-      alert('Something went wrong. Try again.');
-    } finally {
-      button.disabled = false;
-      button.textContent = 'Suggest an Upsell';
-    }
-  });
-</script> {% endcomment %}
 
 <script>
-  const button = document.getElementById('chatbot-button');
+const button = document.getElementById('chatbot-button');
 const messages = document.getElementById('chatbot-messages');
 const textContainer = document.getElementById('chatbot-text');
 
@@ -248,14 +122,7 @@ async function fetchUpsellSuggestion() {
 
     const upsellData = JSON.parse(cleanedJson);
     console.log('Parsed upsell data:', upsellData);
-   //const upsellData = JSON.parse(modelMessage.match(/{[\s\S]*}/)[0]);
-
-  // const { title, image, price, message } = upsellData;
-   
-  // console.log('title', title)
-  // Now you can use them in your UI
-
-  // showChatbotModal({ title, image, price, message });
+  
    showChatbotModal(upsellData)
 
   } catch (err) {
@@ -264,124 +131,6 @@ async function fetchUpsellSuggestion() {
   }
 }
 
-// Button-triggered manual upsell request
-button.addEventListener('click', async () => {
-  button.disabled = true;
-  button.textContent = 'Thinking...';
-
-  await fetchUpsellSuggestion();
-
-  button.disabled = false;
-  button.textContent = 'Suggest an Upsell';
-});
-
-
-
-/*if (typeof Shopify !== 'undefined' && Shopify.onItemAdded) {
-  const oldCallback = Shopify.onItemAdded;
-  Shopify.onItemAdded = function (line_item) {
-    console.log('[Add to Cart] Shopify AJAX item added');
-    fetchCartAndTriggerUpsell();
-    if (typeof oldCallback === 'function') oldCallback(line_item);
-  };
-}
-
-
-
-// Auto-trigger upsell on add-to-cart events
-document.body.addEventListener('click', function (e) {
-  const btn = e.target.closest('button, a, input');
-  if (btn && JSON.stringify(btn).includes('/cart/add')) {
-    console.log('[Add to Cart] AJAX-style button click detected');
-    setTimeout(fetchCartAndTriggerUpsell, 1000);
-  }
-});*/
-
-
-//let previousCartItems = [];
-
-//async function checkCartChange() {
- // try {
-   // const cart = await fetch('/cart.js').then(res => res.json());
-   // const currentItems = cart.items;
-
-   // // Get all current product IDs
-   // const previousIds = previousCartItems.map(item => item.id);
-   // const currentIds = currentItems.map(item => item.id);
-
-   // // Find if there's any ID in current that's not in previous → NEW item
-   // const newItem = currentItems.find(item => !previousIds.includes(item.id));
-
-    //if (newItem) {
-   //   console.log('New item added to cart:', newItem);
-  //    fetchUpsellSuggestion()
-   //   //showChatbotModal(); // Trigger modal only on new product
-   // }
-
-   // previousCartItems = currentItems;
-  //} catch (err) {
-  //  console.error('Failed to check cart.js:', err);
- // }
-//}
-
-// Start polling every 2 seconds
-//setInterval(checkCartChange, 2000);
-//let previousCartItems = [];
-//let hasCartChanged = false;
-//let isNavigatingAway = false;
-
-// Detect navigation or tab switch
-//window.addEventListener('beforeunload', () => {
-  //isNavigatingAway = true;
-//});
-
-//document.addEventListener('visibilitychange', () => {
-//  if (document.visibilityState === 'hidden') {
-//    isNavigatingAway = true;
-//  }
-//});
-
-{% comment %} async function checkCartChange() {
-  try {
-    const cart = await fetch('/cart.js').then(res => res.json());
-    const currentItems = cart.items;
-
-    let newItem = null;
-
-    for (const currentItem of currentItems) {
-      const previousItem = previousCartItems.find(item => item.id === currentItem.id);
-
-      if (!previousItem) {
-        newItem = currentItem;
-        break;
-      } else if (currentItem.quantity > previousItem.quantity) {
-        newItem = currentItem;
-        break;
-      }
-    }
-
-    if (newItem && !isNavigatingAway) {
-      console.log('New item added or quantity increased:', newItem);
-      hasCartChanged = true;
-      fetchUpsellSuggestion();
-      // showChatbotModal();
-    }
-
-    previousCartItems = currentItems;
-  } catch (err) {
-    console.error('Failed to check cart.js:', err);
-  }
-}
-
-// Start polling
-setInterval(checkCartChange, 2000); {% endcomment %}
-
-
-//function showChatbotModal(message) {
-//  textContainer.textContent = message;
-//  document.getElementById('chatbot-messages').style.display = 'block';
-//  document.getElementById('chatbot-backdrop').style.display = 'block';
-//}
 
 function showChatbotModal(message) {
  const modal = document.getElementById('chatbot-messages');
@@ -406,38 +155,12 @@ variantInput.value = numericId
   console.log('Image URL:', message.image);
 
 
-  // Store product title in button for later use
-  //const addButton = document.getElementById('chatbot-add-to-cart');
-  //addButton.dataset.productTitle = message.title;
-
-
-  //textContainer.textContent = message;
+ 
   document.getElementById('chatbot-messages').style.display = 'block';
   document.getElementById('chatbot-backdrop').style.display = 'block';
 }
 
-//function showChatbotModal(suggestion) {
-//  const modal = document.getElementById('chatbot-messages');
-//  const titleEl = document.getElementById('chatbot-title');
-//  const imageEl = document.getElementById('chatbot-image');
-//  const priceEl = document.getElementById('chatbot-price');
-//  const textEl = document.getElementById('chatbot-text');
 
-//  if (suggestion) {
-//    titleEl.textContent = suggestion.title || '';
-//    priceEl.textContent = suggestion.price ? `$${suggestion.price}` : '';
-//    textEl.textContent = suggestion.message || '';
-
-//    if (suggestion.image) {
-//      imageEl.src = suggestion.image;
-//      imageEl.style.display = 'block';
-//    } else {
-//      imageEl.style.display = 'none';
-//    }
-//  }
-
-//  modal.style.display = 'block';
-//}
 
 function closeChatbotModal() {
   document.getElementById('chatbot-messages').style.display = 'none';
@@ -482,37 +205,6 @@ function closeChatbotModal() {
 })();
 
 
-
-//(function() {
-//  const originalFetch = window.fetch;
-
-//  window.fetch = async (...args) => {
-//    const response = await originalFetch(...args);
-
-//    const url = args[0];
-//    const options = args[1] || {};
-
-    // Detect cart add API call
-//    if (typeof url === 'string' && url.includes('/cart/add')) {
-//      console.log('[Cart Alert] Add to cart triggered via fetch:', url);
-
-//      try {
-//        const clone = response.clone();
-//        const addedItem = await clone.json();
-
-//        alert(`🛒 "${addedItem.title}" has been added to your cart!`);
-//        console.log('[Cart Alert] Added item:', addedItem);
-
-        // 🔁 Trigger upsell fetch
-//        fetchUpsellSuggestion();
-//      } catch (e) {
-//        console.warn('Failed to parse cart add response:', e);
-//      }
-//   }
-
-//    return response;
-//  };
-//})(); 
 
 
 
