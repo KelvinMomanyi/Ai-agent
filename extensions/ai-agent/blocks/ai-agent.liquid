@@ -206,7 +206,7 @@ function closeChatbotModal() {
 
 
 
-document.addEventListener('DOMContentLoaded', () => {
+
   (function () {
   const originalFetch = window.fetch;
 
@@ -232,7 +232,31 @@ document.addEventListener('DOMContentLoaded', () => {
     return response; // 🚨 Always return the response
   };
 })();
+
+
+(function () {
+  const originalXHROpen = XMLHttpRequest.prototype.open;
+
+  XMLHttpRequest.prototype.open = function (method, url) {
+    if (url.includes('/cart/add')) {
+      this.addEventListener('load', function () {
+        console.log('[Cart Alert - XHR] Add to cart triggered via XMLHttpRequest:', url);
+        fetchUpsellSuggestion(); // custom logic
+      });
+    }
+    return originalXHROpen.apply(this, arguments);
+  };
+})();
+
+
+document.addEventListener('submit', function (e) {
+  const form = e.target;
+  if (form.action.includes('/cart/add')) {
+    console.log('[Cart Alert - Form] Add to cart triggered via form submission');
+    fetchUpsellSuggestion();
+  }
 });
+
 
 
 document.addEventListener('DOMContentLoaded', function () {
