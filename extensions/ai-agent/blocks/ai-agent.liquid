@@ -178,7 +178,36 @@ function closeChatbotModal() {
 
 
 // Hook into all fetch calls to detect /cart/add.js usage
-(function () {
+//(function () {
+//  const originalFetch = window.fetch;
+
+//  window.fetch = async (...args) => {
+//    const response = await originalFetch(...args);
+
+//    const url = args[0];
+
+//    if (typeof url === 'string' && url.includes('/cart/add')) {
+//      console.log('[Cart Alert] Add to cart triggered via fetch:', url);
+
+//      // Use .clone() if you need to read the body here
+//      try {
+//        const clonedResponse = response.clone();
+//        const data = await clonedResponse.json();
+//        console.log('[Cart Alert] Added item:', data);
+//        fetchUpsellSuggestion(); // Custom logic
+//      } catch (err) {
+//        console.error('Error reading response:', err);
+//      }
+//    }
+
+//    return response; // 🚨 Always return the response
+//  };
+//})();
+
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  (function () {
   const originalFetch = window.fetch;
 
   window.fetch = async (...args) => {
@@ -203,9 +232,7 @@ function closeChatbotModal() {
     return response; // 🚨 Always return the response
   };
 })();
-
-
-
+});
 
 
 document.addEventListener('DOMContentLoaded', function () {

@@ -3,7 +3,7 @@
 client_id = "b314197727859b8c244255e176f8b2af"
 name = "ai-agent"
 handle = "ai-agent-21"
-application_url = "https://impact-educational-fault-relay.trycloudflare.com"
+application_url = "https://ai-agent-plum-eight.vercel.app/"
 embedded = true
 
 [build]
@@ -17,9 +17,9 @@ scopes = "read_products,write_products"
 
 [auth]
 redirect_urls = [
-  "https://impact-educational-fault-relay.trycloudflare.com/auth/callback",
-  "https://impact-educational-fault-relay.trycloudflare.com/auth/shopify/callback",
-  "https://impact-educational-fault-relay.trycloudflare.com/api/auth/callback"
+  "https://ai-agent-plum-eight.vercel.app/auth/callback",
+  "https://ai-agent-plum-eight.vercel.app/auth/shopify/callback",
+  "https://ai-agent-plum-eight.vercel.app/api/auth/callback"
 ]
 
 [webhooks]
