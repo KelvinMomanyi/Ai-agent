@@ -74,12 +74,27 @@
 
 
 
-<div>
+<!-- Suggest Button -->
+<button id="chatbot-button" style="
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background-color: #000;
+  color: #fff;
+  font-family: 'DM Sans', sans-serif;
+  padding: 14px 24px;
+  border: none;
+  border-radius: 30px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 500;
+  z-index: 10000;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+">
+  💡 Suggest for Me
+</button>
 
-  <button style='color:blue; width:20px; height:20px;' id='chatbot-button'>
-    suggest
-  </button>
-</div>
 
 
 
@@ -184,38 +199,16 @@ function closeChatbotModal() {
 
 
 
+document.addEventListener('DOMContentLoaded', function () {
+  const chatbotBtn = document.getElementById('chatbot-button');
 
+  if (chatbotBtn) {
+    chatbotBtn.addEventListener('click', function () {
+      fetchUpsellSuggestion();
+    });
+  }
+});
 
-// Hook into all fetch calls to detect /cart/add.js usage
-//(function () {
-//  const originalFetch = window.fetch;
-
-//  window.fetch = async (...args) => {
-//    const response = await originalFetch(...args);
-
-//    const url = args[0];
-
-//    if (typeof url === 'string' && url.includes('/cart/add')) {
-//      console.log('[Cart Alert] Add to cart triggered via fetch:', url);
-
-//      // Use .clone() if you need to read the body here
-//      try {
-//        const clonedResponse = response.clone();
-//        const data = await clonedResponse.json();
-//        console.log('[Cart Alert] Added item:', data);
-//        fetchUpsellSuggestion(); // Custom logic
-//      } catch (err) {
-//        console.error('Error reading response:', err);
-//      }
-//    }
-
-//    return response; // 🚨 Always return the response
-//  };
-//})();
-
-button.addEventListener('click', function(){
-  fetchUpsellSuggestion()
-})
 
 
 (function () {
