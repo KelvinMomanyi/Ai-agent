@@ -74,6 +74,15 @@
 
 
 
+<div>
+
+  <button style='color:blue; width:20px; height:20px;' id='chatbot-button'>
+    suggest
+  </button>
+</div>
+
+
+
 
 
 
@@ -204,7 +213,9 @@ function closeChatbotModal() {
 //  };
 //})();
 
-
+button.addEventListener('click', function(){
+  fetchUpsellSuggestion()
+})
 
 
 (function () {
