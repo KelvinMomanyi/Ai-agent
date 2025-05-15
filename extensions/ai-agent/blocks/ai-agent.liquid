@@ -207,59 +207,65 @@ document.addEventListener('submit', function (e) {
 });
 
 
-//looks out for cart.js changes
 (function () {
-  console.log('[Cart Watcher] Initialized');
+  console.log('[Cart Monitor] Initialized');
 
-  let previousCartItems = [];
-
-  function getCart() {
-    return fetch('/cart.js')
-      .then(res => res.ok ? res.json() : Promise.reject('Failed to fetch cart'))
-      .then(cart => cart.items || [])
-      .catch(err => {
-        console.error('[Cart Watcher] Error fetching cart:', err);
-        return [];
-      });
+  function handleCartAdd(data) {
+    console.log('[Cart Monitor] Product added to cart:', data);
+    // trigger modal, upsell, etc.
   }
 
-  function hasCartChanged(oldItems, newItems) {
-    if (oldItems.length !== newItems.length) return true;
+  // Intercept fetch()
+  const originalFetch = window.fetch;
+  window.fetch = async function (...args) {
+    const response = await originalFetch(...args);
+    const url = typeof args[0] === 'string' ? args[0] : args[0]?.url;
 
-    const oldMap = new Map(oldItems.map(item => [item.id, item.quantity]));
-    const newMap = new Map(newItems.map(item => [item.id, item.quantity]));
+    if (url && /\/cart\/add(\.js)?/.test(url) && args[1]?.method === 'POST') {
+      try {
+        const cloned = response.clone();
+        const contentType = cloned.headers.get("content-type");
 
-    for (let [id, qty] of newMap.entries()) {
-      if (oldMap.get(id) !== qty) return true;
+        if (contentType && contentType.includes("application/json")) {
+          const data = await cloned.json();
+          handleCartAdd(data);
+        } else {
+          handleCartAdd(); // fallback
+        }
+      } catch (err) {
+        console.warn('[Cart Monitor] Error parsing add-to-cart response:', err);
+        handleCartAdd(); // still trigger
+      }
     }
 
-    return false;
-  }
+    return response;
+  };
 
-  function onCartChange(newCartItems) {
-    console.log('[Cart Watcher] Cart changed!', newCartItems);
-   fetchUpsellSuggestion();
-  }
+  // Intercept XMLHttpRequest
+  const originalOpen = XMLHttpRequest.prototype.open;
+  const originalSend = XMLHttpRequest.prototype.send;
 
-  async function checkCartLoop() {
-    const currentCartItems = await getCart();
+  XMLHttpRequest.prototype.open = function (method, url) {
+    this._url = url;
+    this._method = method;
+    return originalOpen.apply(this, arguments);
+  };
 
-    if (hasCartChanged(previousCartItems, currentCartItems)) {
-      onCartChange(currentCartItems);
-      previousCartItems = currentCartItems;
-    }
-
-    setTimeout(checkCartLoop, 10); // Recheck every 1.5 seconds
-  }
-
-  // Start polling
-  getCart().then(items => {
-    previousCartItems = items;
-    checkCartLoop();
-  });
-
+  XMLHttpRequest.prototype.send = function (...args) {
+    this.addEventListener('load', function () {
+      if (/\/cart\/add(\.js)?/.test(this._url) && this._method === 'POST') {
+        try {
+          const data = JSON.parse(this.responseText);
+          handleCartAdd(data);
+        } catch (err) {
+          console.warn('[Cart Monitor] XHR error:', err);
+          handleCartAdd();
+        }
+      }
+    });
+    return originalSend.apply(this, args);
+  };
 })();
-
 
 
 </script>
