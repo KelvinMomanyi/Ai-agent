@@ -207,7 +207,7 @@ function closeChatbotModal() {
 
 
 
-  (function () {
+(function () {
   const originalFetch = window.fetch;
 
   window.fetch = async (...args) => {
@@ -256,6 +256,93 @@ document.addEventListener('submit', function (e) {
     fetchUpsellSuggestion();
   }
 });
+
+
+
+
+
+(function () {
+  console.log('[Cart Alert] Interception script initialized.');
+
+  // --- FETCH INTERCEPTOR ---
+  const originalFetch = window.fetch;
+  window.fetch = async (...args) => {
+    const response = await originalFetch(...args);
+
+    try {
+      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+      if (url.includes('/cart/add')) {
+        console.log('[Cart Alert] Add to cart via fetch:', url);
+        const clonedResponse = response.clone();
+        const data = await clonedResponse.json();
+        console.log('[Cart Alert] Added item (fetch):', data);
+        fetchUpsellSuggestion(data); // Your custom function
+      }
+    } catch (err) {
+      console.error('Fetch Intercept Error:', err);
+    }
+
+    return response;
+  };
+
+  // --- XMLHTTPREQUEST INTERCEPTOR ---
+  const originalOpen = XMLHttpRequest.prototype.open;
+  const originalSend = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function (method, url) {
+    this._url = url; // Store the URL for access in send()
+    return originalOpen.apply(this, arguments);
+  };
+
+  XMLHttpRequest.prototype.send = function () {
+    this.addEventListener('load', function () {
+      if (this._url && this._url.includes('/cart/add')) {
+        console.log('[Cart Alert] Add to cart via XMLHttpRequest:', this._url);
+        try {
+          const jsonResponse = JSON.parse(this.responseText);
+          console.log('[Cart Alert] Added item (XHR):', jsonResponse);
+          fetchUpsellSuggestion(jsonResponse); // Your custom function
+        } catch (err) {
+          console.error('XHR Intercept Error:', err);
+        }
+      }
+    });
+    return originalSend.apply(this, arguments);
+  };
+
+  // --- FORM SUBMISSION INTERCEPTOR ---
+  document.addEventListener('submit', function (e) {
+    const form = e.target;
+    const action = form.action || '';
+
+    if (action.includes('/cart/add') || form.querySelector('[name="add"]')) {
+      console.log('[Cart Alert] Add to cart via form submit:', action);
+      const formData = new FormData(form);
+      const formDataJSON = Object.fromEntries(formData.entries());
+      console.log('[Cart Alert] Added item (form):', formDataJSON);
+      fetchUpsellSuggestion(formDataJSON); // Your custom function
+    }
+  });
+
+  // --- Custom Callback (Replace as needed) ---
+  function fetchUpsellSuggestion(data) {
+    console.log('[Upsell Triggered] Suggesting upsell for:', data);
+    // Custom upsell logic goes here
+  }
+})();
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
