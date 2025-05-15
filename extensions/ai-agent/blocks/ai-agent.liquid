@@ -71,7 +71,7 @@
   </div>
 </div>
 
-<script>
+<script   defer=false>
 const button = document.getElementById('chatbot-button');
 const messages = document.getElementById('chatbot-messages');
 const textContainer = document.getElementById('chatbot-text');
@@ -267,6 +267,17 @@ document.addEventListener('submit', function (e) {
   };
 })();
 
+
+
+
+if (window.Shopify && typeof window.Shopify.onCartUpdate === 'function') {
+  const originalUpdate = window.Shopify.onCartUpdate;
+  window.Shopify.onCartUpdate = function (cart) {
+    console.log('🛒 Shopify cart updated', cart);
+    // fire upsell or update logic
+    return originalUpdate.apply(this, arguments);
+  };
+}
 
 </script>
 
