@@ -311,6 +311,35 @@ self.addEventListener('fetch', event => {
   }
 
 
+  document.addEventListener('DOMContentLoaded', () => {
+    const addToCartForms = document.querySelectorAll('form[action^="/cart/add"]');
+  
+    addToCartForms.forEach((form) => {
+      form.addEventListener('submit', (e) => {
+        const sellingPlanId = window.getCurrentSellingPlanId();
+  
+        // You can now use this ID however you want:
+        console.log('Selected Selling Plan ID:', sellingPlanId);
+  
+        // Example: append to the form as a hidden input (if not already there)
+        if (!form.querySelector('input[name="selling_plan"]')) {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = 'selling_plan';
+          input.value = sellingPlanId;
+          form.appendChild(input);
+        } else {
+          form.querySelector('input[name="selling_plan"]').value = sellingPlanId;
+        }
+  
+        // OPTIONAL: You could also trigger your own logic here
+        // someOtherClassInstance.handleSellingPlan(sellingPlanId);
+      });
+    });
+  });
+  
+
+
 </script>
 
 {% schema %}
