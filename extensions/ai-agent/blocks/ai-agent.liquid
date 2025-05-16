@@ -283,6 +283,25 @@ document.addEventListener('submit', function (e) {
   };
 })();
 
+
+
+
+
+
+self.addEventListener('fetch', event => {
+  if (event.request.method === 'POST' && event.request.url.includes("/cart/add")) {
+    event.respondWith(
+      (async () => {
+        const cloned = event.request.clone();
+        const body = await cloned.text();
+        console.log('POST Body:', body);
+        return fetch(event.request);
+      })()
+    );
+  }
+});
+
+
 </script>
 
 {% schema %}
