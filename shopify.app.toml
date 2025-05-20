@@ -3,7 +3,7 @@
 client_id = "b314197727859b8c244255e176f8b2af"
 name = "ai-agent"
 handle = "ai-agent-21"
-application_url = "https://ai-agent-plum-eight.vercel.app/"
+application_url = "https://regulatory-britain-medline-estimation.trycloudflare.com"
 embedded = true
 
 [build]
@@ -17,9 +17,9 @@ scopes = "read_products"
 
 [auth]
 redirect_urls = [
-  "https://ai-agent-plum-eight.vercel.app/auth/callback",
-  "https://ai-agent-plum-eight.vercel.app/auth/shopify/callback",
-  "https://ai-agent-plum-eight.vercel.app/api/auth/callback"
+  "https://regulatory-britain-medline-estimation.trycloudflare.com/auth/callback",
+  "https://regulatory-britain-medline-estimation.trycloudflare.com/auth/shopify/callback",
+  "https://regulatory-britain-medline-estimation.trycloudflare.com/api/auth/callback"
 ]
 
 [webhooks]
@@ -32,6 +32,11 @@ api_version = "2025-04"
   [[webhooks.subscriptions]]
   topics = [ "app/uninstalled" ]
   uri = "/webhooks/app/uninstalled"
+
+[app_proxy]
+url = "https://regulatory-britain-medline-estimation.trycloudflare.com/api/upsell"
+subpath = "upsell"
+prefix = "apps"
 
 [pos]
 embedded = false

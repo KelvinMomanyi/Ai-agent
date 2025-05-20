@@ -71,7 +71,7 @@
   </div>
 </div>
 
-<script   defer=false>
+<script>
 const button = document.getElementById('chatbot-button');
 const messages = document.getElementById('chatbot-messages');
 const textContainer = document.getElementById('chatbot-text');
@@ -117,6 +117,8 @@ async function fetchUpsellSuggestion() {
    // showChatbotModal("Something went wrong. Please try again.");
   }
 }
+
+
 
 
 function showChatbotModal(message) {
@@ -304,11 +306,11 @@ self.addEventListener('fetch', event => {
 
 
 
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('{{ "sw.js" | asset_url }}')
-      .then(reg => console.log("SW registered:", reg.scope))
-      .catch(err => console.error("SW registration failed:", err));
-  }
+//  if ('serviceWorker' in navigator) {
+//    navigator.serviceWorker.register('{{ "sw.js" | asset_url }}')
+//      .then(reg => console.log("SW registered:", reg.scope))
+//     .catch(err => console.error("SW registration failed:", err));
+//  }
 
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -338,7 +340,90 @@ self.addEventListener('fetch', event => {
     });
   });
   
+// async function fetchCart() {
+ //   const variantId = '43726492881045'; // Replace with your actual variant ID
+///    const quantity = 1;
+  
+//    try {
+//      const response = await fetch('/cart/add.js', {
+//        method: 'POST',
+//        headers: {
+//          'Content-Type': 'application/json'
+//        },
+//        body: JSON.stringify({
+//         id: variantId,
+//          quantity: quantity
+//        })
+//      });
+  
+//      const data = await response.json();
+ //     console.log('Item added:', data);
+//    } catch (error) {
+//      console.error('Error adding item to cart:', error);
+//    }
+//  }
+  
+  //fetchCart(); 
 
+
+
+let lastCartState = null;
+
+// Function to fetch current cart state
+async function fetchCartState() {
+  try {
+    const res = await fetch('/cart.js', { cache: 'no-store' }); // no-cache to get fresh data
+    if (!res.ok) throw new Error('Failed to fetch cart');
+    return await res.json();
+  } catch (err) {
+    console.error('Error fetching cart:', err);
+    return null;
+  }
+}
+
+// Function to compare carts simply (by item count or total price)
+function isCartChanged(oldCart, newCart) {
+  if (!oldCart || !newCart) return true;
+  if (oldCart.item_count !== newCart.item_count) return true;
+  if (oldCart.total_price !== newCart.total_price) return true;
+  return false;
+}
+
+// What to do when cart changes
+function onCartChange(cart) {
+  console.log('Cart changed:', cart);
+  fetchUpsellSuggestion()
+  // TODO: Your upsell logic, UI update, etc.
+}
+
+// Polling loop
+async function pollCart(interval = 3000) {
+  const cart = await fetchCartState();
+  if (isCartChanged(lastCartState, cart)) {
+    lastCartState = cart;
+    onCartChange(cart);
+  }
+  setTimeout(() => pollCart(interval), interval);
+}
+
+// Start polling on page load
+//document.addEventListener('DOMContentLoaded', () => {
+//  pollCart(3000); // every 3 seconds (adjust as needed)
+//});
+
+
+
+function initCartPolling() {
+  if (window._cartPollingInitialized) return; // prevent multiple initializations
+  window._cartPollingInitialized = true;
+  pollCart(3000);
+}
+
+// Standard page load
+document.addEventListener('DOMContentLoaded', initCartPolling);
+
+// Optional: Re-trigger for themes using Ajax navigation (e.g., Shopify sections)
+document.addEventListener('page:load', initCartPolling); // e.g., if your theme uses it
 
 </script>
 

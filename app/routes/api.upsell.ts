@@ -125,7 +125,7 @@
 // };
 import { json } from '@remix-run/node';
 import type { ActionFunctionArgs } from '@remix-run/node';
-import { authenticate } from 'app/shopify.server';
+import { authenticate } from '../shopify.server';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',

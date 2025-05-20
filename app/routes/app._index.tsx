@@ -15,7 +15,6 @@ import {
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
-import ChatBot from "app/componets/chatbot";
 
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -34,7 +33,6 @@ export default function Index() {
         <Layout.Section>
           <Text as="h2" variant="headingMd">Chatbot</Text>
         </Layout.Section>
-        <ChatBot/>
       </Layout>  
     </Page>
   );
