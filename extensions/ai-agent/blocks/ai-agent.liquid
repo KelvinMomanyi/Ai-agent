@@ -270,7 +270,7 @@ async function fetchUpsellSuggestion() {
     console.log('Parsed upsell data:', upsellData);
   
    showChatbotModal(upsellData, cart)
-
+   trackEvent('upsell_impression', { id: upsellData.id }); // impression
   } catch (err) {
     console.error('Upsell API error:', err);
    // showChatbotModal("Something went wrong. Please try again.");
@@ -450,31 +450,6 @@ document.addEventListener('submit', function (e) {
 
 
 
-
-
-self.addEventListener('fetch', event => {
-  if (event.request.method === 'POST' && event.request.url.includes("/cart/add")) {
-    event.respondWith(
-      (async () => {
-        const cloned = event.request.clone();
-        const body = await cloned.text();
-        console.log('POST Body:', body);
-        return fetch(event.request);
-      })()
-    );
-  }
-});
-
-
-
-
-//  if ('serviceWorker' in navigator) {
-//    navigator.serviceWorker.register('{{ "sw.js" | asset_url }}')
-//      .then(reg => console.log("SW registered:", reg.scope))
-//     .catch(err => console.error("SW registration failed:", err));
-//  }
-
-
   document.addEventListener('DOMContentLoaded', () => {
     const addToCartForms = document.querySelectorAll('form[action^="/cart/add"]');
   
@@ -586,6 +561,38 @@ document.addEventListener('DOMContentLoaded', initCartPolling);
 
 // Optional: Re-trigger for themes using Ajax navigation (e.g., Shopify sections)
 document.addEventListener('page:load', initCartPolling); // e.g., if your theme uses it
+
+
+
+
+
+
+
+//CONVERSIONS
+function trackEvent(eventName, data = {}) {
+  fetch('/apps/upsell/track', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      event: eventName,
+      timestamp: new Date().toISOString(),
+      data: data,
+    }),
+  }).then(res => {
+    if (!res.ok) {
+      console.error(`Failed to track ${eventName}`);
+    }
+  }).catch(err => {
+    console.error('Tracking error:', err);
+  });
+}
+
+
+const form = document.querySelector('#chatbot-messages form');
+form.addEventListener('submit', () => {
+  trackEvent('upsell_add_to_cart', { id: document.getElementById('upsell-variant-id').value });
+});
+
 
 </script>
 
