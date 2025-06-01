@@ -569,21 +569,47 @@ document.addEventListener('page:load', initCartPolling); // e.g., if your theme 
 
 
 //CONVERSIONS
+//function trackEvent(eventName, data = {}) {
+//  fetch('/apps/upsell/track', {
+//    method: 'POST',
+//    headers: { 'Content-Type': 'application/json' },
+//    body: JSON.stringify({
+//      event: eventName,
+//      timestamp: new Date().toISOString(),
+//      data: data,
+//    }),
+//  }).then(res => {
+//    if (!res.ok) {
+//      console.error(`Failed to track ${eventName}`);
+//    }
+//  }).catch(err => {
+//    console.error('Tracking error:', err);
+//  });
+//}
+
 function trackEvent(eventName, data = {}) {
-  fetch('/apps/upsell/track', {
+  //let shop = new URLSearchParams(window.location.search).get("shop");
+ // const currentURL = window.location.href;
+  let shop = window.location.href;
+ // console.log(currentURL, 'currentURL');  // Outputs the full URL of the current page
+  
+//  if (!shop) {
+//    shop = document.querySelector('meta[name="shop"]')?.content;
+//  }
+
+//  if (!shop) {
+//    console.warn("Missing shop identifier. Cannot track.");
+//    return;
+//  }
+  data.shop = shop;
+  fetch(`/apps/upsell/track`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       event: eventName,
       timestamp: new Date().toISOString(),
-      data: data,
+      data,
     }),
-  }).then(res => {
-    if (!res.ok) {
-      console.error(`Failed to track ${eventName}`);
-    }
-  }).catch(err => {
-    console.error('Tracking error:', err);
   });
 }
 

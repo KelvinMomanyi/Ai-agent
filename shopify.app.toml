@@ -3,7 +3,7 @@
 client_id = "b314197727859b8c244255e176f8b2af"
 name = "ai-agent"
 handle = "ai-agent-21"
-application_url = "https://winning-adipex-additional-modeling.trycloudflare.com"
+application_url = "https://february-truck-rom-particles.trycloudflare.com"
 embedded = true
 
 [build]
@@ -17,9 +17,9 @@ scopes = "read_products"
 
 [auth]
 redirect_urls = [
-  "https://winning-adipex-additional-modeling.trycloudflare.com/auth/callback",
-  "https://winning-adipex-additional-modeling.trycloudflare.com/auth/shopify/callback",
-  "https://winning-adipex-additional-modeling.trycloudflare.com/api/auth/callback"
+  "https://february-truck-rom-particles.trycloudflare.com/auth/callback",
+  "https://february-truck-rom-particles.trycloudflare.com/auth/shopify/callback",
+  "https://february-truck-rom-particles.trycloudflare.com/api/auth/callback"
 ]
 
 [webhooks]
@@ -34,7 +34,7 @@ api_version = "2025-04"
   uri = "/webhooks/app/uninstalled"
 
 [app_proxy]
-url = "https://winning-adipex-additional-modeling.trycloudflare.com/api/upsell"
+url = "https://february-truck-rom-particles.trycloudflare.com/api/upsell"
 subpath = "upsell"
 prefix = "apps"
 

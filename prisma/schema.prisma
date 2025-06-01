@@ -38,5 +38,14 @@ model Shop {
   productCatalog Json?
 }
 
+// In Prisma schema
+model Event {
+  id         String   @id @default(cuid())
+  event      String
+  timestamp  DateTime
+  data       Json
+  storeId    String      // <- The unique shop domain, e.g., "nike.myshopify.com"
+}
+
 
 
