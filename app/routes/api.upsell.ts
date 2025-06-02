@@ -124,7 +124,7 @@
 //   }
 // };
 import { json } from '@remix-run/node';
-import type { ActionFunctionArgs } from '@remix-run/node';
+import type { ActionFunctionArgs, LoaderFunctionArgs} from '@remix-run/node';
 import { authenticate } from '../shopify.server';
 
 const corsHeaders = {
@@ -132,6 +132,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
+
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method === 'OPTIONS') {

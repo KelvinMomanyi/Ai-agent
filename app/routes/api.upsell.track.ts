@@ -89,7 +89,7 @@ export const action = async ({ request }) => {
   //if (!storeId) {
  //   return json({ error: "Missing storeId (session or ?shop= param)" }, { status: 400 });
   //}
-   const storeId =  data?.shop;
+   const storeId =  data.shop;
   
   await prisma.event.create({
     data: {
