@@ -123,7 +123,7 @@ type EventData = {
 
 export const loader: LoaderFunction = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
-  const storeId = `https://${session.shop}/`
+  const storeId = session.shop
 
   if (!storeId) {
     throw new Response("Missing shop identifier", { status: 400 });

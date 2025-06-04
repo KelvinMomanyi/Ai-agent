@@ -69,13 +69,23 @@ export function getAllEvents() {
 
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
+import { LoaderFunctionArgs } from "@remix-run/node";
+
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+
+ return json({ message: "Use POST method to get upsell tracks." });
+};
+
+
+
 
 export const action = async ({ request }) => {
   const body = await request.json();
-  const { admin, session } = await authenticate.admin(request);
-
+ ///const { admin, session } = await authenticate.admin(request);
+ const { session } = await authenticate.public.appProxy(request);
   const { event, timestamp, data } = body;
-  console.log(session.shop, 'sessionshop')
+ console.log(session.shop, 'sessionshop')
   if (!event || !timestamp) {
     return json({ error: "Missing required fields" }, { status: 400 });
   }
@@ -83,13 +93,14 @@ export const action = async ({ request }) => {
   // Try to get shop from URL if session is not present
   const url = new URL(request.url);
   const fallbackShop = url.searchParams.get("shop");
-  //const storeId = session.shop
- // const storeId = sessionShop || fallbackShop;
+ // const storeId = request.headers.get("x-shopify-shop-domain")
+ const storeId = session.shop
 
   //if (!storeId) {
  //   return json({ error: "Missing storeId (session or ?shop= param)" }, { status: 400 });
   //}
-   const storeId =  data.shop;
+   //const storeId =  data.shop;
+   
   
   await prisma.event.create({
     data: {
