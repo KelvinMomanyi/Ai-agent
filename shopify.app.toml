@@ -3,7 +3,7 @@
 client_id = "b314197727859b8c244255e176f8b2af"
 name = "ai-agent"
 handle = "ai-agent-21"
-application_url = "https://waves-commitment-threaded-organizing.trycloudflare.com"
+application_url = "https://refrigerator-pasta-hungarian-win.trycloudflare.com"
 embedded = true
 
 [build]
@@ -13,13 +13,13 @@ include_config_on_deploy = true
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_products"
+scopes = "read_orders,read_products"
 
 [auth]
 redirect_urls = [
-  "https://waves-commitment-threaded-organizing.trycloudflare.com/auth/callback",
-  "https://waves-commitment-threaded-organizing.trycloudflare.com/auth/shopify/callback",
-  "https://waves-commitment-threaded-organizing.trycloudflare.com/api/auth/callback"
+  "https://refrigerator-pasta-hungarian-win.trycloudflare.com/auth/callback",
+  "https://refrigerator-pasta-hungarian-win.trycloudflare.com/auth/shopify/callback",
+  "https://refrigerator-pasta-hungarian-win.trycloudflare.com/api/auth/callback"
 ]
 
 [webhooks]
@@ -34,7 +34,7 @@ api_version = "2025-04"
   uri = "/webhooks/app/uninstalled"
 
 [app_proxy]
-url = "https://waves-commitment-threaded-organizing.trycloudflare.com/api/upsell"
+url = "https://refrigerator-pasta-hungarian-win.trycloudflare.com/api/upsell"
 subpath = "upsell"
 prefix = "apps"
 
