@@ -3,7 +3,7 @@
 client_id = "b314197727859b8c244255e176f8b2af"
 name = "ai-agent"
 handle = "ai-agent-21"
-application_url = "https://refrigerator-pasta-hungarian-win.trycloudflare.com"
+application_url = "https://zero-dawn-asks-solution.trycloudflare.com"
 embedded = true
 
 [build]
@@ -17,9 +17,9 @@ scopes = "read_orders,read_products"
 
 [auth]
 redirect_urls = [
-  "https://refrigerator-pasta-hungarian-win.trycloudflare.com/auth/callback",
-  "https://refrigerator-pasta-hungarian-win.trycloudflare.com/auth/shopify/callback",
-  "https://refrigerator-pasta-hungarian-win.trycloudflare.com/api/auth/callback"
+  "https://zero-dawn-asks-solution.trycloudflare.com/auth/callback",
+  "https://zero-dawn-asks-solution.trycloudflare.com/auth/shopify/callback",
+  "https://zero-dawn-asks-solution.trycloudflare.com/api/auth/callback"
 ]
 
 [webhooks]
@@ -33,8 +33,12 @@ api_version = "2025-04"
   topics = [ "app/uninstalled" ]
   uri = "/webhooks/app/uninstalled"
 
+  [[webhooks.subscriptions]]
+  topics = [ "orders/paid" ]
+  uri = "/webhooks/orders/paid"
+
 [app_proxy]
-url = "https://refrigerator-pasta-hungarian-win.trycloudflare.com/api/upsell"
+url = "https://zero-dawn-asks-solution.trycloudflare.com/api/upsell"
 subpath = "upsell"
 prefix = "apps"
 

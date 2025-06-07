@@ -54,7 +54,7 @@ export const loader = async () => {
 export const action = async ({ request }) => {
   const { shop, topic, payload } = await authenticate.webhook(request);
   
-  if (topic === 'orders/create') {
+  if (topic === 'orders/paid') {
     const storeId = shop;
     const order = payload;
     await prisma.event.create({
@@ -69,3 +69,5 @@ export const action = async ({ request }) => {
   
   return new Response("OK", { status: 200 });
 };
+
+

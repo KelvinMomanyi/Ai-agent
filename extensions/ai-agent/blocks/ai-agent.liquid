@@ -234,47 +234,231 @@ const button = document.getElementById('chatbot-button');
 const messages = document.getElementById('chatbot-messages');
 const textContainer = document.getElementById('chatbot-text');
 
+
+
+//ORIGINAL FUNCTION
+//async function fetchUpsellSuggestion() {
+//  try {
+//    const cart = await fetch('/cart.js').then(res => res.json());
+//    const response = await fetch('/apps/upsell', {
+//      method: 'POST',
+//      headers: {
+//        'Content-Type': 'application/json',
+//        "Access-Control-Allow-Origin": "*",
+//      },
+//      body: JSON.stringify({
+//        cartItems: cart.items,
+//      }),
+//    });
+
+//    const data = await response.json();
+//    console.log(data, 'upsell response');
+//   // showChatbotModal(data.suggestion);
+
+//   const modelMessage = data.suggestion
+
+//   const jsonMatch = modelMessage.match(/\{[\s\S]*?\}/);
+
+//    if (!jsonMatch) {
+//      throw new Error('No valid JSON found in model response');
+//    }
+
+//    // Clean and parse the JSON block
+//    const cleanedJson = jsonMatch[0]
+//      .replace(/[\n\r\t]/g, '')     // remove newlines, tabs, etc.
+//      .replace(/\\(?=")/g, '');     // remove unnecessary backslashes before quotes
+
+//    const upsellData = JSON.parse(cleanedJson);
+//    console.log('Parsed upsell data:', upsellData);
+  
+//   showChatbotModal(upsellData, cart)
+//   trackEvent('upsell_impression', { id: upsellData.id }); // impression
+//  } catch (err) {
+//    console.error('Upsell API error:', err);
+//   // showChatbotModal("Something went wrong. Please try again.");
+//  }
+//}
+
+
+
 async function fetchUpsellSuggestion() {
   try {
-    const cart = await fetch('/cart.js').then(res => res.json());
+    // Get cart data with error handling
+    let cart;
+    try {
+      cart = await fetch('/cart.js').then(res => {
+        if (!res.ok) throw new Error(`Cart fetch failed: ${res.status}`);
+        return res.json();
+      });
+    } catch (cartError) {
+      console.error('Failed to fetch cart:', cartError);
+      throw new Error('Unable to load cart data');
+    }
+
+    console.log('Cart data:', cart); // Debug cart structure
+
+    // Validate cart data before sending
+    if (!cart || !cart.items || !Array.isArray(cart.items)) {
+      throw new Error('Invalid cart data structure');
+    }
+
+    // Make upsell request with comprehensive error handling
     const response = await fetch('/apps/upsell', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        "Access-Control-Allow-Origin": "*",
+        'Accept': 'application/json',
+        // Remove CORS header - it's not needed for same-origin requests
+         "Access-Control-Allow-Origin": "*", 
       },
       body: JSON.stringify({
         cartItems: cart.items,
+        // Add additional context that might be needed
+        cartTotal: cart.total_price,
+        currency: cart.currency,
+        itemCount: cart.item_count
       }),
     });
 
-    const data = await response.json();
-    console.log(data, 'upsell response');
-   // showChatbotModal(data.suggestion);
+    // Handle different HTTP status codes
+    if (!response.ok) {
+      let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+      
+      try {
+        // Try to get error details from response
+        const errorData = await response.text();
+        console.error('Server error response:', errorData);
+        
+        // Try to parse as JSON for structured error
+        try {
+          const errorJson = JSON.parse(errorData);
+          errorMessage = errorJson.message || errorJson.error || errorMessage;
+        } catch (e) {
+          // Not JSON, use text response
+          if (errorData) errorMessage += ` - ${errorData}`;
+        }
+      } catch (e) {
+        console.error('Could not read error response:', e);
+      }
+      
+      throw new Error(errorMessage);
+    }
 
-   const modelMessage = data.suggestion
+    // Parse response with error handling
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      console.error('Failed to parse response as JSON:', parseError);
+      const responseText = await response.text();
+      console.error('Raw response:', responseText);
+      throw new Error('Invalid JSON response from server');
+    }
 
-   const jsonMatch = modelMessage.match(/\{[\s\S]*?\}/);
+    console.log('Upsell API response:', data);
 
+    // Validate response structure
+    if (!data || !data.suggestion) {
+      throw new Error('Invalid response: missing suggestion data');
+    }
+
+    const modelMessage = data.suggestion;
+    
+    // Robust JSON extraction
+    const jsonMatch = modelMessage.match(/\{(?:[^{}]|{[^{}]*})*\}/);
     if (!jsonMatch) {
+      console.error('No JSON found in model response:', modelMessage);
       throw new Error('No valid JSON found in model response');
     }
 
-    // Clean and parse the JSON block
-    const cleanedJson = jsonMatch[0]
-      .replace(/[\n\r\t]/g, '')     // remove newlines, tabs, etc.
-      .replace(/\\(?=")/g, '');     // remove unnecessary backslashes before quotes
+    // Clean and parse JSON
+    let cleanedJson = jsonMatch[0]
+      .replace(/[\n\r\t]/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+      .trim();
 
-    const upsellData = JSON.parse(cleanedJson);
+    console.log('Extracted JSON:', cleanedJson);
+
+    let upsellData;
+    try {
+      upsellData = JSON.parse(cleanedJson);
+    } catch (jsonError) {
+      console.error('JSON parsing failed:', jsonError);
+      console.error('Problematic JSON:', cleanedJson);
+      throw new Error(`JSON parsing error: ${jsonError.message}`);
+    }
+
     console.log('Parsed upsell data:', upsellData);
-  
-   showChatbotModal(upsellData, cart)
-   trackEvent('upsell_impression', { id: upsellData.id }); // impression
+
+    // Validate required fields
+    if (!upsellData.id) {
+      throw new Error('Invalid upsell data: missing id');
+    }
+
+    showChatbotModal(upsellData, cart);
+    trackEvent('upsell_impression', { id: upsellData.id });
+
   } catch (err) {
     console.error('Upsell API error:', err);
-   // showChatbotModal("Something went wrong. Please try again.");
+    
+    // Log detailed error info for debugging
+    //console.group('Upsell Error Details');
+    //console.error('Error type:', err.constructor.name);
+    //console.error('Error message:', err.message);
+    //console.error('Stack trace:', err.stack);
+    console.groupEnd();
+    
+    // Optional: Show user-friendly error
+    // showChatbotModal({
+    //   error: true,
+    //   message: "Unable to load recommendations. Please try again."
+    // });
   }
 }
+
+// Enhanced cart polling with retry logic
+async function pollCart() {
+  const maxRetries = 3;
+  let retryCount = 0;
+  
+  while (retryCount < maxRetries) {
+    try {
+      await fetchUpsellSuggestion();
+      break; // Success, exit retry loop
+    } catch (error) {
+      retryCount++;
+      console.warn(`Upsell attempt ${retryCount} failed:`, error.message);
+      
+      if (retryCount < maxRetries) {
+        // Wait before retrying (exponential backoff)
+        const delay = Math.pow(2, retryCount) * 1000;
+        console.log(`Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        console.error('All upsell attempts failed');
+      }
+    }
+  }
+}
+
+// Alternative: Check if endpoint exists before calling
+async function checkUpsellEndpoint() {
+  try {
+    const response = await fetch('/apps/upsell', {
+      method: 'OPTIONS' // Pre-flight check
+    });
+    return response.ok;
+  } catch (error) {
+    console.warn('Upsell endpoint check failed:', error);
+    return false;
+  }
+}
+
+
+
+
+
 
 
 
@@ -414,6 +598,12 @@ document.addEventListener('submit', function (e) {
     }
   });
 
+
+
+
+
+
+  
   // ✅ Monkey-patch XMLHttpRequest to intercept /cart/add (like the code you shared)
   const originalOpen = XMLHttpRequest.prototype.open;
   const originalSend = XMLHttpRequest.prototype.send;
@@ -533,14 +723,14 @@ function onCartChange(cart) {
 }
 
 // Polling loop
-async function pollCart(interval = 3000) {
-  const cart = await fetchCartState();
-  if (isCartChanged(lastCartState, cart)) {
-    lastCartState = cart;
-    onCartChange(cart);
-  }
-  setTimeout(() => pollCart(interval), interval);
-}
+//async function pollCart(interval = 3000) {
+//  const cart = await fetchCartState();
+//  if (isCartChanged(lastCartState, cart)) {
+//    lastCartState = cart;
+ //   onCartChange(cart);
+ // }
+ // setTimeout(() => pollCart(interval), interval);
+//}
 
 // Start polling on page load
 //document.addEventListener('DOMContentLoaded', () => {
