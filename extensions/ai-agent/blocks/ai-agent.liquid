@@ -520,7 +520,7 @@ function closeChatbotModal() {
         const clonedResponse = response.clone();
         const data = await clonedResponse.json();
         console.log('[Cart Alert] Added item:', data);
-        trackEvent('upsell_add_to_cart', { data })
+        trackEvent('upsell_add_to_cart', { ...data })
         fetchUpsellSuggestion(); // Custom logic
       } catch (err) {
         console.error('Error reading response:', err);

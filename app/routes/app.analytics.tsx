@@ -525,7 +525,7 @@ export default function UpsellDashboard() {
     events.forEach((event) => {
       const eventType = eventTypeMap[event.event];
       const productId = event.data?.id || "unknown";
-      const productName = event.data?.title || event.data?.name || "Unknown Product";
+      const productName = event.data?.title || event.data?.data.title|| "Unknown Product";
       const dateKey = new Date(event.timestamp).toISOString().split('T')[0];
 
       if (eventType) {
