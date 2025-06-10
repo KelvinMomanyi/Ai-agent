@@ -90,6 +90,7 @@
       <p id="chatbot-text" class="cb-text"></p>
       <form method="POST" action="/cart/add">
         <input type="hidden" name="id" id="upsell-variant-id" />
+        <input type="hidden" name="productName" value="" />
         <button type="submit" class="cb-add-to-cart-btn">Add to Cart</button>
       </form>
     </div>
@@ -397,7 +398,7 @@ async function fetchUpsellSuggestion() {
     }
 
     showChatbotModal(upsellData, cart);
-    trackEvent('upsell_impression', { id: upsellData.id });
+    trackEvent('upsell_impression', { id: upsellData.id, title:upsellData.title });
 
   } catch (err) {
     console.error('Upsell API error:', err);
@@ -519,6 +520,7 @@ function closeChatbotModal() {
         const clonedResponse = response.clone();
         const data = await clonedResponse.json();
         console.log('[Cart Alert] Added item:', data);
+        trackEvent('upsell_add_to_cart', { data })
         fetchUpsellSuggestion(); // Custom logic
       } catch (err) {
         console.error('Error reading response:', err);
@@ -549,6 +551,7 @@ document.addEventListener('submit', function (e) {
   const form = e.target;
   if (form.action.includes('/cart/add')) {
     console.log('[Cart Alert - Form] Add to cart triggered via form submission');
+  
     fetchUpsellSuggestion();
   }
 });
@@ -592,6 +595,7 @@ document.addEventListener('submit', function (e) {
           productId: formData.get("id"),
           quantity: formData.get("quantity"),
         });
+
       } catch (e) {
         console.warn("❌ Failed to parse cart/add response", e);
       }
@@ -797,24 +801,6 @@ document.addEventListener('page:load', initCartPolling); // e.g., if your theme 
 
 
 function trackEvent(eventName, data = {}) {
-  //let shop = document.querySelector('meta[name="shop"]')?.content;
-
-  //const container = document.getElementById("analytics-app")
-  //const shop = container?.dataset.shop
- //console.log(shop, 'shop')
- // const currentURL = window.location.href;
- // let shop = window.location.href;
- // console.log(currentURL, 'currentURL');  // Outputs the full URL of the current page
-  
-//  if (!shop) {
-//    shop = document.querySelector('meta[name="shop"]')?.content;
-//  }
-
-//  if (!shop) {
-//    console.warn("Missing shop identifier. Cannot track.");
-//    return;
-//  }
- // data.shop = shop;
   fetch('/apps/upsell/track', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -829,8 +815,11 @@ function trackEvent(eventName, data = {}) {
 
 const form = document.querySelector('#chatbot-messages form');
 form.addEventListener('submit', () => {
-  trackEvent('upsell_add_to_cart', { id: document.getElementById('upsell-variant-id').value });
+  //trackEvent('upsell_add_to_cart', { id: document.getElementById('upsell-variant-id').value });
 });
+
+
+// Place this in a <script> tag or separate JS file loaded in your Shopify theme
 
 
 </script>

@@ -615,70 +615,92 @@ export default function UpsellDashboard() {
   ]);
 
   return (
-    <Page title="Upsell Analytics Dashboard">
+    <Page title="Analytics Dashboard">
       <Layout>
         {/* Key Metrics Cards */}
-        <Layout.Section oneHalf>
-          <Card >
-      
-              <Text variant="headingLg" as="h3" alignment="center">
-                {processedData.overallMetrics.totalImpressions}
-              </Text>
-              <Text variant="bodyMd" color="subdued" alignment="center">
-                Total Impressions
-              </Text>
-            
-          </Card>
-        </Layout.Section>
-        <Layout.Section oneHalf>
-          <Card >
-        
-              <Text variant="headingLg" as="h3" alignment="center">
-                {processedData.overallMetrics.totalClicks}
-              </Text>
-              <Text variant="bodyMd" color="subdued" alignment="center">
-                Total Clicks
-              </Text>
-             
-          </Card>
-        </Layout.Section>
-        <Layout.Section oneThird>
-          <Card>
-           
-              <Text variant="headingLg" as="h3" alignment="center">
-                {processedData.overallMetrics.totalConversions}
-              </Text>
-              <Text variant="bodyMd" color="subdued" alignment="center">
-                Total Conversions
-              </Text>
-            
-          </Card>
-        </Layout.Section>
-        <Layout.Section oneThird>
-          <Card >
-       
-              <Text variant="headingLg" as="h3" alignment="center">
-                {processedData.overallMetrics.overallCTR.toFixed(2)}%
-              </Text>
-              <Text variant="bodyMd" color="subdued" alignment="center">
-                Overall CTR
-              </Text>
-              
-          </Card>
-        </Layout.Section>
-        <Layout.Section oneThird>
-          <Card >
-          
-              <Text variant="headingLg" as="h3" alignment="center">
-                {processedData.overallMetrics.overallConversionRate.toFixed(2)}%
-              </Text>
-              <Text variant="bodyMd" color="subdued" alignment="center">
-                Conversion Rate
-              </Text>
-              
-          </Card>
-        </Layout.Section>
 
+            <Layout styles={{
+                display: 'flex',
+                flexDirection: 'row',
+                gap: '16px',
+                flexWrap: 'wrap',
+                width: '100%',
+              }}>
+              <Layout.Section oneHalf >
+                <Card >
+                    <Text variant="headingLg" as="h3" alignment="center">
+                      {processedData.overallMetrics.totalImpressions}
+                    </Text>
+                    <Text variant="bodyMd" color="subdued" alignment="center">
+                      Total Impressions
+                    </Text>
+                </Card>
+              </Layout.Section>
+              
+            </Layout >
+            <Layout styles={{
+                display: 'flex',
+                flexDirection: 'row',
+                gap: '16px',
+                flexWrap: 'wrap',
+                width: '100%',
+              }}>
+              <Layout.Section oneHalf>
+                <Card >
+              
+                    <Text variant="headingLg" as="h3" alignment="center">
+                      {processedData.overallMetrics.totalClicks}
+                    </Text>
+                    <Text variant="bodyMd" color="subdued" alignment="center">
+                      Total Clicks
+                    </Text>
+                  
+                </Card>
+              </Layout.Section>
+            </Layout>
+            <Layout>
+              <Layout.Section oneHalf>
+                <Card>
+                
+                    <Text variant="headingLg" as="h3" alignment="center">
+                      {processedData.overallMetrics.totalConversions}
+                    </Text>
+                    <Text variant="bodyMd" color="subdued" alignment="center">
+                      Total Conversions
+                    </Text>
+                  
+                </Card>
+              </Layout.Section>
+            </Layout>
+            <Layout >
+            <Layout.Section oneHalf>
+              <Card >
+          
+                  <Text variant="headingLg" as="h3" alignment="center">
+                    {processedData.overallMetrics.overallCTR.toFixed(2)}%
+                  </Text>
+                  <Text variant="bodyMd" color="subdued" alignment="center">
+                    Overall CTR
+                  </Text>
+                  
+              </Card>
+            </Layout.Section>
+            </Layout>  
+            <Layout>
+            <Layout.Section oneHalf>
+              <Card >
+              
+                  <Text variant="headingLg" as="h3" alignment="center">
+                    {processedData.overallMetrics.overallConversionRate.toFixed(2)}%
+                  </Text>
+                  <Text variant="bodyMd" color="subdued" alignment="center">
+                    Conversion Rate
+                  </Text>
+                  
+              </Card>
+            </Layout.Section>
+            </Layout> 
+   
         {/* Charts Section */}
         <Layout.Section oneHalf>
           <Card title="Event Distribution" sectioned>
