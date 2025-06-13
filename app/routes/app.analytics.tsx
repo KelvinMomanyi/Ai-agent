@@ -829,7 +829,7 @@ export default function UpsellDashboard() {
         }
         break;
         
-      case 'upsell_conversion':
+      case 'conversion':
         // Conversion data is an array of line items
         if (Array.isArray(data) && data.length > 0) {
           // For conversions, we'll create entries for each line item
@@ -857,7 +857,7 @@ export default function UpsellDashboard() {
     const eventTypeMap: Record<string, keyof typeof eventCounts> = {
       upsell_impression: "impression",
       upsell_add_to_cart: "click",
-      upsell_conversion: "conversion",
+      conversion: "conversion",
     };
 
     // Product-specific analytics
