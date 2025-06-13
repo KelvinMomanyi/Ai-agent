@@ -192,24 +192,33 @@ export const action = async ({ request } : ActionFunctionArgs) => {
         const cleanedId = extractProductVariantId(item.variant_id);
 
         // Look up matching event by cleanedId
+        // const matchingEvent = await prisma.event.findFirst({ 
+        //   where: {
+        //     OR: [
+        //       { 
+        //         event: "upsell_impression", 
+        //         data: { 
+        //           path: ["id"], 
+        //           equals: `gid://shopify/ProductVariant/${cleanedId}` 
+        //         } 
+        //       },
+        //       { 
+        //         event: "upsell_add_to_cart", 
+        //         data: { 
+        //           path: ["variant_id"], 
+        //           equals: cleanedId 
+        //         } 
+        //       },
+        //     ],
+        //   },
+        // });
         const matchingEvent = await prisma.event.findFirst({ 
           where: {
-            OR: [
-              { 
-                event: "upsell_impression", 
-                data: { 
-                  path: ["id"], 
-                  equals: `gid://shopify/ProductVariant/${cleanedId}` 
-                } 
-              },
-              { 
-                event: "upsell_add_to_cart", 
-                data: { 
-                  path: ["variant_id"], 
-                  equals: cleanedId 
-                } 
-              },
-            ],
+            event: "upsell_impression", 
+            data: { 
+              path: ["id"], 
+              equals: `gid://shopify/ProductVariant/${cleanedId}` 
+            }
           },
         });
 
