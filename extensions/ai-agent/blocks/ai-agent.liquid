@@ -403,7 +403,7 @@ async function fetchUpsellSuggestion() {
   const modelMessage = data.suggestion;
 
   // Check if it's already a parsed object (fallback case)
-  if (typeof modelMessage === 'object' && modelMessage.id) {
+  if (typeof modelMessage === 'object') {
     upsellData = modelMessage;
   } else {
     // It's a JSON string (AI response case)
