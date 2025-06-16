@@ -363,32 +363,32 @@ async function fetchUpsellSuggestion() {
       throw new Error('Invalid response: missing suggestion data');
     }
 
-    const modelMessage = data.suggestion;
-    
+    //const modelMessage = data.cleanedJson;
+    const upsellData = data.suggestion
     // Robust JSON extraction
-    const jsonMatch = modelMessage.match(/\{(?:[^{}]|{[^{}]*})*\}/);
-    if (!jsonMatch) {
-      console.error('No JSON found in model response:', modelMessage);
-      throw new Error('No valid JSON found in model response');
-    }
+    //const jsonMatch = modelMessage.match(/\{(?:[^{}]|{[^{}]*})*\}/);
+    //if (!jsonMatch) {
+    //  console.error('No JSON found in model response:', modelMessage);
+    //  throw new Error('No valid JSON found in model response');
+   // }
 
     // Clean and parse JSON
-    let cleanedJson = jsonMatch[0]
-      .replace(/[\n\r\t]/g, '')
-      .replace(/\s+/g, ' ')
-      .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
-      .trim();
+   // let cleanedJson = jsonMatch[0]
+    //  .replace(/[\n\r\t]/g, '')
+    //  .replace(/\s+/g, ' ')
+    //  .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+    //  .trim();
 
-    console.log('Extracted JSON:', cleanedJson);
+    // console.log('Extracted JSON:', cleanedJson);
 
-    let upsellData;
-    try {
-      upsellData = JSON.parse(cleanedJson);
-    } catch (jsonError) {
-      console.error('JSON parsing failed:', jsonError);
-      console.error('Problematic JSON:', cleanedJson);
-      throw new Error(`JSON parsing error: ${jsonError.message}`);
-    }
+    //let upsellData;
+    //try {
+     // upsellData = JSON.parse(cleanedJson);
+   // } catch (jsonError) {
+   //   console.error('JSON parsing failed:', jsonError);
+    ///  console.error('Problematic JSON:', cleanedJson);
+    //  throw new Error(`JSON parsing error: ${jsonError.message}`);
+   // }
 
     console.log('Parsed upsell data:', upsellData);
 

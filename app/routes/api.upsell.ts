@@ -854,6 +854,27 @@ Analyze the cart, find the best complementary product, and create a persuasive c
         max_tokens: 400,
         temperature: 0.3 // Lower temperature for more consistent results
       }
+    },
+    {
+      name: 'claude',
+      url: 'https://api.anthropic.com/v1/messages',
+      headers: {
+        'Authorization': `Bearer ${process.env.ANTHROPIC_API_KEY}`,
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01'
+      },
+      body: {
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 400,
+        temperature: 0.3,
+        system: 'You are a professional sales consultant. Always respond with valid JSON only. No additional text or formatting.',
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      }
     }
    
   ];
@@ -884,30 +905,39 @@ Analyze the cart, find the best complementary product, and create a persuasive c
         aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
       }
 
-      // if (aiResponse) {
-      //   try {
-      //     // Clean and extract JSON from response
-      //     const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-      //     if (jsonMatch) {
-      //       const suggestion = JSON.parse(jsonMatch[0]);
+      if (aiResponse) {
+        try {
+          // Clean and extract JSON from response
+         // const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+         const jsonMatch = aiResponse.match(/\{(?:[^{}]|{[^{}]*})*\}/);
+          // if (jsonMatch) {
+          //   const suggestion = JSON.parse(jsonMatch[0]);
             
-      //       // Validate the suggestion
-      //       if (suggestion.id && suggestion.title && suggestion.message && suggestion.image) {
-      //         // Double-check that suggested product isn't in cart
-      //         if (!cartProductIds.has(suggestion.id)) {
-      //           console.log(`Cross-sell success with ${service.name}`);
-      //           return suggestion;
-      //         } else {
-      //           console.log(`${service.name} suggested cart item, retrying...`);
-      //         }
-      //       }
-      //     }
-      //   } catch (parseError) {
-      //     console.log(`${service.name} JSON parse error:`, parseError.message);
-      //   }
-      // }
+          //   // // Validate the suggestion
+          //   // if (suggestion.id && suggestion.title && suggestion.message && suggestion.image) {
+          //   //   // Double-check that suggested product isn't in cart
+          //   //   if (!cartProductIds.has(suggestion.id)) {
+          //   //     console.log(`Cross-sell success with ${service.name}`);
+          //   //     return suggestion;
+          //   //   } else {
+          //   //     console.log(`${service.name} suggested cart item, retrying...`);
+          //   //   }
+          //   // }
 
-      return aiResponse
+          // }
+          let cleanedJson = jsonMatch[0]
+          .replace(/[\n\r\t]/g, '')
+          .replace(/\s+/g, ' ')
+          .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+          .trim();
+          const suggestion = JSON.parse(cleanedJson)  
+          return suggestion
+        } catch (parseError) {
+          console.log(`${service.name} JSON parse error:`, parseError.message);
+        }
+      }
+
+    //  return aiResponse
     } catch (error) {
       console.log(`${service.name} error:`, error.message);
       continue;
