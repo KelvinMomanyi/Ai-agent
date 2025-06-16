@@ -363,25 +363,64 @@ async function fetchUpsellSuggestion() {
       throw new Error('Invalid response: missing suggestion data');
     }
 
-    const modelMessage = data?.suggestion;
+    //const modelMessage = data?.suggestion;
     
     // Robust JSON extraction
+   // const jsonMatch = modelMessage.match(/\{(?:[^{}]|{[^{}]*})*\}/);
+   // if (!jsonMatch) {
+   //   console.error('No JSON found in model response:', modelMessage);
+   //   throw new Error('No valid JSON found in model response');
+   // }
+
+    // Clean and parse JSON
+    //let cleanedJson = jsonMatch[0]
+    //  .replace(/[\n\r\t]/g, '')
+    //  .replace(/\s+/g, ' ')
+    //  .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+     // .trim();
+
+   // console.log('Extracted JSON:', cleanedJson);
+
+   // let upsellData;
+   // try {
+    //  upsellData = JSON.parse(cleanedJson);
+    //} catch (jsonError) {
+   //   console.error('JSON parsing failed:', jsonError);
+   //   console.error('Problematic JSON:', cleanedJson);
+   //   throw new Error(`JSON parsing error: ${jsonError.message}`);
+   // }
+
+   // console.log('Parsed upsell data:', upsellData);
+
+    // Validate required fields
+   // if (!upsellData.id) {
+   //   throw new Error('Invalid upsell data: missing id');
+   // }
+
+   // showChatbotModal(upsellData, cart);
+   // trackEvent('upsell_impression', { id: upsellData.id, title:upsellData.title });
+   let upsellData;
+  const modelMessage = data.suggestion;
+
+  // Check if it's already a parsed object (fallback case)
+  if (typeof modelMessage === 'object' && modelMessage.id) {
+    upsellData = modelMessage;
+  } else {
+    // It's a JSON string (AI response case)
     const jsonMatch = modelMessage.match(/\{(?:[^{}]|{[^{}]*})*\}/);
     if (!jsonMatch) {
       console.error('No JSON found in model response:', modelMessage);
       throw new Error('No valid JSON found in model response');
     }
 
-    // Clean and parse JSON
     let cleanedJson = jsonMatch[0]
       .replace(/[\n\r\t]/g, '')
       .replace(/\s+/g, ' ')
-      .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+      .replace(/,(\s*[}\]])/g, '$1')
       .trim();
 
     console.log('Extracted JSON:', cleanedJson);
 
-    let upsellData;
     try {
       upsellData = JSON.parse(cleanedJson);
     } catch (jsonError) {
@@ -389,17 +428,17 @@ async function fetchUpsellSuggestion() {
       console.error('Problematic JSON:', cleanedJson);
       throw new Error(`JSON parsing error: ${jsonError.message}`);
     }
+  }
 
-    console.log('Parsed upsell data:', upsellData);
+  console.log('Parsed upsell data:', upsellData);
 
-    // Validate required fields
-    if (!upsellData.id) {
-      throw new Error('Invalid upsell data: missing id');
-    }
+  // Validate required fields
+  if (!upsellData.id) {
+    throw new Error('Invalid upsell data: missing id');
+  }
 
-    showChatbotModal(upsellData, cart);
-    trackEvent('upsell_impression', { id: upsellData.id, title:upsellData.title });
-
+  showChatbotModal(upsellData, cart);
+  trackEvent('upsell_impression', { id: upsellData.id, title: upsellData.title });
   } catch (err) {
     console.error('Upsell API error:', err);
     
