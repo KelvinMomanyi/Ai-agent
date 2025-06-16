@@ -560,12 +560,25 @@ const generateFallbackUpsell = (products, cartItems) => {
   const upsellProduct = products[0];
   const cartItemNames = cartItems.map(item => item.title || item.product_title).join(', ');
   
-  return {
+  // return {
+  //   id: upsellProduct.id,
+  //   title: upsellProduct.title,
+  //   price: upsellProduct.price,
+  //   image: upsellProduct.image.src,
+  //   message: `Complete your purchase! Customers who bought ${cartItemNames} often love adding ${upsellProduct.title} to their order.`
+  // };
+  const fallbackSuggestion = {
     id: upsellProduct.id,
     title: upsellProduct.title,
     price: upsellProduct.price,
-    image: upsellProduct.image.src,
-    message: `Complete your purchase! Customers who bought ${cartItemNames} often love adding ${upsellProduct.title} to their order.`
+    image: upsellProduct.image?.src || upsellProduct.image,
+    message: `Complete your purchase! Customers who bought ${cartItemNames} often love adding ${upsellProduct.title} to their order.`,
+    reasoning: "Fallback recommendation based on availability"
+  };
+
+  // Return as JSON STRING to match AI response format
+  return {
+    suggestion: JSON.stringify(fallbackSuggestion) // <-- This makes it consistent
   };
 };
 
