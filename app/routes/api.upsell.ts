@@ -835,7 +835,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
   const services = [
     {
       name: 'gemini',
-     // url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`,
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       headers: { 'Content-Type': 'application/json' },
       body: {
         contents: [{ parts: [{ text: prompt }] }],
@@ -847,7 +847,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
     },
     {
       name: 'groq',
-    //  url: 'https://api.groq.com/openai/v1/chat/completions',
+      url: 'https://api.groq.com/openai/v1/chat/completions',
       headers: {
         'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
         'Content-Type': 'application/json'
@@ -870,7 +870,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
     },
     {
       name: 'claude',
-    //  url: 'https://api.anthropic.com/v1/messages',
+      url: 'https://api.anthropic.com/v1/messages',
       headers: {
         'Authorization': `Bearer ${process.env.ANTHROPIC_API_KEY}`,
         'Content-Type': 'application/json',
