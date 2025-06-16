@@ -564,7 +564,7 @@ const generateFallbackUpsell = (products, cartItems) => {
     id: upsellProduct.id,
     title: upsellProduct.title,
     price: upsellProduct.price,
-    image: upsellProduct.image,
+    image: upsellProduct.image.src,
     message: `Complete your purchase! Customers who bought ${cartItemNames} often love adding ${upsellProduct.title} to their order.`
   };
 };
