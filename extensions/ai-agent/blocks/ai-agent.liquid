@@ -363,7 +363,7 @@ async function fetchUpsellSuggestion() {
       throw new Error('Invalid response: missing suggestion data');
     }
 
-    const modelMessage = data.suggestion || data.suggestion.suggestion;
+    const modelMessage = data?.suggestion;
     
     // Robust JSON extraction
     const jsonMatch = modelMessage.match(/\{(?:[^{}]|{[^{}]*})*\}/);
