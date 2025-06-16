@@ -40,11 +40,17 @@ model Shop {
 
 // In Prisma schema
 model Event {
-  id         String   @id @default(cuid())
-  event      String
-  timestamp  DateTime
-  data       Json
-  storeId    String      // <- The unique shop domain, e.g., "nike.myshopify.com"
+  id        String   @id @default(cuid())
+  event     String
+  orderId   String?  // Add this field
+  storeId   String
+  timestamp DateTime
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Add this unique constraint
+  @@unique([event, orderId, storeId], name: "event_orderId_storeId")
 }
 
 
