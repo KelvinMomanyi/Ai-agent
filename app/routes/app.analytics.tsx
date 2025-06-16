@@ -1514,7 +1514,7 @@ export default function UpsellDashboard() {
         </Layout.Section> 
 
         {/* Detailed Event Log */}
-         <Layout.Section>
+         {/* <Layout.Section>
           <Card title="Event Tracking Log" sectioned>
 
               <Text variant="bodyMd" color="subdued">
@@ -1533,7 +1533,7 @@ export default function UpsellDashboard() {
               />
 
           </Card>
-        </Layout.Section> 
+        </Layout.Section>  */}
       </Layout>
     </Page>
   );
