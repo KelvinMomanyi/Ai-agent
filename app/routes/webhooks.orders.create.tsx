@@ -440,108 +440,6 @@ function extractProductVariantId(id) {
 
 
 
-// export const action = async ({ request }: ActionFunctionArgs) => {
-//   console.log("Webhook route hit");
-
-//   try {
-//     const { shop, topic, payload } = await authenticate.webhook(request);
-//     console.log("Authenticated", { shop, topic });
-
-//     if (topic === "ORDERS_CREATE") {
-//       console.log("Webhook triggered for orders/create");
-
-//       // Check if we've already processed this order
-//       const existing = await prisma.event.findFirst({ 
-//         where: { 
-//           event: "conversion",
-//           data: {
-//             path: "$.id",
-//             equals: String(payload.id)
-//           }
-//         }
-//       });
-
-//       if (existing) {
-//         console.log("Conversion event already exists for this order.");
-//         return new Response("OK", { status: 200 });
-//       }
-
-//       let matched = false;
-
-//       // Loop through each line item
-//       for (const item of payload.line_items) {
-//         const cleanedId = extractProductVariantId(item.variant_id);
-
-//         const matchingEvent = await prisma.event.findFirst({ 
-//           where: { 
-//             event: "upsell_add_to_cart",
-//             data: {
-//               path: "$.variant_id",
-//               equals: cleanedId
-//             }
-//           }
-//         });
-
-//         if (matchingEvent) {
-//           console.log("Matched event!", matchingEvent.id);
-//           matched = true;
-//           break;
-//         } else {
-//           console.log("No matching event for item.", cleanedId);
-//         }
-//       }
-
-//       if (matched) {
-//         console.log("Creating conversion event.");
-
-//         // Generate a uniqueId for this event
-//         const uniqueId = uuidv4();
-
-//         // Create conversion event
-//         await prisma.event.create({ 
-//           data: {
-//             event: "conversion",
-//             timestamp: new Date(payload.created_at),
-//             data: { 
-//               ...payload, 
-//               uniqueId // Store this uniqueId alongside 
-//             },
-//             storeId: shop
-//           },
-//         });
-
-//         // Now clean up duplicates (keep the earliest)
-//         const duplicates = await prisma.event.findMany({ 
-//           where: {
-//             event: "conversion",
-//             data: {
-//               path: "$.uniqueId",
-//               equals: uniqueId
-//             },
-//             NOT: { id: existing?.id }
-//           },
-//           orderBy: { timestamp: "asc" },
-//         });
-
-//         if (duplicates.length > 0) {
-//           // Delete duplicates except for the first
-//           for (let i = 1; i < duplicates.length; i++) {
-//             await prisma.event.delete({ where: { id: duplicates[i].id } });
-//             console.log("Deleted duplicate event.", duplicates[i].id);
-//           }
-//         }
-//       } else {
-//         console.log("No matching event for this order.");
-//       }
-//     }
-
-//   } catch (err) {
-//     console.error("Webhook failed.", err);
-//     return new Response("Error.", { status: 500 });
-//   }
-
-//   return new Response("OK", { status: 200 });
-// };
 export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("Webhook route hit");
 
@@ -552,66 +450,88 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (topic === "ORDERS_CREATE") {
       console.log("Webhook triggered for orders/create");
 
-      // Use the order ID as the deduplication key
-      const orderId = String(payload.id);
-      
-      // Use upsert to prevent race conditions - this is atomic
-      const result = await prisma.event.upsert({
-        where: {
-          // Create a unique constraint on event + orderId + storeId in your schema
-          event_orderId_storeId: {
-            event: "conversion",
-            orderId: orderId,
-            storeId: shop
-          }
-        },
-        update: {
-          // If it exists, just update the timestamp to show it was processed again
-          updatedAt: new Date()
-        },
-        create: {
+      // Check if we've already processed this order
+      const existing = await prisma.event.findFirst({ 
+        where: { 
           event: "conversion",
-          orderId: orderId, // Add this field to your schema
-          timestamp: new Date(payload.created_at),
-          data: payload,
-          storeId: shop
+          data: {
+            path: "$.id",
+            equals: String(payload.id)
+          }
         }
       });
 
-      // Check if this was a new creation or just an update
-      if (result.createdAt.getTime() === result.updatedAt.getTime()) {
-        console.log("Created new conversion event");
-        
-        // Only do the matching logic for new events
-        let matched = false;
+      if (existing) {
+        console.log("Conversion event already exists for this order.");
+        return new Response("OK", { status: 200 });
+      }
 
-        for (const item of payload.line_items) {
-          const cleanedId = extractProductVariantId(item.variant_id);
+      let matched = false;
 
-          const matchingEvent = await prisma.event.findFirst({ 
-            where: { 
-              event: "upsell_add_to_cart",
-              data: {
-                path: "$.variant_id",
-                equals: cleanedId
-              }
+      // Loop through each line item
+      for (const item of payload.line_items) {
+        const cleanedId = extractProductVariantId(item.variant_id);
+
+        const matchingEvent = await prisma.event.findFirst({ 
+          where: { 
+            event: "upsell_add_to_cart",
+            data: {
+              path: "$.variant_id",
+              equals: cleanedId
             }
-          });
+          }
+        });
 
-          if (matchingEvent) {
-            console.log("Matched event!", matchingEvent.id);
-            matched = true;
-            break;
+        if (matchingEvent) {
+          console.log("Matched event!", matchingEvent.id);
+          matched = true;
+          break;
+        } else {
+          console.log("No matching event for item.", cleanedId);
+        }
+      }
+
+      if (matched) {
+        console.log("Creating conversion event.");
+
+        // Generate a uniqueId for this event
+        const uniqueId = uuidv4();
+
+        // Create conversion event
+        await prisma.event.create({ 
+          data: {
+            event: "conversion",
+            timestamp: new Date(payload.created_at),
+            data: { 
+              ...payload, 
+              uniqueId // Store this uniqueId alongside 
+            },
+            storeId: shop
+          },
+        });
+
+        // Now clean up duplicates (keep the earliest)
+        const duplicates = await prisma.event.findMany({ 
+          where: {
+            event: "conversion",
+            data: {
+              path: "$.uniqueId",
+              equals: uniqueId
+            },
+            NOT: { id: existing?.id }
+          },
+          orderBy: { timestamp: "asc" },
+        });
+
+        if (duplicates.length > 0) {
+          // Delete duplicates except for the first
+          for (let i = 1; i < duplicates.length; i++) {
+            await prisma.event.delete({ where: { id: duplicates[i].id } });
+            console.log("Deleted duplicate event.", duplicates[i].id);
           }
         }
-
-        if (!matched) {
-          // If no match found, delete the conversion event we just created
-          await prisma.event.delete({ where: { id: result.id } });
-          console.log("No matching upsell event found, deleted conversion event");
-        }
       } else {
-        console.log("Conversion event already existed, skipping processing");
+        console.log("No matching event for this order.");
       }
     }
 
@@ -621,6 +541,90 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   return new Response("OK", { status: 200 });
-}
+};
+
+
+
+
+// export const action = async ({ request }: ActionFunctionArgs) => {
+//   console.log("Webhook route hit");
+
+//   try {
+//     const { shop, topic, payload } = await authenticate.webhook(request);
+//     console.log("Authenticated", { shop, topic });
+
+//     if (topic === "ORDERS_CREATE") {
+//       console.log("Webhook triggered for orders/create");
+
+//       // Use the order ID as the deduplication key
+//       const orderId = String(payload.id);
+      
+//       // Use upsert to prevent race conditions - this is atomic
+//       const result = await prisma.event.upsert({
+//         where: {
+//           // Create a unique constraint on event + orderId + storeId in your schema
+//           event_orderId_storeId: {
+//             event: "conversion",
+//             orderId: orderId,
+//             storeId: shop
+//           }
+//         },
+//         update: {
+//           // If it exists, just update the timestamp to show it was processed again
+//           updatedAt: new Date()
+//         },
+//         create: {
+//           event: "conversion",
+//           orderId: orderId, // Add this field to your schema
+//           timestamp: new Date(payload.created_at),
+//           data: payload,
+//           storeId: shop
+//         }
+//       });
+
+//       // Check if this was a new creation or just an update
+//       if (result.createdAt.getTime() === result.updatedAt.getTime()) {
+//         console.log("Created new conversion event");
+        
+//         // Only do the matching logic for new events
+//         let matched = false;
+
+//         for (const item of payload.line_items) {
+//           const cleanedId = extractProductVariantId(item.variant_id);
+
+//           const matchingEvent = await prisma.event.findFirst({ 
+//             where: { 
+//               event: "upsell_add_to_cart",
+//               data: {
+//                 path: "$.variant_id",
+//                 equals: cleanedId
+//               }
+//             }
+//           });
+
+//           if (matchingEvent) {
+//             console.log("Matched event!", matchingEvent.id);
+//             matched = true;
+//             break;
+//           }
+//         }
+
+//         if (!matched) {
+//           // If no match found, delete the conversion event we just created
+//           await prisma.event.delete({ where: { id: result.id } });
+//           console.log("No matching upsell event found, deleted conversion event");
+//         }
+//       } else {
+//         console.log("Conversion event already existed, skipping processing");
+//       }
+//     }
+
+//   } catch (err) {
+//     console.error("Webhook failed.", err);
+//     return new Response("Error.", { status: 500 });
+//   }
+
+//   return new Response("OK", { status: 200 });
+// }
 
 
