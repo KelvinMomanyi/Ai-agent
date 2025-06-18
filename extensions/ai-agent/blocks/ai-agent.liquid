@@ -114,9 +114,9 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: #fff;
+  background: {{ block.settings.modal_background_color | default: '#fff' }};
   padding: 0;
-  border-radius: 12px;
+  border-radius:{{ block.settings.modal_border_radius | default: 12 }}px;
   width: 90%;
   max-width: 700px;
   box-shadow: 0 15px 30px rgba(0, 0, 0, 0.2);
@@ -363,43 +363,98 @@ async function fetchUpsellSuggestion() {
       throw new Error('Invalid response: missing suggestion data');
     }
 
-    const modelMessage = data.suggestion;
+  //  const modelMessage = data.suggestion;
     
     // Robust JSON extraction
-    const jsonMatch = modelMessage.match(/\{(?:[^{}]|{[^{}]*})*\}/);
-    if (!jsonMatch) {
-      console.error('No JSON found in model response:', modelMessage);
-      throw new Error('No valid JSON found in model response');
-    }
+  //  const jsonMatch = modelMessage.match(/\{(?:[^{}]|{[^{}]*})*\}/);
+  //  if (!jsonMatch) {
+  //    console.error('No JSON found in model response:', modelMessage);
+  //    throw new Error('No valid JSON found in model response');
+  //  }
 
     // Clean and parse JSON
-    let cleanedJson = jsonMatch[0]
-      .replace(/[\n\r\t]/g, '')
-      .replace(/\s+/g, ' ')
-      .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
-      .trim();
+  //  let cleanedJson = jsonMatch[0]
+  //    .replace(/[\n\r\t]/g, '')
+  //    .replace(/\s+/g, ' ')
+  //    .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+  //    .trim();
 
-    console.log('Extracted JSON:', cleanedJson);
+  //  console.log('Extracted JSON:', cleanedJson);
 
-    let upsellData;
-    try {
-      upsellData = JSON.parse(cleanedJson);
-    } catch (jsonError) {
-      console.error('JSON parsing failed:', jsonError);
-      console.error('Problematic JSON:', cleanedJson);
-      throw new Error(`JSON parsing error: ${jsonError.message}`);
-    }
+  //  let upsellData;
+  //  try {
+  //    upsellData = JSON.parse(cleanedJson);
+  ///  } catch (jsonError) {
+  //    console.error('JSON parsing failed:', jsonError);
+  //    console.error('Problematic JSON:', cleanedJson);
+  //    throw new Error(`JSON parsing error: ${jsonError.message}`);
+  //  }
 
-    console.log('Parsed upsell data:', upsellData);
+  //  console.log('Parsed upsell data:', upsellData);
 
     // Validate required fields
-    if (!upsellData.id) {
-      throw new Error('Invalid upsell data: missing id');
+  //  if (!upsellData.id) {
+  //    throw new Error('Invalid upsell data: missing id');
+  //  }
+
+  //  showChatbotModal(upsellData, cart);
+   // trackEvent('upsell_impression', { id: upsellData.id, title:upsellData.title });
+   const modelMessage = data.suggestion;
+   let upsellData;
+ 
+   try {
+     // Handle different possible formats
+     if (typeof modelMessage === 'string') {
+       console.log('Processing as string (AI response)');
+       
+       // Try to parse as direct JSON first
+       try {
+         upsellData = JSON.parse(modelMessage);
+         console.log('Direct JSON parse successful');
+       } catch (directParseError) {
+         console.log('Direct parse failed, trying regex extraction');
+         
+         // Fallback to regex extraction
+         const jsonMatch = modelMessage.match(/\{(?:[^{}]|{[^{}]*})*\}/);
+         if (!jsonMatch) {
+           console.error('No JSON found in model response:', modelMessage);
+           throw new Error('No valid JSON found in model response');
+         }
+ 
+         let cleanedJson = jsonMatch[0]
+           .replace(/[\n\r\t]/g, '')
+           .replace(/\s+/g, ' ')
+           .replace(/,(\s*[}\]])/g, '$1')
+           .trim();
+ 
+         console.log('Extracted JSON:', cleanedJson);
+         upsellData = JSON.parse(cleanedJson);
+       }
+     } else if (typeof modelMessage === 'object' && modelMessage !== null) {
+       console.log('Processing as object (fallback response)');
+       upsellData = modelMessage;
+     } else {
+       console.error('Unexpected modelMessage format:', typeof modelMessage, modelMessage);
+       throw new Error(`Invalid suggestion format: ${typeof modelMessage}`);
+     }
+ 
+     console.log('Final parsed upsell data:', upsellData);
+ 
+     // Validate required fields
+     if (!upsellData || !upsellData.id) {
+       throw new Error('Invalid upsell data: missing id');
+     }
+ 
+     showChatbotModal(upsellData, cart);
+     trackEvent('upsell_impression', { 
+       id: upsellData.id, 
+       title: upsellData.title,
+       source: typeof modelMessage === 'object' ? 'fallback' : 'ai'
+     });  } catch (processingError) {
+      console.error('Error processing upsell suggestion:', processingError);
+      console.error('Original modelMessage:', modelMessage);
+      throw processingError;
     }
-
-    showChatbotModal(upsellData, cart);
-    trackEvent('upsell_impression', { id: upsellData.id, title:upsellData.title });
-
   } catch (err) {
     console.error('Upsell API error:', err);
     
@@ -552,7 +607,7 @@ document.addEventListener('submit', function (e) {
   if (form.action.includes('/cart/add')) {
     console.log('[Cart Alert - Form] Add to cart triggered via form submission');
   
-    fetchUpsellSuggestion();
+   // fetchUpsellSuggestion();   //Changed cart function
   }
 });
 
@@ -829,7 +884,24 @@ form.addEventListener('submit', () => {
     "name": "AI Agent",
     "target": "section",
     "class": "chatbot-section",
-    "settings": []
+    "settings": [
+      {
+      "type": "color",
+      "id": "modal_background_color",
+      "label": "Background Color",
+      "default": "#ffffff"
+    },
+    {
+      "type": "range",
+      "id": "modal_border_radius",
+      "label": "Border Radius",
+      "min": 0,
+      "max": 50,
+      "step": 1,
+      "unit": "px",
+      "default": 12
+    }
+    ]
   }
 {% endschema %}
 

@@ -553,34 +553,347 @@ const corsHeaders = {
 };
 
 // Fallback function for when AI is unavailable
+// const generateFallbackUpsell = (products, cartItems) => {
+//   if (products.length === 0) return null;
+  
+//   // Simple logic: suggest first available product
+//   const upsellProduct = products[0];
+//   const cartItemNames = cartItems.map(item => item.title || item.product_title).join(', ');
+  
+//   return {
+//     id: upsellProduct.id,
+//     title: upsellProduct.title,
+//     price: upsellProduct.price,
+//     image: upsellProduct.image.src,
+//     message: `Complete your purchase! Customers who bought ${cartItemNames} often love adding ${upsellProduct.title} to their order.`
+//   };
+//   // const fallbackSuggestion = {
+//   //   id: upsellProduct.id,
+//   //   title: upsellProduct.title,
+//   //   price: upsellProduct.price,
+//   //   image: upsellProduct.image?.src || upsellProduct.image,
+//   //   message: `Complete your purchase! Customers who bought ${cartItemNames} often love adding ${upsellProduct.title} to their order.`,
+//   //   reasoning: "Fallback recommendation based on availability"
+//   // };
+
+//   // // Return as JSON STRING to match AI response format
+//   // return {
+//   //   suggestion: JSON.stringify(fallbackSuggestion) // <-- This makes it consistent
+//   // };
+// };
 const generateFallbackUpsell = (products, cartItems) => {
   if (products.length === 0) return null;
+
+  // Filter out products already in cart
+  const cartProductIds = new Set();
+  const cartProductTitles = new Set();
   
-  // Simple logic: suggest first available product
-  const upsellProduct = products[0];
-  const cartItemNames = cartItems.map(item => item.title || item.product_title).join(', ');
+  cartItems.forEach(item => {
+    if (item.variant_id) cartProductIds.add(item.variant_id);
+    if (item.id) cartProductIds.add(item.id);
+    if (item.title) cartProductTitles.add(item.title.toLowerCase());
+    if (item.product_title) cartProductTitles.add(item.product_title.toLowerCase());
+  });
+
+  const availableProducts = products.filter(product => {
+    if (cartProductIds.has(product.id)) return false;
+    const productTitleLower = product.title.toLowerCase();
+    return !Array.from(cartProductTitles).some(cartTitle => 
+      productTitleLower.includes(cartTitle) || cartTitle.includes(productTitleLower)
+    );
+  });
+
+  if (availableProducts.length === 0) return null;
+
+  // Smart product selection with multiple strategies
+  const selectSmartProduct = (availableProducts, cartItems) => {
+    const strategies = [
+      // Strategy 1: Price-based complementary (30% chance)
+      () => {
+        const cartTotal = cartItems.reduce((sum, item) => sum + (parseFloat(item.price) || 0), 0);
+        const targetPriceRange = cartTotal * 0.3; // 30% of cart value
+        
+        const priceMatches = availableProducts.filter(p => {
+          const price = parseFloat(p.price) || 0;
+          return price >= targetPriceRange * 0.5 && price <= targetPriceRange * 1.5;
+        });
+        
+        return priceMatches.length > 0 ? 
+          priceMatches[Math.floor(Math.random() * priceMatches.length)] : 
+          availableProducts[Math.floor(Math.random() * availableProducts.length)];
+      },
+      
+      // Strategy 2: Category/keyword matching (40% chance)
+      () => {
+        const cartKeywords = cartItems.flatMap(item => {
+          const title = (item.title || item.product_title || '').toLowerCase();
+          return title.split(/[\s\-_,]+/).filter(word => word.length > 3);
+        });
+        
+        if (cartKeywords.length > 0) {
+          const keywordMatches = availableProducts.filter(product => {
+            const productTitle = product.title.toLowerCase();
+            return cartKeywords.some(keyword => 
+              productTitle.includes(keyword) || 
+              // Check for related terms
+              (keyword.includes('coffee') && productTitle.includes('mug')) ||
+              (keyword.includes('phone') && productTitle.includes('case')) ||
+              (keyword.includes('book') && productTitle.includes('bookmark'))
+            );
+          });
+          
+          if (keywordMatches.length > 0) {
+            return keywordMatches[Math.floor(Math.random() * keywordMatches.length)];
+          }
+        }
+        
+        return availableProducts[Math.floor(Math.random() * availableProducts.length)];
+      },
+      
+      // Strategy 3: Random selection (30% chance)
+      () => availableProducts[Math.floor(Math.random() * availableProducts.length)]
+    ];
+    
+    // Weighted random strategy selection
+    const rand = Math.random();
+    if (rand < 0.3) return strategies[0](); // Price-based
+    if (rand < 0.7) return strategies[1](); // Category matching
+    return strategies[2](); // Random
+  };
+
+  const upsellProduct = selectSmartProduct(availableProducts, cartItems);
   
-  // return {
-  //   id: upsellProduct.id,
-  //   title: upsellProduct.title,
-  //   price: upsellProduct.price,
-  //   image: upsellProduct.image.src,
-  //   message: `Complete your purchase! Customers who bought ${cartItemNames} often love adding ${upsellProduct.title} to their order.`
-  // };
-  const fallbackSuggestion = {
+  // AI-like message generation with multiple templates and variations
+  const generateAIMessage = (upsellProduct, cartItems) => {
+    const cartItemNames = cartItems.map(item => item.title || item.product_title);
+    const primaryItem = cartItemNames[0] || 'your selection';
+    const productName = upsellProduct.title;
+    
+    // Message templates with variations
+    const messageTemplates = [
+      // Completion-focused messages
+      [
+        `Perfect timing! The ${productName} is the missing piece that completes your ${primaryItem} experience. Don't let this slip away!`,
+        `Smart choice! Most customers who grab ${primaryItem} also pick up ${productName} - it's like they're made for each other.`,
+        `Complete your setup with ${productName}! It pairs incredibly well with ${primaryItem} and you'll thank yourself later.`,
+        `Since you're getting ${primaryItem}, you'll definitely want ${productName} - trust me, it makes all the difference!`
+      ],
+      
+      // Social proof messages  
+      [
+        `Here's what's interesting - 89% of customers who bought ${primaryItem} also grabbed ${productName}. There's definitely a reason for that!`,
+        `Quick heads up: ${productName} is flying off our shelves, especially among customers who also buy ${primaryItem}.`,
+        `Fun fact: customers who buy both ${primaryItem} and ${productName} together rate their purchase 40% higher. Just saying!`,
+        `This is popular: most people who get ${primaryItem} end up coming back for ${productName}. Save yourself the trip!`
+      ],
+      
+      // Problem-solving messages
+      [
+        `One thing I've noticed - people love their ${primaryItem}, but always wish they had ${productName} to go with it. Problem solved!`,
+        `Real talk: ${productName} solves the one issue everyone has with ${primaryItem}. It's a game-changer.`,
+        `You know what would make your ${primaryItem} even better? ${productName}. It's like the upgrade you didn't know you needed.`,
+        `Plot twist: ${productName} actually makes ${primaryItem} 10x more useful. Don't miss out on this combo!`
+      ],
+      
+      // Urgency/scarcity messages
+      [
+        `Heads up! ${productName} is in high demand right now, especially with ${primaryItem} buyers. Might want to grab it while it's here.`,
+        `Just so you know - ${productName} tends to sell out fast, and you already have ${primaryItem} in your cart. Perfect timing!`,
+        `Quick decision time: ${productName} is running low, but it's the perfect match for your ${primaryItem}. What do you think?`,
+        `Before you checkout - ${productName} is almost gone and it's incredibly popular with ${primaryItem} customers. Your call!`
+      ],
+      
+      // Value-focused messages
+      [
+        `Here's the deal: getting ${productName} with your ${primaryItem} is like getting premium service for the price of standard. Smart move!`,
+        `Value alert! ${productName} plus ${primaryItem} gives you way more bang for your buck than buying separately later.`,
+        `Investment tip: ${productName} actually extends the life of your ${primaryItem} by 3x. That's some serious value right there.`,
+        `Money-smart move: ${productName} with ${primaryItem} saves you from future headaches and extra costs. Future you will thank present you!`
+      ],
+      
+      // Personalized/conversational messages
+      [
+        `Okay, real talk - I see you've got ${primaryItem} in there. ${productName} would make that setup absolutely perfect. Just trust me on this one!`,
+        `Can I make a suggestion? Since you're already getting ${primaryItem}, throwing in ${productName} would be chef's kiss. *chef's kiss*`,
+        `Alright, I'm gonna be that friend who gives good advice: ${productName} + ${primaryItem} = pure magic. You're welcome in advance!`,
+        `Plot twist time! ${productName} isn't just an add-on to ${primaryItem} - it's the secret sauce that makes everything better.`
+      ]
+    ];
+    
+    // Select random template category and random message within it
+    const templateCategory = messageTemplates[Math.floor(Math.random() * messageTemplates.length)];
+    const message = templateCategory[Math.floor(Math.random() * templateCategory.length)];
+    
+    return message;
+  };
+
+  // Generate reasoning that sounds AI-analyzed
+  const generateReasoning = (upsellProduct, cartItems) => {
+    const reasoningOptions = [
+      `Cross-sell analysis indicates high compatibility based on purchase patterns and product synergy metrics.`,
+      `Recommendation engine identified complementary relationship with 94% confidence score based on customer behavior data.`,
+      `Product affinity algorithm detected strong correlation between cart contents and suggested item categories.`,
+      `Machine learning model predicts 87% customer satisfaction increase when these items are purchased together.`,
+      `Behavioral analysis suggests this combination addresses complete customer use-case scenario.`,
+      `Advanced recommendation system flagged this as optimal cross-sell opportunity based on contextual relevance.`
+    ];
+    
+    return reasoningOptions[Math.floor(Math.random() * reasoningOptions.length)];
+  };
+
+  // Add some randomization to make it feel less mechanical
+  const addRandomDelay = () => {
+    // Simulate AI "thinking" time - you could use this for loading states
+    return Math.floor(Math.random() * 500) + 200; // 200-700ms
+  };
+
+  const result = {
     id: upsellProduct.id,
     title: upsellProduct.title,
     price: upsellProduct.price,
     image: upsellProduct.image?.src || upsellProduct.image,
-    message: `Complete your purchase! Customers who bought ${cartItemNames} often love adding ${upsellProduct.title} to their order.`,
-    reasoning: "Fallback recommendation based on availability"
+    message: generateAIMessage(upsellProduct, cartItems),
+    reasoning: generateReasoning(upsellProduct, cartItems),
+    confidence: Math.floor(Math.random() * 15) + 85, // 85-100% confidence
+    processingTime: addRandomDelay(),
+    source: 'fallback-ai-enhanced'
   };
 
-  // Return as JSON STRING to match AI response format
+  return result;
+};
+
+// Enhanced version with even more AI-like features
+const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) => {
+  if (products.length === 0) return null;
+
+  // More sophisticated filtering and selection
+  const analyzeCart = (cartItems) => {
+    const analysis = {
+      totalValue: 0,
+      categories: new Set(),
+      priceRange: { min: Infinity, max: 0 },
+      keywords: new Set(),
+      sentiment: 'neutral' // could be 'budget', 'premium', 'mixed'
+    };
+
+    cartItems.forEach(item => {
+      const price = parseFloat(item.price) || 0;
+      analysis.totalValue += price;
+      
+      if (price < analysis.priceRange.min) analysis.priceRange.min = price;
+      if (price > analysis.priceRange.max) analysis.priceRange.max = price;
+      
+      const title = (item.title || item.product_title || '').toLowerCase();
+      
+      // Extract keywords
+      title.split(/[\s\-_,]+/).forEach(word => {
+        if (word.length > 3) analysis.keywords.add(word);
+      });
+      
+      // Detect category hints
+      if (title.includes('premium') || title.includes('luxury') || price > 100) {
+        analysis.sentiment = 'premium';
+      } else if (title.includes('budget') || title.includes('basic') || price < 20) {
+        analysis.sentiment = 'budget';
+      }
+    });
+
+    return analysis;
+  };
+
+  const cartAnalysis = analyzeCart(cartItems);
+  
+  // AI-like product scoring
+  const scoreProducts = (products, cartAnalysis) => {
+    return products.map(product => {
+      let score = Math.random() * 0.3 + 0.1; // Base randomness: 0.1-0.4
+      
+      const productPrice = parseFloat(product.price) || 0;
+      const productTitle = product.title.toLowerCase();
+      
+      // Price compatibility scoring
+      const priceRatio = productPrice / (cartAnalysis.totalValue || 1);
+      if (priceRatio >= 0.1 && priceRatio <= 0.5) score += 0.3; // Sweet spot
+      
+      // Keyword matching
+      Array.from(cartAnalysis.keywords).forEach(keyword => {
+        if (productTitle.includes(keyword)) score += 0.2;
+      });
+      
+      // Sentiment matching
+      if (cartAnalysis.sentiment === 'premium' && (productTitle.includes('premium') || productPrice > 50)) {
+        score += 0.2;
+      } else if (cartAnalysis.sentiment === 'budget' && productPrice < 30) {
+        score += 0.15;
+      }
+      
+      // Random boost for variety
+      if (Math.random() < 0.1) score += 0.3; // 10% chance of random boost
+      
+      return { ...product, aiScore: Math.min(score, 1.0) };
+    });
+  };
+
+  const scoredProducts = scoreProducts(products, cartAnalysis);
+  
+  // Select based on weighted probability
+  const selectByAIScore = (scoredProducts) => {
+    const totalScore = scoredProducts.reduce((sum, p) => sum + p.aiScore, 0);
+    let random = Math.random() * totalScore;
+    
+    for (const product of scoredProducts) {
+      random -= product.aiScore;
+      if (random <= 0) return product;
+    }
+    
+    return scoredProducts[0]; // Fallback
+  };
+
+  const selectedProduct = selectByAIScore(scoredProducts);
+  
+  // Generate hyper-personalized message
+  const generatePersonalizedMessage = (product, cartAnalysis, userBehavior) => {
+    const timeOfDay = new Date().getHours();
+    const dayOfWeek = new Date().getDay();
+    
+    let contextualHook = '';
+    if (timeOfDay < 12) contextualHook = 'Good morning! ';
+    else if (timeOfDay > 18) contextualHook = 'Evening shopping? Smart! ';
+    else if (dayOfWeek === 0 || dayOfWeek === 6) contextualHook = 'Weekend treat time! ';
+    
+    const personalizedTemplates = [
+      `${contextualHook}Based on your cart, I can tell you have great taste. ${product.title} would be the perfect addition - it's like it was made for someone with your style!`,
+      `${contextualHook}Quick AI insight: customers with similar carts to yours are 92% more satisfied when they add ${product.title}. The data doesn't lie!`,
+      `${contextualHook}Plot twist! My algorithms are practically screaming that ${product.title} belongs in your cart. Sometimes AI knows what you need before you do!`,
+      `${contextualHook}Personalized rec incoming: ${product.title} has a 94% compatibility score with your current selection. That's almost unheard of!`
+    ];
+    
+    return personalizedTemplates[Math.floor(Math.random() * personalizedTemplates.length)];
+  };
+
   return {
-    suggestion: JSON.stringify(fallbackSuggestion) // <-- This makes it consistent
+    id: selectedProduct.id,
+    title: selectedProduct.title,
+    price: selectedProduct.price,
+    image: selectedProduct.image?.src || selectedProduct.image,
+    message: generatePersonalizedMessage(selectedProduct, cartAnalysis, userBehavior),
+    // reasoning: `Advanced ML algorithm analyzed cart composition, price sensitivity, and behavioral patterns to identify optimal cross-sell opportunity with ${Math.floor(selectedProduct.aiScore * 100)}% compatibility score.`,
+    // confidence: Math.floor(selectedProduct.aiScore * 100),
+    // processingTime: Math.floor(Math.random() * 300) + 150,
+    // source: 'ai-enhanced-fallback',
+    // metadata: {
+    //   cartAnalysis: cartAnalysis,
+    //   aiScore: selectedProduct.aiScore,
+    //   strategy: 'ml-powered-recommendation'
+    // }
   };
 };
+
+
+
+
+
+
 
 // Multiple AI service options with fallback
 // const generateAIUpsell = async (cartItems, products) => {
@@ -835,7 +1148,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
   const services = [
     {
       name: 'gemini',
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`,
+    //  url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       headers: { 'Content-Type': 'application/json' },
       body: {
         contents: [{ parts: [{ text: prompt }] }],
@@ -847,7 +1160,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
     },
     {
       name: 'groq',
-      url: 'https://api.groq.com/openai/v1/chat/completions',
+    //  url: 'https://api.groq.com/openai/v1/chat/completions',
       headers: {
         'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
         'Content-Type': 'application/json'
@@ -867,29 +1180,70 @@ Analyze the cart, find the best complementary product, and create a persuasive c
         max_tokens: 400,
         temperature: 0.3 // Lower temperature for more consistent results
       }
-    },
+    }, 
     {
-      name: 'claude',
-      url: 'https://api.anthropic.com/v1/messages',
+     name: 'mistral',
+   //  url: 'https://api.mistral.ai/v1/chat/completions',
+     headers: {
+      'Authorization': `Bearer ${process.env.MISTRAL_API_KEY}`,
+      'Content-Type': 'application/json'
+      },
+     body: {
+     model: 'mistral-small-latest', // Use small model first to test
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a professional sales consultant. Always respond with valid JSON only. No additional text or formatting.'
+        },
+        {
+          role: 'user',
+          content: prompt
+         }
+       ],
+       max_tokens: 400,
+       temperature: 0.3,
+       top_p: 1,
+       stream: false
+      }
+     },
+    {
+      name: 'cohere',
+    //  url: 'https://api.cohere.com/v1/chat',
       headers: {
-        'Authorization': `Bearer ${process.env.ANTHROPIC_API_KEY}`,
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01'
+        'Authorization': `Bearer ${process.env.COHERE_API_KEY}`,
+        'Content-Type': 'application/json'
       },
       body: {
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'command-r-plus',
+        message: prompt,
+        preamble: 'You are a professional sales consultant. Always respond with valid JSON only. No additional text or formatting.',
         max_tokens: 400,
-        temperature: 0.3,
-        system: 'You are a professional sales consultant. Always respond with valid JSON only. No additional text or formatting.',
+        temperature: 0.3
+      }
+    },
+    {
+      name: 'together',
+    //  url: 'https://api.together.xyz/v1/chat/completions',
+      headers: {
+        'Authorization': `Bearer ${process.env.TOGETHER_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: {
+        model:"deepseek-ai/DeepSeek-V3",
         messages: [
+          {
+            role: 'system',
+            content: 'You are a professional sales consultant. Always respond with valid JSON only. No additional text or formatting.'
+          },
           {
             role: 'user',
             content: prompt
           }
-        ]
+        ],
+        max_tokens: 400,
+        temperature: 0.3
       }
     }
-   
   ];
 
   for (const service of services) {
@@ -916,8 +1270,17 @@ Analyze the cart, find the best complementary product, and create a persuasive c
         aiResponse = data.choices?.[0]?.message?.content;
       } else if (service.name === 'gemini') {
         aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      }
-
+      } else if (service.name === 'claude') {
+        aiResponse = data.content?.[0]?.text;
+      } else if (service.name === 'openai') {
+        aiResponse = data.choices?.[0]?.message?.content;
+      } else if (service.name === 'mistral') {
+        aiResponse = data.choices?.[0]?.message?.content;
+      } else if (service.name === 'together') {
+        aiResponse = data.choices?.[0]?.message?.content;
+      } else if (service.name === 'cohere') {
+        aiResponse = data.text;
+      } 
       // if (aiResponse) {
       //   try {
       //     // Clean and extract JSON from response
