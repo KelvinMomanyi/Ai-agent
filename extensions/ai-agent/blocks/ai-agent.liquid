@@ -85,14 +85,19 @@
       {% comment %} <p id="chatbot-price" style="font-weight: bold; font-size: 1.2rem; margin-bottom: 10px;"></p> {% endcomment %}
       <div style="display:flex; flex-direction:row; gap:5px">
         <p class="cb-price" id="chatbot-currency">{{ shop.currency  }}</p>
-        <p id="chatbot-price" style="font-weight: bold; font-size: 1.2rem; margin-bottom: 10px;"></p>
+        <p id="chatbot-price" ></p>
       </div>
       <p id="chatbot-text" class="cb-text"></p>
-      <form method="POST" action="/cart/add">
+      {% comment %} <form method="POST" action="/cart/add">
         <input type="hidden" name="id" id="upsell-variant-id" />
-        <input type="hidden" name="productName" value="" />
+        <input type="hidden" name="quantity" value="1" />
         <button type="submit" class="cb-add-to-cart-btn">Add to Cart</button>
-      </form>
+      </form> {% endcomment %}
+      <form method="POST" action="/cart/add" onsubmit="handleSubmit(event, this)">
+        <input type="hidden" name="id" id="upsell-variant-id" value="YOUR_VARIANT_ID_HERE" />
+        <input type="hidden" name="quantity" value="1" />
+        <button type="submit" class="cb-add-to-cart-btn">Add to Cart</button>
+    </form>
     </div>
   </div>
 </div>
@@ -150,7 +155,8 @@
 /* Image Section */
 .cb-image-section {
   flex: 1;
-  background-color: #f9f9f9;
+  background-color: ;
+  background: {{ block.settings.image_section_Background_color | default: '#f9f9f9' }};
   display: flex;
   align-items: center;
   justify-content: center;
@@ -175,25 +181,33 @@
 
 .cb-info-section h3 {
   margin: 0 0 10px;
-  font-size: 1.5rem;
+  font-size:{{ block.settings.modal_title_fontSize | default: 16 }}px;
   font-weight: 600;
+  color: {{ block.settings.modal_title_color | default: '#333' }};
 }
 
 .cb-info-section .cb-price {
   font-weight: bold; 
-  font-size: 1.2rem;
+  font-size: {{ block.settings.modal_price_fontSize | default: 16 }}px;
   margin-bottom: 10px;
+  color: {{ block.settings.modal_price_color | default: '#333' }};
 }
-
+.cb-info-section #chatbot-price {
+  font-size: {{ block.settings.modal_price_fontSize | default: 16 }}px;
+  color: {{ block.settings.modal_price_color | default: '#333' }};
+}
 .cb-info-section .cb-text {
   margin-bottom: 20px;
   color: #555;
+  font-size:{{ block.settings.modal_text_fontSize | default: 16 }}px;
+  margin-bottom: 10px;
+  color: {{ block.settings.modal_text_color | default: '#555' }};
 }
 
 /* Add to Cart Button */
 .cb-add-to-cart-btn {
-  background-color: #000;
-  color: #fff;
+  background-color:{{ block.settings.modal_button_color | default: '#000' }};;
+  color:{{ block.settings.modal_Button_text_color | default: '#FFF' }};;
   padding: 12px 24px;
   font-size: 1rem;
   border: none;
@@ -633,7 +647,8 @@ document.addEventListener('submit', function (e) {
 
       const formData = new FormData(form);
       const postData = new URLSearchParams(formData);
-
+    
+      
       // Send form manually (if you prevented default)
       const response = await fetch(form.action, {
         method: form.method,
@@ -645,11 +660,14 @@ document.addEventListener('submit', function (e) {
 
       try {
         const json = await response.json();
+        // ✅ ADD DELAY HERE - Wait before triggering upsell
+      setTimeout(() => {
         onCartAddIntercept(json, {
           source: 'form',
           productId: formData.get("id"),
           quantity: formData.get("quantity"),
         });
+      }, 500);
 
       } catch (e) {
         console.warn("❌ Failed to parse cart/add response", e);
@@ -877,6 +895,25 @@ form.addEventListener('submit', () => {
 // Place this in a <script> tag or separate JS file loaded in your Shopify theme
 
 
+
+
+  function handleSubmit(event, form) {
+    const btn = form.querySelector('.cb-add-to-cart-btn');
+    const originalText = btn.innerHTML;
+    
+    // Show loading
+    btn.innerHTML = 'Adding...';
+    btn.disabled = true;
+    
+    // Reset after form submission completes
+    setTimeout(() => {
+        btn.innerHTML = '✓ Added!';
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }, 3000);
+    }, 2000);
+}
 </script>
 
 {% schema %}
@@ -892,6 +929,12 @@ form.addEventListener('submit', () => {
       "default": "#ffffff"
     },
     {
+      "type": "color",
+      "id": "image_section_Background_color",
+      "label": "Image Section Background Color",
+      "default": "#ffffff"
+    },
+    {
       "type": "range",
       "id": "modal_border_radius",
       "label": "Border Radius",
@@ -900,7 +943,68 @@ form.addEventListener('submit', () => {
       "step": 1,
       "unit": "px",
       "default": 12
+    },
+    {
+      "type": "color",
+      "id": "modal_title_color",
+      "label": "Title Color",
+      "default": "#333333"
+    },
+    {
+      "type": "range",
+      "id": "modal_title_fontSize",
+      "label": "Modal Title Font Size",
+      "min": 0,
+      "max": 50,
+      "step": 1,
+      "unit": "px",
+      "default": 16
+    },
+    {
+      "type": "color",
+      "id": "modal_price_color",
+      "label": "Title Color",
+      "default": "#333333"
+    },
+    {
+      "type": "range",
+      "id": "modal_price_fontSize",
+      "label": "Price Font Size",
+      "min": 0,
+      "max": 50,
+      "step": 1,
+      "unit": "px",
+      "default": 14
+    },
+    {
+      "type": "color",
+      "id": "modal_text_color",
+      "label": "Title Color",
+      "default": "#555"
+    },
+    {
+      "type": "range",
+      "id": "modal_text_fontSize",
+      "label": "Text Font Size",
+      "min": 0,
+      "max": 50,
+      "step": 1,
+      "unit": "px",
+      "default": 16
+    },
+    {
+      "type": "color",
+      "id": "modal_button_color",
+      "label": "Button Background Color",
+      "default": "#000"
+    },
+    {
+      "type": "color",
+      "id": "modal_Button_text_color",
+      "label": "Button Title Color",
+      "default": "#FFF"
     }
+    
     ]
   }
 {% endschema %}

@@ -3,7 +3,7 @@
 client_id = "b314197727859b8c244255e176f8b2af"
 name = "ai-agent"
 handle = "ai-agent-21"
-application_url = "https://maldives-features-emails-pen.trycloudflare.com"
+application_url = "https://golden-garmin-associated-psi.trycloudflare.com"
 embedded = true
 
 [build]
@@ -17,9 +17,9 @@ scopes = "read_orders,read_products"
 
 [auth]
 redirect_urls = [
-  "https://maldives-features-emails-pen.trycloudflare.com/auth/callback",
-  "https://maldives-features-emails-pen.trycloudflare.com/auth/shopify/callback",
-  "https://maldives-features-emails-pen.trycloudflare.com/api/auth/callback"
+  "https://golden-garmin-associated-psi.trycloudflare.com/auth/callback",
+  "https://golden-garmin-associated-psi.trycloudflare.com/auth/shopify/callback",
+  "https://golden-garmin-associated-psi.trycloudflare.com/api/auth/callback"
 ]
 
 [webhooks]
@@ -38,7 +38,7 @@ api_version = "2025-04"
   uri = "/webhooks/orders/create"
 
 [app_proxy]
-url = "https://maldives-features-emails-pen.trycloudflare.com/api/upsell"
+url = "https://golden-garmin-associated-psi.trycloudflare.com/api/upsell"
 subpath = "upsell"
 prefix = "apps"
 
