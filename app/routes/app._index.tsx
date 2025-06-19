@@ -53,6 +53,23 @@ export default function Index() {
             </Box>
 
             <Box>
+              <InlineStack gap="300">
+                <Button url="app/analytics">View Analytics</Button>
+              </InlineStack>
+            </Box>
+          </BlockStack>
+        </Card>
+      </Layout.Section>
+
+      <Layout.Section>
+        <Card>
+          <BlockStack gap="400">
+            <Box>
+              <Text as="h2" variant="headingMd">
+                Key Features
+              </Text>
+            </Box>
+            <Box>
               <List>
                 <List.Item>
                   Automatically display cross-sell offers based on what customers are shopping.
@@ -63,9 +80,21 @@ export default function Index() {
                 <List.Item>
                   Track added revenue with real-time AOV analytics.
                 </List.Item>
+                <List.Item>
+                  AI-powered product matching for higher conversion rates.
+                </List.Item>
+                <List.Item>
+                  Seamless integration with your existing theme design.
+                </List.Item>
               </List>
             </Box>
+          </BlockStack>
+        </Card>
+      </Layout.Section>
 
+      <Layout.Section>
+        <Card>
+          <BlockStack gap="400">
             <Box>
               <Text as="h2" variant="headingMd">
                 Quick Setup Guide
@@ -73,30 +102,53 @@ export default function Index() {
               <Text as="p" variant="bodyMd" tone="subdued">
                 Get AOVBoost running on your store in 3 simple steps:
               </Text>
+            </Box>
+            <Box>
               <List type="number">
                 <List.Item>
-                  Go to your Shopify admin → Online Store → Themes
+                  <Text as="span" variant="bodyMd" fontWeight="semibold">Access Theme Editor:</Text> Go to your Shopify admin → Online Store → Themes
                 </List.Item>
                 <List.Item>
-                  Click "Customize" on your active theme
+                  <Text as="span" variant="bodyMd" fontWeight="semibold">Customize Theme:</Text> Click "Customize" on your active theme
                 </List.Item>
                 <List.Item>
-                  Add AOVBoost sections to your desired pages:
-                  <List>
-                    <List.Item>Homepage - for featured product recommendations</List.Item>
-                    <List.Item>Product pages - for related product upsells</List.Item>
-                    <List.Item>Collection pages - for cross-category suggestions</List.Item>
-                    <List.Item>Cart page - for last-minute add-ons</List.Item>
-                  </List>
+                  <Text as="span" variant="bodyMd" fontWeight="semibold">Add AOVBoost Sections:</Text> Use the "Add section" option to place AOVBoost on your desired pages
                 </List.Item>
               </List>
             </Box>
+          </BlockStack>
+        </Card>
+      </Layout.Section>
 
+      <Layout.Section>
+        <Card>
+          <BlockStack gap="400">
             <Box>
-              <InlineStack gap="300">
-                <Button primary>Set Up AOVBoost</Button>
-                <Button url="/analytics">View Analytics</Button>
-              </InlineStack>
+              <Text as="h2" variant="headingMd">
+                Recommended Page Placements
+              </Text>
+              <Text as="p" variant="bodyMd" tone="subdued">
+                Choose where to display recommendations for maximum impact:
+              </Text>
+            </Box>
+            <Box>
+              <List>
+                <List.Item>
+                  <Text as="span" variant="bodyMd" fontWeight="semibold">Homepage:</Text> Featured product recommendations to showcase popular items
+                </List.Item>
+                <List.Item>
+                  <Text as="span" variant="bodyMd" fontWeight="semibold">Product Pages:</Text> Related product upsells and complementary items
+                </List.Item>
+                <List.Item>
+                  <Text as="span" variant="bodyMd" fontWeight="semibold">Collection Pages:</Text> Cross-category suggestions to expand browsing
+                </List.Item>
+                <List.Item>
+                  <Text as="span" variant="bodyMd" fontWeight="semibold">Cart Page:</Text> Last-minute add-ons before checkout
+                </List.Item>
+                <List.Item>
+                  <Text as="span" variant="bodyMd" fontWeight="semibold">Checkout:</Text> Final upsell opportunities (premium feature)
+                </List.Item>
+              </List>
             </Box>
           </BlockStack>
         </Card>
