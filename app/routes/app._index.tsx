@@ -67,7 +67,36 @@ export default function Index() {
             </Box>
 
             <Box>
-              <Button primary>Set Up AOVBoost</Button>
+              <Text as="h2" variant="headingMd">
+                Quick Setup Guide
+              </Text>
+              <Text as="p" variant="bodyMd" tone="subdued">
+                Get AOVBoost running on your store in 3 simple steps:
+              </Text>
+              <List type="number">
+                <List.Item>
+                  Go to your Shopify admin → Online Store → Themes
+                </List.Item>
+                <List.Item>
+                  Click "Customize" on your active theme
+                </List.Item>
+                <List.Item>
+                  Add AOVBoost sections to your desired pages:
+                  <List>
+                    <List.Item>Homepage - for featured product recommendations</List.Item>
+                    <List.Item>Product pages - for related product upsells</List.Item>
+                    <List.Item>Collection pages - for cross-category suggestions</List.Item>
+                    <List.Item>Cart page - for last-minute add-ons</List.Item>
+                  </List>
+                </List.Item>
+              </List>
+            </Box>
+
+            <Box>
+              <InlineStack gap="300">
+                <Button primary>Set Up AOVBoost</Button>
+                <Button url="/analytics">View Analytics</Button>
+              </InlineStack>
             </Box>
           </BlockStack>
         </Card>
