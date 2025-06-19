@@ -306,11 +306,11 @@ async function fetchUpsellSuggestion() {
         return res.json();
       });
     } catch (cartError) {
-      console.error('Failed to fetch cart:', cartError);
+     // console.error('Failed to fetch cart:', cartError);
       throw new Error('Unable to load cart data');
     }
 
-    console.log('Cart data:', cart); // Debug cart structure
+  //  console.log('Cart data:', cart); // Debug cart structure
 
     // Validate cart data before sending
     if (!cart || !cart.items || !Array.isArray(cart.items)) {
@@ -342,7 +342,7 @@ async function fetchUpsellSuggestion() {
       try {
         // Try to get error details from response
         const errorData = await response.text();
-        console.error('Server error response:', errorData);
+      //  console.error('Server error response:', errorData);
         
         // Try to parse as JSON for structured error
         try {
@@ -353,7 +353,7 @@ async function fetchUpsellSuggestion() {
           if (errorData) errorMessage += ` - ${errorData}`;
         }
       } catch (e) {
-        console.error('Could not read error response:', e);
+      //  console.error('Could not read error response:', e);
       }
       
       throw new Error(errorMessage);
@@ -364,13 +364,13 @@ async function fetchUpsellSuggestion() {
     try {
       data = await response.json();
     } catch (parseError) {
-      console.error('Failed to parse response as JSON:', parseError);
+    //  console.error('Failed to parse response as JSON:', parseError);
       const responseText = await response.text();
-      console.error('Raw response:', responseText);
+    //  console.error('Raw response:', responseText);
       throw new Error('Invalid JSON response from server');
     }
 
-    console.log('Upsell API response:', data);
+   // console.log('Upsell API response:', data);
 
     // Validate response structure
     if (!data || !data.suggestion) {
@@ -424,14 +424,14 @@ async function fetchUpsellSuggestion() {
        // Try to parse as direct JSON first
        try {
          upsellData = JSON.parse(modelMessage);
-         console.log('Direct JSON parse successful');
+      //   console.log('Direct JSON parse successful');
        } catch (directParseError) {
-         console.log('Direct parse failed, trying regex extraction');
+      //   console.log('Direct parse failed, trying regex extraction');
          
          // Fallback to regex extraction
          const jsonMatch = modelMessage.match(/\{(?:[^{}]|{[^{}]*})*\}/);
          if (!jsonMatch) {
-           console.error('No JSON found in model response:', modelMessage);
+        //   console.error('No JSON found in model response:', modelMessage);
            throw new Error('No valid JSON found in model response');
          }
  
@@ -441,18 +441,18 @@ async function fetchUpsellSuggestion() {
            .replace(/,(\s*[}\]])/g, '$1')
            .trim();
  
-         console.log('Extracted JSON:', cleanedJson);
+        // console.log('Extracted JSON:', cleanedJson);
          upsellData = JSON.parse(cleanedJson);
        }
      } else if (typeof modelMessage === 'object' && modelMessage !== null) {
-       console.log('Processing as object (fallback response)');
+      // console.log('Processing as object (fallback response)');
        upsellData = modelMessage;
      } else {
-       console.error('Unexpected modelMessage format:', typeof modelMessage, modelMessage);
+      // console.error('Unexpected modelMessage format:', typeof modelMessage, modelMessage);
        throw new Error(`Invalid suggestion format: ${typeof modelMessage}`);
      }
  
-     console.log('Final parsed upsell data:', upsellData);
+    // console.log('Final parsed upsell data:', upsellData);
  
      // Validate required fields
      if (!upsellData || !upsellData.id) {
@@ -465,8 +465,8 @@ async function fetchUpsellSuggestion() {
        title: upsellData.title,
        source: typeof modelMessage === 'object' ? 'fallback' : 'ai'
      });  } catch (processingError) {
-      console.error('Error processing upsell suggestion:', processingError);
-      console.error('Original modelMessage:', modelMessage);
+    ///  console.error('Error processing upsell suggestion:', processingError);
+    //  console.error('Original modelMessage:', modelMessage);
       throw processingError;
     }
   } catch (err) {
@@ -477,7 +477,7 @@ async function fetchUpsellSuggestion() {
     //console.error('Error type:', err.constructor.name);
     //console.error('Error message:', err.message);
     //console.error('Stack trace:', err.stack);
-    console.groupEnd();
+  //  console.groupEnd();
     
     // Optional: Show user-friendly error
     // showChatbotModal({
@@ -498,15 +498,15 @@ async function pollCart() {
       break; // Success, exit retry loop
     } catch (error) {
       retryCount++;
-      console.warn(`Upsell attempt ${retryCount} failed:`, error.message);
+    //  console.warn(`Upsell attempt ${retryCount} failed:`, error.message);
       
       if (retryCount < maxRetries) {
         // Wait before retrying (exponential backoff)
         const delay = Math.pow(2, retryCount) * 1000;
-        console.log(`Retrying in ${delay}ms...`);
+    //    console.log(`Retrying in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       } else {
-        console.error('All upsell attempts failed');
+    //    console.error('All upsell attempts failed');
       }
     }
   }
@@ -520,7 +520,7 @@ async function checkUpsellEndpoint() {
     });
     return response.ok;
   } catch (error) {
-    console.warn('Upsell endpoint check failed:', error);
+  //  console.warn('Upsell endpoint check failed:', error);
     return false;
   }
 }
@@ -556,7 +556,7 @@ const numericId = gid.split("/").pop(); // "12345678901234"
 
 
 variantInput.value = numericId
-  console.log('Image URL:', message.image);
+//  console.log('Image URL:', message.image);
 
 
  
@@ -582,17 +582,17 @@ function closeChatbotModal() {
     const url = args[0];
 
     if (typeof url === 'string' && url.includes('/cart/add')) {
-      console.log('[Cart Alert] Add to cart triggered via fetch:', url);
+    //  console.log('[Cart Alert] Add to cart triggered via fetch:', url);
 
       // Use .clone() if you need to read the body here
       try {
         const clonedResponse = response.clone();
         const data = await clonedResponse.json();
-        console.log('[Cart Alert] Added item:', data);
+      //  console.log('[Cart Alert] Added item:', data);
         trackEvent('upsell_add_to_cart', { ...data })
         fetchUpsellSuggestion(); // Custom logic
       } catch (err) {
-        console.error('Error reading response:', err);
+      //  console.error('Error reading response:', err);
       }
     }
 
@@ -607,7 +607,7 @@ function closeChatbotModal() {
   XMLHttpRequest.prototype.open = function (method, url) {
     if (url.includes('/cart/add')) {
       this.addEventListener('load', function () {
-        console.log('[Cart Alert - XHR] Add to cart triggered via XMLHttpRequest:', url);
+      //  console.log('[Cart Alert - XHR] Add to cart triggered via XMLHttpRequest:', url);
         fetchUpsellSuggestion(); // custom logic
       });
     }
@@ -619,17 +619,17 @@ function closeChatbotModal() {
 document.addEventListener('submit', function (e) {
   const form = e.target;
   if (form.action.includes('/cart/add')) {
-    console.log('[Cart Alert - Form] Add to cart triggered via form submission');
+  //  console.log('[Cart Alert - Form] Add to cart triggered via form submission');
   
    // fetchUpsellSuggestion();   //Changed cart function
   }
 });
 
 (function () {
-  console.log('[🛒 Intercepting cart/add]');
+//  console.log('[🛒 Intercepting cart/add]');
 
   function onCartAddIntercept(data, metadata = {}) {
-    console.log('🟢 Cart Add Intercepted:', data, metadata);
+  //  console.log('🟢 Cart Add Intercepted:', data, metadata);
     // 👉 Do your own logic: upsell, show modal, analytics, etc.
   }
 
@@ -670,7 +670,7 @@ document.addEventListener('submit', function (e) {
       }, 500);
 
       } catch (e) {
-        console.warn("❌ Failed to parse cart/add response", e);
+    //    console.warn("❌ Failed to parse cart/add response", e);
       }
     }
   });
@@ -704,7 +704,7 @@ document.addEventListener('submit', function (e) {
             onCartAddIntercept(json, { source: "xhr", url, body });
           }
         } catch (e) {
-          console.warn("❌ Error parsing XHR cart/add", e);
+      //    console.warn("❌ Error parsing XHR cart/add", e);
         }
       }
     });
@@ -779,7 +779,7 @@ async function fetchCartState() {
     if (!res.ok) throw new Error('Failed to fetch cart');
     return await res.json();
   } catch (err) {
-    console.error('Error fetching cart:', err);
+  //  console.error('Error fetching cart:', err);
     return null;
   }
 }
@@ -794,7 +794,7 @@ function isCartChanged(oldCart, newCart) {
 
 // What to do when cart changes
 function onCartChange(cart) {
-  console.log('Cart changed:', cart);
+//  console.log('Cart changed:', cart);
   fetchUpsellSuggestion()
   // TODO: Your upsell logic, UI update, etc.
 }
