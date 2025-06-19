@@ -1148,7 +1148,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
   const services = [
     {
       name: 'gemini',
-    //  url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`,
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       headers: { 'Content-Type': 'application/json' },
       body: {
         contents: [{ parts: [{ text: prompt }] }],
@@ -1160,7 +1160,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
     },
     {
       name: 'groq',
-    //  url: 'https://api.groq.com/openai/v1/chat/completions',
+      url: 'https://api.groq.com/openai/v1/chat/completions',
       headers: {
         'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
         'Content-Type': 'application/json'
@@ -1183,7 +1183,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
     }, 
     {
      name: 'mistral',
-   //  url: 'https://api.mistral.ai/v1/chat/completions',
+     url: 'https://api.mistral.ai/v1/chat/completions',
      headers: {
       'Authorization': `Bearer ${process.env.MISTRAL_API_KEY}`,
       'Content-Type': 'application/json'
@@ -1208,7 +1208,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
      },
     {
       name: 'cohere',
-    //  url: 'https://api.cohere.com/v1/chat',
+      url: 'https://api.cohere.com/v1/chat',
       headers: {
         'Authorization': `Bearer ${process.env.COHERE_API_KEY}`,
         'Content-Type': 'application/json'
@@ -1223,7 +1223,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
     },
     {
       name: 'together',
-    //  url: 'https://api.together.xyz/v1/chat/completions',
+      url: 'https://api.together.xyz/v1/chat/completions',
       headers: {
         'Authorization': `Bearer ${process.env.TOGETHER_API_KEY}`,
         'Content-Type': 'application/json'
