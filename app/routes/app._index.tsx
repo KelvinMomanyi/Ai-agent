@@ -51,12 +51,6 @@ export default function Index() {
                 <Badge>Shopify Native</Badge>
               </InlineStack>
             </Box>
-
-            <Box>
-              <InlineStack gap="300">
-                <Link to="/app/analytics">View Analytics</Link>
-              </InlineStack>
-            </Box>
           </BlockStack>
         </Card>
       </Layout.Section>
@@ -144,9 +138,6 @@ export default function Index() {
                 </List.Item>
                 <List.Item>
                   <Text as="span" variant="bodyMd" fontWeight="semibold">Cart Page:</Text> Last-minute add-ons before checkout
-                </List.Item>
-                <List.Item>
-                  <Text as="span" variant="bodyMd" fontWeight="semibold">Checkout:</Text> Final upsell opportunities (premium feature)
                 </List.Item>
               </List>
             </Box>
