@@ -17,13 +17,17 @@ scopes = "read_orders,read_products"
 
 [auth]
 redirect_urls = [
-  "https://golden-garmin-associated-psi.trycloudflare.com/auth/callback",
-  "https://golden-garmin-associated-psi.trycloudflare.com/auth/shopify/callback",
-  "https://golden-garmin-associated-psi.trycloudflare.com/api/auth/callback"
+  "https://ai-agent-plum-eight.vercel.app/auth/callback",
+  "https://ai-agent-plum-eight.vercel.app/auth/shopify/callback",
+  "https://ai-agent-plum-eight.vercel.app/api/auth/callback"
 ]
 
 [webhooks]
 api_version = "2025-04"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  uri = "https://ai-agent-plum-eight.vercel.app/webhooks/app/privacy"
 
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
@@ -38,7 +42,7 @@ api_version = "2025-04"
   uri = "/webhooks/orders/create"
 
 [app_proxy]
-url = "https://golden-garmin-associated-psi.trycloudflare.com/api/upsell"
+url = "https://ai-agent-plum-eight.vercel.app/api/upsell"
 subpath = "upsell"
 prefix = "apps"
 
