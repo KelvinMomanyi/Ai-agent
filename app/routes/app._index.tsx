@@ -28,12 +28,49 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function Index() {
   
   return (
-    <Page>
-       <Layout>
-        <Layout.Section>
-          <Text as="h2" variant="headingMd">Chatbot</Text>
-        </Layout.Section>
-      </Layout>  
-    </Page>
+    <Page title="Welcome to AOVBoost">
+    <Layout>
+      <Layout.Section>
+        <Card>
+          <BlockStack gap="500">
+            <Box>
+              <Text as="h1" variant="headingXl">
+                Boost Your Average Order Value with AI
+              </Text>
+              <Text as="p" variant="bodyMd" tone="subdued">
+                AOVBoost uses AI to recommend smart cross-sell and upsell products — no manual setup required.
+              </Text>
+            </Box>
+
+            <Box>
+              <InlineStack gap="400">
+                <Badge status="success">Live AI Recommendations</Badge>
+                <Badge>Cart Integration</Badge>
+                <Badge>Shopify Native</Badge>
+              </InlineStack>
+            </Box>
+
+            <Box>
+              <List>
+                <List.Item>
+                  Automatically display cross-sell offers based on what customers are shopping.
+                </List.Item>
+                <List.Item>
+                  Works out of the box on product and cart pages — no code needed.
+                </List.Item>
+                <List.Item>
+                  Track added revenue with real-time AOV analytics.
+                </List.Item>
+              </List>
+            </Box>
+
+            <Box>
+              <Button primary>Set Up AOVBoost</Button>
+            </Box>
+          </BlockStack>
+        </Card>
+      </Layout.Section>
+    </Layout>
+  </Page>
   );
 }

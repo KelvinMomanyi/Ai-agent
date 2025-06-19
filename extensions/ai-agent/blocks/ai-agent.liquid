@@ -419,7 +419,7 @@ async function fetchUpsellSuggestion() {
    try {
      // Handle different possible formats
      if (typeof modelMessage === 'string') {
-       console.log('Processing as string (AI response)');
+      // console.log('Processing as string (AI response)');
        
        // Try to parse as direct JSON first
        try {
@@ -470,7 +470,7 @@ async function fetchUpsellSuggestion() {
       throw processingError;
     }
   } catch (err) {
-    console.error('Upsell API error:', err);
+   // console.error('Upsell API error:', err);
     
     // Log detailed error info for debugging
     //console.group('Upsell Error Details');
