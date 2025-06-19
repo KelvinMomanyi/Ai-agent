@@ -54,7 +54,7 @@ export default function Index() {
 
             <Box>
               <InlineStack gap="300">
-                <Button url="app/analytics">View Analytics</Button>
+                <Link to="/app/analytics">View Analytics</Link>
               </InlineStack>
             </Box>
           </BlockStack>
