@@ -22,9 +22,9 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>AOVBoost</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+             Your AI Sales Agent for Smart Cross-Sells
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
@@ -39,18 +39,20 @@ export default function App() {
           </Form>
         )}
         <ul className={styles.list}>
-          <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
-          </li>
-          <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
-          </li>
-          <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
-          </li>
+            <li>
+              <strong>Smart product recommendations</strong>. Show relevant cross-sell and upsell products based on what customers are browsing or adding to cart.
+            </li>
+            <li>
+              <strong>Automatic placement on product and cart pages</strong>. Instantly display offers without editing your theme or configuring placement manually.
+            </li>
+            <li>
+              <strong>Real-time AOV tracking</strong>. Monitor how much extra revenue each cross-sell recommendation is generating.
+            </li>
+            <li>
+              <strong>Works seamlessly with your existing Shopify theme</strong>. No coding needed and fully responsive on desktop and mobile.
+            </li>
+          </ul>
+
         </ul>
       </div>
     </div>
