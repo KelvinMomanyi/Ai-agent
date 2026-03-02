@@ -544,7 +544,7 @@
 
 import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
-import { authenticate, unauthenticated } from '../shopify.server';
+import { authenticate } from '../shopify.server';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1334,24 +1334,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     const { cartItems } = await request.json();
-    const authContext = await authenticate.public.appProxy(request);
-    const { session } = authContext;
-    let admin = authContext.admin;
-
-    if (!admin && session?.shop) {
-      console.log(`Admin context missing from appProxy, attempting fallback for ${session.shop}`);
-      try {
-        const unauthContext = await unauthenticated.admin(session.shop);
-        admin = unauthContext.admin;
-      } catch (unauthError: any) {
-        console.error(`Fallback authentication failed for ${session.shop}:`, unauthError.message);
-      }
-    }
-
-    if (!admin) {
-      console.error("Admin context could not be established. Session:", !!session, "Shop:", session?.shop);
-      return json({ error: 'Authentication failed: Admin context unavailable' }, { status: 403, headers: corsHeaders });
-    }
+    const { session, admin } = await authenticate.public.appProxy(request);
 
     // Get products from Shopify
     const graphqlQuery = `
@@ -1383,13 +1366,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const productResponse = await admin.graphql(`#graphql\n${graphqlQuery}`);
     const result = await productResponse.json();
 
-    if ((result as any).errors) {
-      throw new Error(`GraphQL error: ${JSON.stringify((result as any).errors)}`);
-    }
-
-    if (!(result as any).data?.products) {
-      console.error("GraphQL response missing expected data structure:", result);
-      throw new Error("Invalid GraphQL response from Shopify: missing products data");
+    if (result.errors) {
+      throw new Error(`GraphQL error: ${JSON.stringify(result.errors)}`);
     }
 
     const products = result.data.products.edges.map(({ node }) => {
@@ -1419,7 +1397,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     return json({ suggestion }, { headers: corsHeaders });
 
-  } catch (error: any) {
+  } catch (error) {
     console.error("Upsell generation error:", {
       message: error.message,
       timestamp: new Date().toISOString()
