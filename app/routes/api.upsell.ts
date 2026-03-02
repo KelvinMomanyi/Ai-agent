@@ -47,10 +47,10 @@
 //                 }
 //               }
 //               `;
-        
+
 //         const productResponse = await admin.graphql(`#graphql\n${graphqlQuery}`);
 //         const result = await productResponse.json();
-        
+
 //         const products = result.data.products.edges.map(({ node }) => ({
 //         id: node.id,
 //         title: node.title,
@@ -84,7 +84,7 @@
 //         //     role: 'user',
 //         //     content: `Cart: ${JSON.stringify(cartItems)} Available products: ${JSON.stringify(products)}`,
 //         //   }
-          
+
 //         // ],
 //         messages: [
 //           {
@@ -93,7 +93,7 @@
 //               You are an AI sales agent. From the available products, suggest ONE upsell item that complements the cart contents.
 //               Respond in a friendly, persuasive marketing tone.
 //               Say something like: "Customers who bought [cart item] also loved [upsell product] because it perfectly complements their purchase."
-        
+
 //               In addition to the marketing message, return a JSON object with the following structure:
 //               {
 //                 "id": "[Variant ID of the upsell product]",
@@ -102,7 +102,7 @@
 //                 "price": "[Price as a number]",
 //                 "message": "[Persuasive upsell message]"
 //               }
-        
+
 //               This will be used to show the upsell product visually on the frontend. Keep the tone helpful and convincing, like a seasoned salesperson offering great advice.
 //             `,
 //           },
@@ -249,7 +249,7 @@
 //         //         You are an AI sales agent. From the available products, suggest ONE upsell item that complements the cart contents.
 //         //         Respond in a friendly, persuasive marketing tone.
 //         //         Say something like: "Customers who bought [cart item] also loved [upsell product] because it perfectly complements their purchase."
-          
+
 //         //         In addition to the marketing message, return a JSON object with the following structure:
 //         //         {
 //         //           "id": "[Variant ID of the upsell product]",
@@ -258,7 +258,7 @@
 //         //           "price": "[Price as a number]",
 //         //           "message": "[Persuasive upsell message]"
 //         //         }
-          
+
 //         //         This will be used to show the upsell product visually on the frontend. Keep the tone helpful and convincing, like a seasoned salesperson offering great advice.
 //         //       `,
 //         //     },
@@ -272,7 +272,7 @@
 //             role: 'system',
 //             content: `
 //               You are an experienced and persuasive sales agent for a high-end online store.
-        
+
 //               Your goal is to recommend ONE highly relevant upsell product from the available list that truly complements the items in the customer's cart.
 //               Write a very convincing marketing message on why the recommended product is a perfect complement what is already in the cart
 //               Your response must:
@@ -281,7 +281,7 @@
 //               - Highlight benefits, compatibility, or how it enhances the cart item(s).
 //               - Use sales techniques such as social proof, urgency, or value ("Customers love this with...").
 //               - Sound like a real salesperson — not a robot.
-        
+
 //               ✅ Format your reply **as a single JSON object**, like this:
 //               {
 //                 "id": "[Variant ID of the upsell product]",
@@ -290,12 +290,12 @@
 //                 "price": "[Price as a number]",
 //                 "message": "[Persuasive and emotionally engaging upsell message]"
 //               }
-        
+
 //               ❗Do NOT suggest unrelated products. Only choose products that clearly complement the cart contents based on title, category, or image.
-        
+
 //               Example message:
 //               "If you’re picking up the [cart item], don’t miss out on the [upsell product] — it’s a perfect match that adds style, comfort, or function. Customers who bought this combo absolutely love the pairing!"
-        
+
 //               Focus on helpful upselling, not hard selling. Be human. Be smart.
 //             `,
 //           },
@@ -332,11 +332,11 @@
 // // Fallback function for when AI is unavailable
 // const generateFallbackUpsell = (products, cartItems) => {
 //   if (products.length === 0) return null;
-  
+
 //   // Simple logic: suggest first available product
 //   const upsellProduct = products[0];
 //   const cartItemNames = cartItems.map(item => item.title || item.product_title).join(', ');
-  
+
 //   return {
 //     id: upsellProduct.id,
 //     title: upsellProduct.title,
@@ -354,16 +354,16 @@
 //     title: p.title,
 //     price: p.price
 //   }));
-  
+
 //   const essentialCart = cartItems.map(item => ({
 //     title: item.title || item.product_title,
 //     quantity: item.quantity || 1
 //   }));
 
-  
+
 
 //   const prompt = `You are a sales expert. Cart: ${JSON.stringify(essentialCart)}. Available: ${JSON.stringify(limitedProducts)}. 
-  
+
 //   Suggest ONE relevant upsell product. Return ONLY this JSON:
 //   {"id":"variant_id","title":"product_name","price":"price","image":"product_image", message":"compelling_sales_message"}`;
 
@@ -380,7 +380,7 @@
 //         stream: false
 //       }
 //     },
-    
+
 //     // 2. Hugging Face (free tier)
 //     {
 //       name: 'huggingface',
@@ -391,7 +391,7 @@
 //       },
 //       body: { inputs: prompt, parameters: { max_new_tokens: 200 } }
 //     },
-    
+
 //     // 3. Google Gemini (generous free tier)
 //     {
 //       name: 'gemini',
@@ -407,7 +407,7 @@
 //   for (const service of services) {
 //     try {
 //       console.log(`Trying ${service.name} AI service...`);
-      
+
 //       const response = await fetch(service.url, {
 //         method: 'POST',
 //         headers: service.headers,
@@ -431,7 +431,7 @@
 //       } else if (service.name === 'gemini') {
 //         aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
 //       }
-   
+
 //       return aiResponse
 //       // if (aiResponse) {
 //       //   // Try to parse JSON from AI response
@@ -511,7 +511,7 @@
 
 //     // Try AI services, fallback to simple logic
 //     let suggestion = await generateAIUpsell(cartItems, products);
-    
+
 //     if (!suggestion) {
 //       console.log('All AI services failed, using fallback logic');
 //       suggestion = generateFallbackUpsell(products, cartItems);
@@ -528,7 +528,7 @@
 //       message: error.message,
 //       timestamp: new Date().toISOString()
 //     });
-    
+
 //     return json({ 
 //       error: 'Service temporarily unavailable',
 //       suggestion: null 
@@ -543,7 +543,7 @@
 
 
 import { json } from '@remix-run/node';
-import type { ActionFunctionArgs } from '@remix-run/node';
+import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { authenticate } from '../shopify.server';
 
 const corsHeaders = {
@@ -552,14 +552,23 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  return json({ message: "Use POST method to get upsell suggestion." }, { headers: corsHeaders });
+};
+
+
 // Fallback function for when AI is unavailable
 // const generateFallbackUpsell = (products, cartItems) => {
 //   if (products.length === 0) return null;
-  
+
 //   // Simple logic: suggest first available product
 //   const upsellProduct = products[0];
 //   const cartItemNames = cartItems.map(item => item.title || item.product_title).join(', ');
-  
+
 //   return {
 //     id: upsellProduct.id,
 //     title: upsellProduct.title,
@@ -587,7 +596,7 @@ const generateFallbackUpsell = (products, cartItems) => {
   // Filter out products already in cart
   const cartProductIds = new Set();
   const cartProductTitles = new Set();
-  
+
   cartItems.forEach(item => {
     if (item.variant_id) cartProductIds.add(item.variant_id);
     if (item.id) cartProductIds.add(item.id);
@@ -598,7 +607,7 @@ const generateFallbackUpsell = (products, cartItems) => {
   const availableProducts = products.filter(product => {
     if (cartProductIds.has(product.id)) return false;
     const productTitleLower = product.title.toLowerCase();
-    return !Array.from(cartProductTitles).some(cartTitle => 
+    return !Array.from(cartProductTitles).some(cartTitle =>
       productTitleLower.includes(cartTitle) || cartTitle.includes(productTitleLower)
     );
   });
@@ -612,48 +621,48 @@ const generateFallbackUpsell = (products, cartItems) => {
       () => {
         const cartTotal = cartItems.reduce((sum, item) => sum + (parseFloat(item.price) || 0), 0);
         const targetPriceRange = cartTotal * 0.3; // 30% of cart value
-        
+
         const priceMatches = availableProducts.filter(p => {
           const price = parseFloat(p.price) || 0;
           return price >= targetPriceRange * 0.5 && price <= targetPriceRange * 1.5;
         });
-        
-        return priceMatches.length > 0 ? 
-          priceMatches[Math.floor(Math.random() * priceMatches.length)] : 
+
+        return priceMatches.length > 0 ?
+          priceMatches[Math.floor(Math.random() * priceMatches.length)] :
           availableProducts[Math.floor(Math.random() * availableProducts.length)];
       },
-      
+
       // Strategy 2: Category/keyword matching (40% chance)
       () => {
         const cartKeywords = cartItems.flatMap(item => {
           const title = (item.title || item.product_title || '').toLowerCase();
           return title.split(/[\s\-_,]+/).filter(word => word.length > 3);
         });
-        
+
         if (cartKeywords.length > 0) {
           const keywordMatches = availableProducts.filter(product => {
             const productTitle = product.title.toLowerCase();
-            return cartKeywords.some(keyword => 
-              productTitle.includes(keyword) || 
+            return cartKeywords.some(keyword =>
+              productTitle.includes(keyword) ||
               // Check for related terms
               (keyword.includes('coffee') && productTitle.includes('mug')) ||
               (keyword.includes('phone') && productTitle.includes('case')) ||
               (keyword.includes('book') && productTitle.includes('bookmark'))
             );
           });
-          
+
           if (keywordMatches.length > 0) {
             return keywordMatches[Math.floor(Math.random() * keywordMatches.length)];
           }
         }
-        
+
         return availableProducts[Math.floor(Math.random() * availableProducts.length)];
       },
-      
+
       // Strategy 3: Random selection (30% chance)
       () => availableProducts[Math.floor(Math.random() * availableProducts.length)]
     ];
-    
+
     // Weighted random strategy selection
     const rand = Math.random();
     if (rand < 0.3) return strategies[0](); // Price-based
@@ -662,13 +671,13 @@ const generateFallbackUpsell = (products, cartItems) => {
   };
 
   const upsellProduct = selectSmartProduct(availableProducts, cartItems);
-  
+
   // AI-like message generation with multiple templates and variations
   const generateAIMessage = (upsellProduct, cartItems) => {
     const cartItemNames = cartItems.map(item => item.title || item.product_title);
     const primaryItem = cartItemNames[0] || 'your selection';
     const productName = upsellProduct.title;
-    
+
     // Message templates with variations
     const messageTemplates = [
       // Completion-focused messages
@@ -678,7 +687,7 @@ const generateFallbackUpsell = (products, cartItems) => {
         `Complete your setup with ${productName}! It pairs incredibly well with ${primaryItem} and you'll thank yourself later.`,
         `Since you're getting ${primaryItem}, you'll definitely want ${productName} - trust me, it makes all the difference!`
       ],
-      
+
       // Social proof messages  
       [
         `Here's what's interesting - 89% of customers who bought ${primaryItem} also grabbed ${productName}. There's definitely a reason for that!`,
@@ -686,7 +695,7 @@ const generateFallbackUpsell = (products, cartItems) => {
         `Fun fact: customers who buy both ${primaryItem} and ${productName} together rate their purchase 40% higher. Just saying!`,
         `This is popular: most people who get ${primaryItem} end up coming back for ${productName}. Save yourself the trip!`
       ],
-      
+
       // Problem-solving messages
       [
         `One thing I've noticed - people love their ${primaryItem}, but always wish they had ${productName} to go with it. Problem solved!`,
@@ -694,7 +703,7 @@ const generateFallbackUpsell = (products, cartItems) => {
         `You know what would make your ${primaryItem} even better? ${productName}. It's like the upgrade you didn't know you needed.`,
         `Plot twist: ${productName} actually makes ${primaryItem} 10x more useful. Don't miss out on this combo!`
       ],
-      
+
       // Urgency/scarcity messages
       [
         `Heads up! ${productName} is in high demand right now, especially with ${primaryItem} buyers. Might want to grab it while it's here.`,
@@ -702,7 +711,7 @@ const generateFallbackUpsell = (products, cartItems) => {
         `Quick decision time: ${productName} is running low, but it's the perfect match for your ${primaryItem}. What do you think?`,
         `Before you checkout - ${productName} is almost gone and it's incredibly popular with ${primaryItem} customers. Your call!`
       ],
-      
+
       // Value-focused messages
       [
         `Here's the deal: getting ${productName} with your ${primaryItem} is like getting premium service for the price of standard. Smart move!`,
@@ -710,7 +719,7 @@ const generateFallbackUpsell = (products, cartItems) => {
         `Investment tip: ${productName} actually extends the life of your ${primaryItem} by 3x. That's some serious value right there.`,
         `Money-smart move: ${productName} with ${primaryItem} saves you from future headaches and extra costs. Future you will thank present you!`
       ],
-      
+
       // Personalized/conversational messages
       [
         `Okay, real talk - I see you've got ${primaryItem} in there. ${productName} would make that setup absolutely perfect. Just trust me on this one!`,
@@ -719,11 +728,11 @@ const generateFallbackUpsell = (products, cartItems) => {
         `Plot twist time! ${productName} isn't just an add-on to ${primaryItem} - it's the secret sauce that makes everything better.`
       ]
     ];
-    
+
     // Select random template category and random message within it
     const templateCategory = messageTemplates[Math.floor(Math.random() * messageTemplates.length)];
     const message = templateCategory[Math.floor(Math.random() * templateCategory.length)];
-    
+
     return message;
   };
 
@@ -737,7 +746,7 @@ const generateFallbackUpsell = (products, cartItems) => {
       `Behavioral analysis suggests this combination addresses complete customer use-case scenario.`,
       `Advanced recommendation system flagged this as optimal cross-sell opportunity based on contextual relevance.`
     ];
-    
+
     return reasoningOptions[Math.floor(Math.random() * reasoningOptions.length)];
   };
 
@@ -779,17 +788,17 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
     cartItems.forEach(item => {
       const price = parseFloat(item.price) || 0;
       analysis.totalValue += price;
-      
+
       if (price < analysis.priceRange.min) analysis.priceRange.min = price;
       if (price > analysis.priceRange.max) analysis.priceRange.max = price;
-      
+
       const title = (item.title || item.product_title || '').toLowerCase();
-      
+
       // Extract keywords
       title.split(/[\s\-_,]+/).forEach(word => {
         if (word.length > 3) analysis.keywords.add(word);
       });
-      
+
       // Detect category hints
       if (title.includes('premium') || title.includes('luxury') || price > 100) {
         analysis.sentiment = 'premium';
@@ -802,72 +811,72 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
   };
 
   const cartAnalysis = analyzeCart(cartItems);
-  
+
   // AI-like product scoring
   const scoreProducts = (products, cartAnalysis) => {
     return products.map(product => {
       let score = Math.random() * 0.3 + 0.1; // Base randomness: 0.1-0.4
-      
+
       const productPrice = parseFloat(product.price) || 0;
       const productTitle = product.title.toLowerCase();
-      
+
       // Price compatibility scoring
       const priceRatio = productPrice / (cartAnalysis.totalValue || 1);
       if (priceRatio >= 0.1 && priceRatio <= 0.5) score += 0.3; // Sweet spot
-      
+
       // Keyword matching
       Array.from(cartAnalysis.keywords).forEach(keyword => {
         if (productTitle.includes(keyword)) score += 0.2;
       });
-      
+
       // Sentiment matching
       if (cartAnalysis.sentiment === 'premium' && (productTitle.includes('premium') || productPrice > 50)) {
         score += 0.2;
       } else if (cartAnalysis.sentiment === 'budget' && productPrice < 30) {
         score += 0.15;
       }
-      
+
       // Random boost for variety
       if (Math.random() < 0.1) score += 0.3; // 10% chance of random boost
-      
+
       return { ...product, aiScore: Math.min(score, 1.0) };
     });
   };
 
   const scoredProducts = scoreProducts(products, cartAnalysis);
-  
+
   // Select based on weighted probability
   const selectByAIScore = (scoredProducts) => {
     const totalScore = scoredProducts.reduce((sum, p) => sum + p.aiScore, 0);
     let random = Math.random() * totalScore;
-    
+
     for (const product of scoredProducts) {
       random -= product.aiScore;
       if (random <= 0) return product;
     }
-    
+
     return scoredProducts[0]; // Fallback
   };
 
   const selectedProduct = selectByAIScore(scoredProducts);
-  
+
   // Generate hyper-personalized message
   const generatePersonalizedMessage = (product, cartAnalysis, userBehavior) => {
     const timeOfDay = new Date().getHours();
     const dayOfWeek = new Date().getDay();
-    
+
     let contextualHook = '';
     if (timeOfDay < 12) contextualHook = 'Good morning! ';
     else if (timeOfDay > 18) contextualHook = 'Evening shopping? Smart! ';
     else if (dayOfWeek === 0 || dayOfWeek === 6) contextualHook = 'Weekend treat time! ';
-    
+
     const personalizedTemplates = [
       `${contextualHook}Based on your cart, I can tell you have great taste. ${product.title} would be the perfect addition - it's like it was made for someone with your style!`,
       `${contextualHook}Quick AI insight: customers with similar carts to yours are 92% more satisfied when they add ${product.title}. The data doesn't lie!`,
       `${contextualHook}Plot twist! My algorithms are practically screaming that ${product.title} belongs in your cart. Sometimes AI knows what you need before you do!`,
       `${contextualHook}Personalized rec incoming: ${product.title} has a 94% compatibility score with your current selection. That's almost unheard of!`
     ];
-    
+
     return personalizedTemplates[Math.floor(Math.random() * personalizedTemplates.length)];
   };
 
@@ -904,7 +913,7 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
 //     price: p.price,
 //     image: p.image?.src || p.image
 //   }));
-  
+
 //   const essentialCart = cartItems.map(item => ({
 //     title: item.title || item.product_title,
 //     quantity: item.quantity || 1
@@ -913,7 +922,7 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
 
 
 //   const prompt = `You are a sales expert. Cart: ${JSON.stringify(essentialCart)}. Available: ${JSON.stringify(limitedProducts)}. 
- 
+
 
 //   Suggest ONE relevant upsell product. Return ONLY this JSON:
 //   {"id":"variant_id","title":"product_name","price":"price","image":"product_image_url","message":"compelling_sales_message"}`;
@@ -933,7 +942,7 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
 //         stream: false
 //       }
 //     },
-    
+
 //     // 2. Hugging Face (free tier)
 //     {
 //       name: 'huggingface',
@@ -955,7 +964,7 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
 //         temperature: 0.7
 //       }
 //     },
-    
+
 //     // 3. Google Gemini (generous free tier)
 //     {
 //       name: 'gemini',
@@ -991,7 +1000,7 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
 //   for (const service of services) {
 //     try {
 //       console.log(`Trying ${service.name} AI service...`);
-      
+
 //       const response = await fetch(service.url, {
 //         method: 'POST',
 //         headers: service.headers,
@@ -1017,7 +1026,7 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
 //       }else if (service.name === 'groq') {
 //         aiResponse = data.choices?.[0]?.message?.content;
 //       }
-      
+
 
 //       // if (aiResponse) {
 //       //   // Try to parse JSON from AI response
@@ -1047,7 +1056,7 @@ const generateAIUpsell = async (cartItems, products) => {
   // 1. Extract cart product IDs and titles for filtering
   const cartProductIds = new Set();
   const cartProductTitles = new Set();
-  
+
   cartItems.forEach(item => {
     if (item.variant_id) cartProductIds.add(item.variant_id);
     if (item.id) cartProductIds.add(item.id);
@@ -1059,10 +1068,10 @@ const generateAIUpsell = async (cartItems, products) => {
   const availableProducts = products.filter(product => {
     // Remove if product ID matches cart items
     if (cartProductIds.has(product.id)) return false;
-    
+
     // Remove if product title matches cart items (case-insensitive)
     const productTitleLower = product.title.toLowerCase();
-    return !Array.from(cartProductTitles).some(cartTitle => 
+    return !Array.from(cartProductTitles).some(cartTitle =>
       productTitleLower.includes(cartTitle) || cartTitle.includes(productTitleLower)
     );
   });
@@ -1152,7 +1161,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
       headers: { 'Content-Type': 'application/json' },
       body: {
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { 
+        generationConfig: {
           maxOutputTokens: 400,
           temperature: 0.3
         }
@@ -1180,32 +1189,32 @@ Analyze the cart, find the best complementary product, and create a persuasive c
         max_tokens: 400,
         temperature: 0.3 // Lower temperature for more consistent results
       }
-    }, 
+    },
     {
-     name: 'mistral',
-     url: 'https://api.mistral.ai/v1/chat/completions',
-     headers: {
-      'Authorization': `Bearer ${process.env.MISTRAL_API_KEY}`,
-      'Content-Type': 'application/json'
+      name: 'mistral',
+      url: 'https://api.mistral.ai/v1/chat/completions',
+      headers: {
+        'Authorization': `Bearer ${process.env.MISTRAL_API_KEY}`,
+        'Content-Type': 'application/json'
       },
-     body: {
-     model: 'mistral-small-latest', // Use small model first to test
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a professional sales consultant. Always respond with valid JSON only. No additional text or formatting.'
-        },
-        {
-          role: 'user',
-          content: prompt
-         }
-       ],
-       max_tokens: 400,
-       temperature: 0.3,
-       top_p: 1,
-       stream: false
+      body: {
+        model: 'mistral-small-latest', // Use small model first to test
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a professional sales consultant. Always respond with valid JSON only. No additional text or formatting.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        max_tokens: 400,
+        temperature: 0.3,
+        top_p: 1,
+        stream: false
       }
-     },
+    },
     {
       name: 'cohere',
       url: 'https://api.cohere.com/v1/chat',
@@ -1229,7 +1238,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
         'Content-Type': 'application/json'
       },
       body: {
-        model:"deepseek-ai/DeepSeek-V3",
+        model: "deepseek-ai/DeepSeek-V3",
         messages: [
           {
             role: 'system',
@@ -1249,7 +1258,7 @@ Analyze the cart, find the best complementary product, and create a persuasive c
   for (const service of services) {
     try {
       console.log(`Attempting cross-sell with ${service.name}...`);
-      
+
       const response = await fetch(service.url, {
         method: 'POST',
         headers: service.headers,
@@ -1280,14 +1289,14 @@ Analyze the cart, find the best complementary product, and create a persuasive c
         aiResponse = data.choices?.[0]?.message?.content;
       } else if (service.name === 'cohere') {
         aiResponse = data.text;
-      } 
+      }
       // if (aiResponse) {
       //   try {
       //     // Clean and extract JSON from response
       //     const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
       //     if (jsonMatch) {
       //       const suggestion = JSON.parse(jsonMatch[0]);
-            
+
       //       // Validate the suggestion
       //       if (suggestion.id && suggestion.title && suggestion.message && suggestion.image) {
       //         // Double-check that suggested product isn't in cart
@@ -1376,7 +1385,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Try AI services, fallback to simple logic
     let suggestion = await generateAIUpsell(cartItems, products);
-    
+
     if (!suggestion) {
       console.log('All AI services failed, using fallback logic');
       suggestion = generateFallbackUpsell(products, cartItems);
@@ -1393,13 +1402,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       message: error.message,
       timestamp: new Date().toISOString()
     });
-    
-    return json({ 
+
+    return json({
       error: 'Service temporarily unavailable',
-      suggestion: null 
-    }, { 
-      status: 500, 
-      headers: corsHeaders 
+      suggestion: null
+    }, {
+      status: 500,
+      headers: corsHeaders
     });
   }
 };
