@@ -1411,11 +1411,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const jsonMatch = suggestion.match(/\{[\s\S]*\}/);
         if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
       }
-      if (parsed && parsed.discount && parsed.discount.percentage && parsed.discount.code) {
-        await createDiscountCode(admin, parsed.discount.code, parsed.discount.percentage);
+
+      if (parsed && parsed.discount && parsed.discount.code) {
+        // Enforce merchant's configured percentage if it exists
+        const finalPercentage = shopConfig?.discountPercentage ?? parsed.discount.percentage ?? 10;
+
+        // Sync the suggestion object so the UI shows the correct (configured) percentage
+        if (typeof suggestion === 'object' && suggestion.discount) {
+          suggestion.discount.percentage = finalPercentage;
+        } else if (typeof suggestion === 'string' && parsed.discount) {
+          // If it's a string from AI, we've already parsed it, 
+          // but the original suggestion string might still be sent back.
+          // Let's ensure 'parsed' is used or 'suggestion' is updated.
+          parsed.discount.percentage = finalPercentage;
+          suggestion = parsed; // Send back the object for reliability
+        }
+
+        await createDiscountCode(admin, parsed.discount.code, finalPercentage);
       }
     } catch (discountErr) {
-      console.log('Discount creation skipped:', discountErr.message);
+      console.log('Discount creation skipped or failed:', discountErr.message);
     }
 
     return json({ suggestion }, { headers: corsHeaders });
