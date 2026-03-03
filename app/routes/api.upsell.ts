@@ -1401,6 +1401,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: 'No products available for upsell' }, { status: 404, headers: corsHeaders });
     }
 
+    // If AI suggested a discount, auto-create it in Shopify
+    try {
+      let parsed = suggestion;
+      if (typeof suggestion === 'string') {
+        const jsonMatch = suggestion.match(/\{[\s\S]*\}/);
+        if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+      }
+      if (parsed && parsed.discount && parsed.discount.percentage && parsed.discount.code) {
+        await createDiscountCode(admin, parsed.discount.code, parsed.discount.percentage);
+      }
+    } catch (discountErr) {
+      console.log('Discount creation skipped:', discountErr.message);
+    }
+
     return json({ suggestion }, { headers: corsHeaders });
 
   } catch (error) {
@@ -1418,3 +1432,69 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
   }
 };
+
+// Auto-create a Shopify discount code for AI-driven smart discounts
+async function createDiscountCode(admin, code: string, percentage: number) {
+  try {
+    const response = await admin.graphql(`#graphql
+      mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
+        discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
+          codeDiscountNode {
+            id
+            codeDiscount {
+              ... on DiscountCodeBasic {
+                title
+                codes(first: 1) {
+                  nodes {
+                    code
+                  }
+                }
+              }
+            }
+          }
+          userErrors {
+            field
+            code
+            message
+          }
+        }
+      }
+    `, {
+      variables: {
+        basicCodeDiscount: {
+          title: `AI Upsell: ${code}`,
+          code: code,
+          startsAt: new Date().toISOString(),
+          endsAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24h expiry
+          usageLimit: 1,
+          customerSelection: {
+            all: true
+          },
+          customerGets: {
+            value: {
+              percentage: percentage / 100
+            },
+            items: {
+              all: true
+            }
+          }
+        }
+      }
+    });
+
+    const result = await response.json();
+    if (result.data?.discountCodeBasicCreate?.userErrors?.length > 0) {
+      const errors = result.data.discountCodeBasicCreate.userErrors;
+      // If discount already exists, that's fine — it was already created
+      if (errors.some(e => e.code === 'TAKEN')) {
+        console.log(`Discount code ${code} already exists, reusing.`);
+        return;
+      }
+      console.log('Discount creation errors:', errors);
+    } else {
+      console.log(`Discount code ${code} created successfully (${percentage}% off, 24h expiry)`);
+    }
+  } catch (err) {
+    console.error('Failed to create discount code:', err.message);
+  }
+}
