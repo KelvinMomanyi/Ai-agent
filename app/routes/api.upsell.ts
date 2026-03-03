@@ -545,6 +545,7 @@
 import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { authenticate } from '../shopify.server';
+import prisma from '../db.server';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
