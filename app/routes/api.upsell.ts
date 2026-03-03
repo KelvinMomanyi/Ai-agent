@@ -1052,7 +1052,7 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
 
 // Enhanced cross-sell logic with better filtering and prompting
 
-const generateAIUpsell = async (cartItems, products) => {
+const generateAIUpsell = async (cartItems, products, historyContext = []) => {
   // 1. Extract cart product IDs and titles for filtering
   const cartProductIds = new Set();
   const cartProductTitles = new Set();
@@ -1085,8 +1085,7 @@ const generateAIUpsell = async (cartItems, products) => {
   const cartContext = cartItems.map(item => ({
     title: item.title || item.product_title,
     quantity: item.quantity || 1,
-    // Add more context if available
-    category: item.product_type || 'unknown',
+    type: item.product_type || 'unknown',
     tags: item.tags || []
   }));
 
@@ -1094,47 +1093,34 @@ const generateAIUpsell = async (cartItems, products) => {
     id: p.id,
     title: p.title,
     price: p.price,
-    image: p.image?.src || p.image,
-    // Add category/type info if available from your product data
-    handle: p.handle || ''
+    type: p.type || 'unknown',
+    tags: p.tags || [],
+    image: p.image?.src || p.image
   }));
 
-  // 4. Enhanced AI prompt with specific cross-sell instructions
-  const prompt = `You are an expert sales consultant specializing in product recommendations and cross-selling.
+  // 4. Enhanced AI prompt with specific cross-sell instructions and historical context
+  const prompt = `You are a world-class e-commerce growth expert.
+  
+HISTORICAL SUCCESSFUL COMBINATIONS (For inspiration):
+${historyContext.length > 0 ? historyContext.map(h => `- ${h}`).join('\n') : 'No history yet. Use your expertise!'}
 
 CURRENT CART ANALYSIS:
 ${JSON.stringify(cartContext, null, 2)}
 
-AVAILABLE PRODUCTS (NOT in cart):
+AVAILABLE PRODUCTS (Selection Pool):
 ${JSON.stringify(productContext, null, 2)}
 
 CROSS-SELL MISSION:
-Analyze the cart contents and suggest one product that creates maximum synergy and value. If there are multiple complementary options, pick one at random. Focus on:
+Analyze the cart and suggest ONE product that creates the highest "Emotional Value" and "Practical Synergy." 
+Focus on:
+- UP-MARKET synergy: If they bought a basic item, suggest a premium accessory.
+- NEED-BASED synergy: If they bought a gift, suggest gift wrapping or a card.
+- REPLENISHMENT: If they bought a tool, suggest the consumables it uses.
 
-🎯 COMPLEMENTARY RELATIONSHIPS:
-- Products that enhance the main purchase (accessories, add-ons, related items)
-- Items that solve additional problems the customer might have
-- Products that complete a set, outfit, or solution
-- Seasonal or occasion-based complements
-
-🚫 STRICT EXCLUSIONS:
-- Never suggest products already in the cart
-- Avoid duplicate or very similar items
-- Skip unrelated products that don't add clear value
-
-💡 CROSS-SELL PSYCHOLOGY:
-- Create urgency: "Perfect timing to add..."
-- Show social proof: "90% of customers who bought X also get Y"
-- Highlight value: "Complete your setup with..."
-- Address pain points: "Don't forget the essential..."
-- Create FOMO: "While you're here, grab this popular..."
-
-🎨 SALES MESSAGE REQUIREMENTS:
-- Start with a benefit-focused hook
-- Explain WHY this product pairs perfectly
-- Use emotional triggers (convenience, style, savings, completeness)
-- Include a call-to-action phrase
-- Sound like a knowledgeable store associate, not a robot
+🎨 SALES MESSAGE PSYCHOLOGY:
+- Use "Future Pacing": Describe how they will feel once they have both items.
+- Use "Value Anchoring": Explain why getting it NOW is better than later.
+- Be specifically human: Reference the items in the cart by name.
 
 RESPONSE FORMAT (JSON only):
 {
@@ -1142,16 +1128,10 @@ RESPONSE FORMAT (JSON only):
   "title": "exact_product_title",
   "price": "exact_price_from_data",
   "image": "exact_image_url",
-  "message": "compelling_cross_sell_message_150_words_max",
-  "reasoning": "brief_explanation_why_this_complements_cart"
+  "message": "highly_persuasive_message_with_emotional_hook",
+  "reasoning": "strategic_reason_for_this_choice"
 }
-
-EXAMPLE MESSAGE STYLES:
-- "Since you're getting the [cart item], you'll definitely want the [cross-sell] - it's the missing piece that makes everything work perfectly together!"
-- "Smart choice! 85% of our customers who buy [cart item] also grab the [cross-sell] because it solves the one problem everyone runs into..."
-- "Perfect timing! The [cross-sell] is flying off our shelves and pairs incredibly well with your [cart item] - complete your setup now!"
-
-Analyze the cart, find the best complementary product, and create a persuasive cross-sell message.`;
+`;
 
   // 5. Try AI services with improved error handling
   const services = [
@@ -1336,34 +1316,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const { cartItems } = await request.json();
     const { session, admin } = await authenticate.public.appProxy(request);
 
-    // Get products from Shopify
-    const graphqlQuery = `
-      query {
-        products(first: 20) {
-          edges {
-            node {
-              id
-              title
-              handle
-              featuredImage {
-                originalSrc
-                altText
-              }
-              variants(first: 1) {
-                edges {
-                  node {
-                    id
-                    price
+    // Get products and conversion history from Shopify/Prisma
+    const [productResponse, conversionEvents] = await Promise.all([
+      admin.graphql(`#graphql
+        query {
+          products(first: 100) {
+            edges {
+              node {
+                id
+                title
+                handle
+                productType
+                tags
+                featuredImage {
+                  originalSrc
+                  altText
+                }
+                variants(first: 1) {
+                  edges {
+                    node {
+                      id
+                      price
+                    }
                   }
                 }
               }
             }
           }
         }
-      }
-    `;
+      `),
+      prisma.event.findMany({
+        where: { storeId: session.shop, event: 'conversion' },
+        take: 20,
+        orderBy: { timestamp: 'desc' },
+      })
+    ]);
 
-    const productResponse = await admin.graphql(`#graphql\n${graphqlQuery}`);
     const result = await productResponse.json();
 
     if (result.errors) {
@@ -1376,6 +1364,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         id: variant?.id,
         title: node.title,
         price: variant?.price || "0.00",
+        type: node.productType,
+        tags: node.tags,
         image: {
           src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
           alt: node.featuredImage?.altText || node.title,
@@ -1383,8 +1373,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       };
     }).filter(product => product.id);
 
+    // Extract historical patterns
+    const historyContext = conversionEvents.map(e => {
+      const orderItems = (e.data as any).line_items || [];
+      return orderItems.map(item => item.title).join(' + ');
+    }).filter(p => p).slice(0, 5);
+
     // Try AI services, fallback to simple logic
-    let suggestion = await generateAIUpsell(cartItems, products);
+    let suggestion = await generateAIUpsell(cartItems, products, historyContext);
 
     if (!suggestion) {
       console.log('All AI services failed, using fallback logic');

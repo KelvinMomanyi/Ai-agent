@@ -102,6 +102,25 @@
   </div>
 </div>
 
+<!-- Inline Upsell Container -->
+<div id="cb-inline-display" class="cb-inline-container">
+  <div class="cb-flex-container">
+    <div class="cb-image-section">
+      <img id="cb-inline-image" src="" alt="">
+    </div>
+    <div class="cb-info-section">
+      <h3 id="cb-inline-title"></h3>
+      <p class="cb-price"><span id="cb-inline-price"></span> <span id="cb-inline-currency"></span></p>
+      <p id="cb-inline-text" style="font-size: 0.9rem; margin-bottom: 10px;"></p>
+      <form onsubmit="handleSubmit(event, this)" action="/cart/add" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="id" id="cb-inline-variant-id" value="">
+        <input type="hidden" name="quantity" value="1" />
+        <button type="submit" class="cb-add-to-cart-btn">Add to Cart</button>
+    </form>
+    </div>
+  </div>
+</div>
+
 <style>
   /* Modal Backdrop */
 .cb-backdrop {
@@ -221,6 +240,47 @@
 .cb-add-to-cart-btn:focus {
   background-color: #222;
   outline: none;
+}
+
+/* Inline Container Styles */
+.cb-inline-container {
+  display: none;
+  background-color: {{ block.settings.modal_background_color | default: '#ffffff' }};
+  border-radius: {{ block.settings.modal_border_radius | default: 12 }}px;
+  border: 1px solid #e1e1e1;
+  margin: 15px auto;
+  max-width: 600px;
+  overflow: hidden;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.cb-inline-container .cb-flex-container {
+  display: flex;
+  flex-direction: row;
+}
+
+.cb-inline-container .cb-image-section {
+  flex: 0 0 150px;
+  background-color: #f9f9f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cb-inline-container .cb-info-section {
+  flex: 1;
+  padding: 15px;
+}
+
+.cb-inline-container .cb-info-section h3 {
+  font-size: 1.1rem;
+  margin-bottom: 5px;
+}
+
+.cb-inline-container .cb-add-to-cart-btn {
+  padding: 10px;
+  font-size: 0.9rem;
+  margin-top: 10px;
 }
 
 /* Responsive: Stack vertically on small screens */
@@ -459,7 +519,7 @@ async function fetchUpsellSuggestion() {
        throw new Error('Invalid upsell data: missing id');
      }
  
-     showChatbotModal(upsellData, cart);
+     showUpsellDisplay(upsellData, cart);
      trackEvent('upsell_impression', { 
        id: upsellData.id, 
        title: upsellData.title,
@@ -533,35 +593,73 @@ async function checkUpsellEndpoint() {
 
 
 
-function showChatbotModal(message, cart) {
- const modal = document.getElementById('chatbot-messages');
- const titleEl = document.getElementById('chatbot-title');
- const imageEl = document.getElementById('chatbot-image');
- const priceEl = document.getElementById('chatbot-price');
- const priceCurrency = document.getElementById('chatbot-currency');
- const textEl = document.getElementById('chatbot-text');
- const variantInput = document.getElementById('upsell-variant-id');
+function showUpsellDisplay(message, cart) {
+  const displayMode = "{{ block.settings.display_mode | default: 'modal' }}";
+  const smartDelay = {{ block.settings.smart_delay | default: 2 }} * 1000;
+  
+  // Logic to determine which display to show
+  const showModal = () => {
+    const modal = document.getElementById('chatbot-messages');
+    const titleEl = document.getElementById('chatbot-title');
+    const imageEl = document.getElementById('chatbot-image');
+    const priceEl = document.getElementById('chatbot-price');
+    const priceCurrency = document.getElementById('chatbot-currency');
+    const textEl = document.getElementById('chatbot-text');
+    const variantInput = document.getElementById('upsell-variant-id');
 
+    if (titleEl) titleEl.textContent = message.title || '';
+    if (priceEl) priceEl.textContent = message.price;
+    if (priceCurrency) priceCurrency.textContent = cart.currency;
+    if (textEl) textEl.textContent = message.message || '';
+    if (imageEl) imageEl.src = message.image;
+    
+    if (variantInput && message.id) {
+       const gid = message.id;
+       const numericId = gid.includes('/') ? gid.split("/").pop() : gid;
+       variantInput.value = numericId;
+    }
 
-  titleEl.textContent = message.title || '';
-  priceEl.textContent = message.price ;
-  priceCurrency.textContent = cart.currency
-  //priceEl.textContent = message.price ? `${message.price}` : '';
-  textEl.textContent = message.message || '';
-  imageEl.src = message.image;
-  //variantInput.value = message.id;
+    document.getElementById('chatbot-messages').style.display = 'block';
+    document.getElementById('chatbot-backdrop').style.display = 'block';
+  };
 
-const gid = message.id
-const numericId = gid.split("/").pop(); // "12345678901234"
+  const showInline = () => {
+    const inlineContainer = document.getElementById('cb-inline-display');
+    const titleEl = document.getElementById('cb-inline-title');
+    const imageEl = document.getElementById('cb-inline-image');
+    const priceEl = document.getElementById('cb-inline-price');
+    const priceCurrency = document.getElementById('cb-inline-currency');
+    const textEl = document.getElementById('cb-inline-text');
+    const variantInput = document.getElementById('cb-inline-variant-id');
 
+    if (titleEl) titleEl.textContent = message.title || '';
+    if (priceEl) priceEl.textContent = message.price;
+    if (priceCurrency) priceCurrency.textContent = cart.currency;
+    if (textEl) textEl.textContent = message.message || '';
+    if (imageEl) imageEl.src = message.image;
+    
+    if (variantInput && message.id) {
+       const gid = message.id;
+       const numericId = gid.includes('/') ? gid.split("/").pop() : gid;
+       variantInput.value = numericId;
+    }
 
-variantInput.value = numericId
-//  console.log('Image URL:', message.image);
+    if (inlineContainer) inlineContainer.style.display = 'block';
+  };
 
-
- 
-  document.getElementById('chatbot-messages').style.display = 'block';
-  document.getElementById('chatbot-backdrop').style.display = 'block';
+  // Apply Smart Delay
+  setTimeout(() => {
+    if (displayMode === 'modal') {
+      showModal();
+    } else if (displayMode === 'inline') {
+      showInline();
+    } else { // 'both'
+      // Show inline first, if it's already there, maybe skip modal? 
+      // For now, let's just show both if both are configured
+      showInline();
+      // Optional: Wait more for modal?
+    }
+  }, smartDelay);
 }
 
 
@@ -922,6 +1020,26 @@ form.addEventListener('submit', () => {
     "target": "section",
     "class": "chatbot-section",
     "settings": [
+      {
+        "type": "select",
+        "id": "display_mode",
+        "label": "Display Mode",
+        "options": [
+          { "value": "modal", "label": "Pop-up Modal" },
+          { "value": "inline", "label": "Inline Section" },
+          { "value": "both", "label": "Both (Inline first, Modal on retry)" }
+        ],
+        "default": "both"
+      },
+      {
+        "type": "range",
+        "id": "smart_delay",
+        "label": "Smart Delay (seconds)",
+        "min": 0,
+        "max": 10,
+        "step": 1,
+        "default": 2
+      },
       {
       "type": "color",
       "id": "modal_background_color",
