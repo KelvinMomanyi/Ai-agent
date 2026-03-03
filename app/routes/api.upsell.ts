@@ -1053,7 +1053,14 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
 
 // Enhanced cross-sell logic with better filtering and prompting
 
-const generateAIUpsell = async (cartItems, products, historyContext = []) => {
+const generateAIUpsell = async (cartItems, products, historyContext = [], shopConfig = null) => {
+  // Use shopConfig for dynamic rules
+  const discountRule = shopConfig ?
+    `You are authorized to offer a discount of ${shopConfig.discountPercentage}%. Only offer it if the product is > $${shopConfig.minProductPrice}.` :
+    `You are authorized to offer a discount of 5%, 10%, or 15%. Only offer it if the product is > $20.`;
+
+  const strategyRule = shopConfig?.offerStrategy || "Focus on: - UP-MARKET synergy: If they bought a basic item, suggest a premium accessory. - NEED-BASED synergy: If they bought a gift, suggest gift wrapping or a card.";
+
   // 1. Extract cart product IDs and titles for filtering
   const cartProductIds = new Set();
   const cartProductTitles = new Set();
@@ -1111,21 +1118,14 @@ ${JSON.stringify(cartContext, null, 2)}
 AVAILABLE PRODUCTS (Selection Pool):
 ${JSON.stringify(productContext, null, 2)}
 
-CROSS-SELL MISSION:
-Analyze the cart and suggest ONE product that creates the highest "Emotional Value" and "Practical Synergy." 
-Focus on:
-- UP-MARKET synergy: If they bought a basic item, suggest a premium accessory.
-- NEED-BASED synergy: If they bought a gift, suggest gift wrapping or a card.
+💰 SMART DISCOUNTING (Merchant Policy):
+${discountRule}
 
-💰 SMART DISCOUNTING (New Policy):
-You are authorized to offer a "Sweetener" discount if you believe the product price might be a friction point.
-- You can offer a discount of 5%, 10%, or 15%.
-- Only offer it if the product is > $20.
-- Use phrases like "Exclusive for this order" or "Secret deal just for you."
-
-🎨 SALES MESSAGE PSYCHOLOGY:
+🎨 SALES MESSAGE PSYCHOLOGY & STRATEGY:
+${strategyRule}
 - Use "Future Pacing": Describe how they will feel once they have both items.
 - Use "Value Anchoring": Explain why getting it NOW is better than later.
+
 
 RESPONSE FORMAT (JSON only):
 {
@@ -1326,8 +1326,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const { cartItems } = await request.json();
     const { session, admin } = await authenticate.public.appProxy(request);
 
-    // Get products and conversion history from Shopify/Prisma
-    const [productResponse, conversionEvents] = await Promise.all([
+    // Get products, conversion history, and shop config from Shopify/Prisma
+    const [productResponse, conversionEvents, shopConfig] = await Promise.all([
       admin.graphql(`#graphql
         query {
           products(first: 100) {
@@ -1359,6 +1359,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         where: { storeId: session.shop, event: 'conversion' },
         take: 20,
         orderBy: { timestamp: 'desc' },
+      }),
+      prisma.shopConfig.findUnique({
+        where: { shopDomain: session.shop }
       })
     ]);
 
@@ -1390,7 +1393,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }).filter(p => p).slice(0, 5);
 
     // Try AI services, fallback to simple logic
-    let suggestion = await generateAIUpsell(cartItems, products, historyContext);
+    let suggestion = await generateAIUpsell(cartItems, products, historyContext, shopConfig);
 
     if (!suggestion) {
       console.log('All AI services failed, using fallback logic');

@@ -13,7 +13,7 @@ export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
-  
+
   const graphqlQuery = `
   query {
     products(first: 50) {
@@ -35,20 +35,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
   `;
-  
+
   const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
   const result = await response.json();
-  
+
   const productCatalog = result.data.products.edges.map(({ node }) => ({
-  id: node.id,
-  title: node.title,
-  image: {
-    src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
-    alt: node.featuredImage?.altText || node.title,
-  },
+    id: node.id,
+    title: node.title,
+    image: {
+      src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
+      alt: node.featuredImage?.altText || node.title,
+    },
   }));
 
-  
+
   await prisma.shop.upsert({
     where: { shopDomain: session.shop },
     update: {
@@ -59,22 +59,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       shopDomain: session.shop,
       accessToken: session.accessToken,
       scope: session.scope,
-      productCatalog:session.productCatalog,
+      productCatalog: session.productCatalog,
     }
   });
-  
 
 
 
 
-return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+
+  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
 
 
 
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
-   
+
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
       <NavMenu>
@@ -82,6 +82,7 @@ export default function App() {
           Home
         </Link>
         <Link to="/app/analytics">Analytics</Link>
+        <Link to="/app/settings">Settings</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>
