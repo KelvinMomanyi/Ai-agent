@@ -81,6 +81,7 @@
       <img id="chatbot-image" src="" alt="" />
     </div>
     <div class="cb-info-section">
+      <div id="cb-discount-badge" class="cb-discount-badge" style="display: none;"></div>
       <h3 id="chatbot-title"></h3>
       {% comment %} <p id="chatbot-price" style="font-weight: bold; font-size: 1.2rem; margin-bottom: 10px;"></p> {% endcomment %}
       <div style="display:flex; flex-direction:row; gap:5px">
@@ -109,6 +110,7 @@
       <img id="cb-inline-image" src="" alt="">
     </div>
     <div class="cb-info-section">
+      <div id="cb-inline-discount-badge" class="cb-discount-badge" style="display: none;"></div>
       <h3 id="cb-inline-title"></h3>
       <p class="cb-price"><span id="cb-inline-price"></span> <span id="cb-inline-currency"></span></p>
       <p id="cb-inline-text" style="font-size: 0.9rem; margin-bottom: 10px;"></p>
@@ -242,6 +244,26 @@
   outline: none;
 }
 
+/* Discount Badge */
+.cb-discount-badge {
+  background-color: #ff4747;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+  margin-bottom: 10px;
+  display: inline-block;
+  align-self: flex-start;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
 /* Inline Container Styles */
 .cb-inline-container {
   display: none;
@@ -333,6 +355,8 @@ const textContainer = document.getElementById('chatbot-text');
 //   const modelMessage = data.suggestion
 
 //   const jsonMatch = modelMessage.match(/\{[\s\S]*?\}/);
+
+let currentDiscountCode = null;
 
 //    if (!jsonMatch) {
 //      throw new Error('No valid JSON found in model response');
@@ -613,6 +637,19 @@ function showUpsellDisplay(message, cart) {
     if (textEl) textEl.textContent = message.message || '';
     if (imageEl) imageEl.src = message.image;
     
+    // Handle Discount
+    const discountBadge = document.getElementById('cb-discount-badge');
+    currentDiscountCode = null; // Reset
+    if (discountBadge) {
+      if (message.discount && message.discount.percentage) {
+        discountBadge.textContent = `🔥 SPECIAL: ${message.discount.percentage}% OFF`;
+        discountBadge.style.display = 'inline-block';
+        currentDiscountCode = message.discount.code || 'SMART-AI-REWARD';
+      } else {
+        discountBadge.style.display = 'none';
+      }
+    }
+    
     if (variantInput && message.id) {
        const gid = message.id;
        const numericId = gid.includes('/') ? gid.split("/").pop() : gid;
@@ -638,6 +675,19 @@ function showUpsellDisplay(message, cart) {
     if (textEl) textEl.textContent = message.message || '';
     if (imageEl) imageEl.src = message.image;
     
+    // Handle Discount
+    const inlineDiscountBadge = document.getElementById('cb-inline-discount-badge');
+    currentDiscountCode = null; // Reset
+    if (inlineDiscountBadge) {
+      if (message.discount && message.discount.percentage) {
+        inlineDiscountBadge.textContent = `🔥 SAVE ${message.discount.percentage}% NOW`;
+        inlineDiscountBadge.style.display = 'inline-block';
+        currentDiscountCode = message.discount.code || 'SMART-AI-REWARD';
+      } else {
+        inlineDiscountBadge.style.display = 'none';
+      }
+    }
+
     if (variantInput && message.id) {
        const gid = message.id;
        const numericId = gid.includes('/') ? gid.split("/").pop() : gid;
@@ -995,29 +1045,39 @@ form.addEventListener('submit', () => {
 
 
 
-  function handleSubmit(event, form) {
+  async function handleSubmit(event, form) {
+    // event.preventDefault(); // Uncomment if you want to handle redirect yourself
     const btn = form.querySelector('.cb-add-to-cart-btn');
     const originalText = btn.innerHTML;
     
     // Show loading
     btn.innerHTML = 'Adding...';
     btn.disabled = true;
+
+    // Apply discount if exists
+    if (currentDiscountCode) {
+      try {
+        await fetch(`/discount/${currentDiscountCode}`);
+        console.log('Discount applied:', currentDiscountCode);
+      } catch (err) {
+        console.error('Failed to apply discount:', err);
+      }
+    }
     
-    // Reset after form submission completes
+    // Reset after form submission completes (assuming standard form submit)
     setTimeout(() => {
         btn.innerHTML = '✓ Added!';
         setTimeout(() => {
             btn.innerHTML = originalText;
             btn.disabled = false;
         }, 3000);
-    }, 2000);
+    }, 1500);
 }
 </script>
 
 {% schema %}
   {
     "name": "AI Agent",
-    "target": "section",
     "class": "chatbot-section",
     "settings": [
       {

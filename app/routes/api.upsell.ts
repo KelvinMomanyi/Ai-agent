@@ -1115,12 +1115,16 @@ Analyze the cart and suggest ONE product that creates the highest "Emotional Val
 Focus on:
 - UP-MARKET synergy: If they bought a basic item, suggest a premium accessory.
 - NEED-BASED synergy: If they bought a gift, suggest gift wrapping or a card.
-- REPLENISHMENT: If they bought a tool, suggest the consumables it uses.
+
+💰 SMART DISCOUNTING (New Policy):
+You are authorized to offer a "Sweetener" discount if you believe the product price might be a friction point.
+- You can offer a discount of 5%, 10%, or 15%.
+- Only offer it if the product is > $20.
+- Use phrases like "Exclusive for this order" or "Secret deal just for you."
 
 🎨 SALES MESSAGE PSYCHOLOGY:
 - Use "Future Pacing": Describe how they will feel once they have both items.
 - Use "Value Anchoring": Explain why getting it NOW is better than later.
-- Be specifically human: Reference the items in the cart by name.
 
 RESPONSE FORMAT (JSON only):
 {
@@ -1129,6 +1133,11 @@ RESPONSE FORMAT (JSON only):
   "price": "exact_price_from_data",
   "image": "exact_image_url",
   "message": "highly_persuasive_message_with_emotional_hook",
+  "discount": {
+    "percentage": "number_or_null",
+    "code": "SMART-AI-REWARD",
+    "text": "e.g., 10% OFF applied at checkout"
+  },
   "reasoning": "strategic_reason_for_this_choice"
 }
 `;
