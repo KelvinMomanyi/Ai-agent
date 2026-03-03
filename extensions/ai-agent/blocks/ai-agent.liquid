@@ -1046,9 +1046,11 @@ form.addEventListener('submit', () => {
 
 
   async function handleSubmit(event, form) {
-    // event.preventDefault(); // Uncomment if you want to handle redirect yourself
+    event.preventDefault(); 
     const btn = form.querySelector('.cb-add-to-cart-btn');
     const originalText = btn.innerHTML;
+    const variantId = form.querySelector('input[name="id"]').value;
+    const quantity = form.querySelector('input[name="quantity"]').value || 1;
     
     // Show loading
     btn.innerHTML = 'Adding...';
@@ -1057,27 +1059,58 @@ form.addEventListener('submit', () => {
     // Apply discount if exists
     if (currentDiscountCode) {
       try {
+        // This sets the discount cookie in the browser
         await fetch(`/discount/${currentDiscountCode}`);
         console.log('Discount applied:', currentDiscountCode);
       } catch (err) {
         console.error('Failed to apply discount:', err);
       }
     }
-    
-    // Reset after form submission completes (assuming standard form submit)
-    setTimeout(() => {
-        btn.innerHTML = '✓ Added!';
-        setTimeout(() => {
-            btn.innerHTML = originalText;
-            btn.disabled = false;
-        }, 3000);
-    }, 1500);
+
+    // Add to cart via AJAX
+    try {
+      const response = await fetch('/cart/add.js', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          id: variantId,
+          quantity: parseInt(quantity)
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to add to cart');
+      
+      const cartData = await response.json();
+      console.log('Item added to cart:', cartData);
+
+      btn.innerHTML = '✓ Added!';
+      
+      // Optional: Refresh the page or redirect to checkout to see the discount
+      // For now, let's just show the success state
+      setTimeout(() => {
+          btn.innerHTML = originalText;
+          btn.disabled = false;
+          // closeChatbotModal(); // Optionally close modal
+          window.location.href = '/checkout'; // Redirect to checkout to show discount
+      }, 1000);
+
+    } catch (err) {
+      console.error('Cart add error:', err);
+      btn.innerHTML = 'Error!';
+      setTimeout(() => {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+      }, 2000);
+    }
 }
 </script>
 
 {% schema %}
   {
     "name": "AI Agent",
+    "target": "section",
     "class": "chatbot-section",
     "settings": [
       {

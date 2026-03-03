@@ -111,6 +111,11 @@ function PostPurchaseUpsell() {
                         type: "add_variant",
                         variantId: parseInt(variantId, 10),
                         quantity: 1,
+                        discount: upsellData.discount?.percentage ? {
+                            value: upsellData.discount.percentage,
+                            valueType: "percentage",
+                            title: upsellData.discount.text || "AI Upsell Discount",
+                        } : undefined,
                     },
                 ],
             });

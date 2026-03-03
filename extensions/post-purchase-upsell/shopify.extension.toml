@@ -1,13 +1,6 @@
-api_version = "2025-04"
-
-[[extensions]]
-name = "AOVBoost Post-Purchase Upsell"
-handle = "post-purchase-upsell"
+name = "post-purchase-upsell"
+uid = "605817b1-8b84-d458-6e77-878311e962ab7fca9c3b"
 type = "checkout_post_purchase"
 
-  [extensions.build]
-  command = ""
-
-  [[extensions.targeting]]
-  module = "./src/index.jsx"
-  target = "purchase.post.render"
+[build]
+command = ""
