@@ -73,9 +73,13 @@
 <!-- Modal Backdrop -->
 <div id="chatbot-backdrop" class="cb-backdrop"></div>
 
-<!-- Modal -->
-<div id="chatbot-messages" class="cb-modal">
+<!-- Modal / Popup Container -->
+<div id="chatbot-messages" 
+     class="cb-modal cb-type-{{ block.settings.popup_type }} cb-pos-{{ block.settings.popup_position }} cb-anim-{{ block.settings.animation_style }} {% if block.settings.enable_glassmorphism %}cb-glass-effect{% endif %}"
+     style="display: none;">
+  
   <button onclick="closeChatbotModal()" class="cb-close-btn">&times;</button>
+  
   <div class="cb-flex-container">
     <div class="cb-image-section">
       <img id="chatbot-image" src="" alt="" />
@@ -83,22 +87,17 @@
     <div class="cb-info-section">
       <div id="cb-discount-badge" class="cb-discount-badge" style="display: none;"></div>
       <h3 id="chatbot-title"></h3>
-      {% comment %} <p id="chatbot-price" style="font-weight: bold; font-size: 1.2rem; margin-bottom: 10px;"></p> {% endcomment %}
-      <div style="display:flex; flex-direction:row; gap:5px">
-        <p class="cb-price" id="chatbot-currency">{{ shop.currency  }}</p>
-        <p id="chatbot-price" ></p>
+      <div class="cb-price-wrapper">
+        <span class="cb-currency" id="chatbot-currency">{{ shop.currency }}</span>
+        <span id="chatbot-price"></span>
       </div>
       <p id="chatbot-text" class="cb-text"></p>
-      {% comment %} <form method="POST" action="/cart/add">
-        <input type="hidden" name="id" id="upsell-variant-id" />
-        <input type="hidden" name="quantity" value="1" />
-        <button type="submit" class="cb-add-to-cart-btn">Add to Cart</button>
-      </form> {% endcomment %}
+      
       <form method="POST" action="/cart/add" onsubmit="handleSubmit(event, this)">
-        <input type="hidden" name="id" id="upsell-variant-id" value="YOUR_VARIANT_ID_HERE" />
+        <input type="hidden" name="id" id="upsell-variant-id" value="" />
         <input type="hidden" name="quantity" value="1" />
         <button type="submit" class="cb-add-to-cart-btn">Add to Cart</button>
-    </form>
+      </form>
     </div>
   </div>
 </div>
@@ -124,138 +123,148 @@
 </div>
 
 <style>
-  /* Modal Backdrop */
-.cb-backdrop {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  z-index: 9998;
-}
-
-/* Modal Container */
+  /* Base Modal System */
 .cb-modal {
   display: none;
   position: fixed;
+  background: {{ block.settings.modal_background_color | default: '#fff' }};
+  border-radius: {{ block.settings.modal_border_radius | default: 12 }}px;
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2), 0 5px 10px rgba(0, 0, 0, 0.1);
+  z-index: 2147483647; /* Maximum possible z-index */
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 600px;
+  width: 90%;
+}
+
+/* Glassmorphism Effect */
+.cb-glass-effect {
+  background: rgba(255, 255, 255, 0.7) !important;
+  backdrop-filter: blur(15px) saturate(180%);
+  -webkit-backdrop-filter: blur(15px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* Position Strategies */
+.cb-pos-center {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: {{ block.settings.modal_background_color | default: '#fff' }};
-  padding: 0;
-  border-radius:{{ block.settings.modal_border_radius | default: 12 }}px;
-  width: 90%;
-  max-width: 700px;
-  box-shadow: 0 15px 30px rgba(0, 0, 0, 0.2);
-  z-index: 9999;
-  font-family: 'DM Sans', sans-serif;
-  overflow: hidden;
 }
 
-/* Close Button */
-.cb-close-btn {
-  position: absolute;
-  top: 15px;
-  right: 20px;
-  background: none;
-  border: none;
-  font-size: 22px;
-  font-weight: 700;
-  color: #333;
-  cursor: pointer;
-  z-index: 10;
+.cb-pos-bottom_left {
+  bottom: 30px;
+  left: 30px;
 }
 
-/* Modal Flex Container */
-.cb-flex-container {
-  display: flex;
-  flex-direction: row;
-  height: 100%;
-  min-height: 320px;
+.cb-pos-bottom_right {
+  bottom: 30px;
+  right: 30px;
 }
 
-/* Image Section */
-.cb-image-section {
-  flex: 1;
-  background-color: ;
-  background: {{ block.settings.image_section_Background_color | default: '#f9f9f9' }};
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
+.cb-pos-top_center {
+  top: 30px;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
-.cb-image-section img {
-  width: 100%;
-  height: auto;
-  object-fit: contain;
-  max-height: 100%;
+/* Layout Variety: Toast */
+.cb-type-toast {
+  max-width: 400px;
+  border-radius: 16px;
 }
 
-/* Info Section */
-.cb-info-section {
-  flex: 1;
-  padding: 30px;
-  display: flex;
+.cb-type-toast .cb-flex-container {
+  min-height: auto;
+}
+
+.cb-type-toast .cb-image-section {
+  flex: 0 0 100px;
+}
+
+/* Layout Variety: Floating Card */
+.cb-type-floating {
+  max-width: 350px;
+  padding: 10px;
+}
+
+.cb-type-floating .cb-flex-container {
   flex-direction: column;
-  justify-content: center;
 }
 
-.cb-info-section h3 {
-  margin: 0 0 10px;
-  font-size:{{ block.settings.modal_title_fontSize | default: 16 }}px;
-  font-weight: 600;
-  color: {{ block.settings.modal_title_color | default: '#333' }};
+.cb-type-floating .cb-image-section {
+  border-radius: 8px;
+  margin-bottom: 10px;
 }
 
-.cb-info-section .cb-price {
-  font-weight: bold; 
-  font-size: {{ block.settings.modal_price_fontSize | default: 16 }}px;
+/* Animation Styles */
+.cb-anim-fade { animation: cb-fadeIn 0.5s ease; }
+.cb-anim-slide_up { animation: cb-slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
+.cb-anim-bounce { animation: cb-bounceIn 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+
+@keyframes cb-fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cb-slideUp { 
+  from { opacity: 0; transform: translate(-50%, 20%); } 
+  to { opacity: 1; transform: translate(-50%, -50%); } 
+}
+/* Adjust slideUp for non-center positions if needed via JS or specific classes */
+.cb-pos-bottom_left.cb-anim-slide_up, .cb-pos-bottom_right.cb-anim-slide_up {
+  animation-name: cb-slideUpSimple;
+}
+@keyframes cb-slideUpSimple {
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes cb-bounceIn {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+  70% { transform: translate(-50%, -50%) scale(0.9); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+
+/* UI Elements */
+.cb-price-wrapper {
   margin-bottom: 10px;
+  font-weight: 800;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.cb-currency {
+  font-size: 0.8em;
+  opacity: 0.7;
+}
+
+#chatbot-price {
+  font-size: {{ block.settings.modal_price_fontSize | default: 16 }}px;
   color: {{ block.settings.modal_price_color | default: '#333' }};
 }
-.cb-info-section #chatbot-price {
-  font-size: {{ block.settings.modal_price_fontSize | default: 16 }}px;
-  color: {{ block.settings.modal_price_color | default: '#333' }};
-}
-.cb-info-section .cb-text {
-  margin-bottom: 20px;
-  color: #555;
-  font-size:{{ block.settings.modal_text_fontSize | default: 16 }}px;
-  margin-bottom: 10px;
+
+.cb-text {
+  font-size: {{ block.settings.modal_text_fontSize | default: 14 }}px;
   color: {{ block.settings.modal_text_color | default: '#555' }};
+  line-height: 1.5;
+  margin-bottom: 20px;
 }
 
-/* Add to Cart Button */
 .cb-add-to-cart-btn {
-  background-color:{{ block.settings.modal_button_color | default: '#000' }};;
-  color:{{ block.settings.modal_Button_text_color | default: '#FFF' }};;
-  padding: 12px 24px;
-  font-size: 1rem;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  width: 100%;
-  transition: background 0.3s ease;
+  background: {{ block.settings.modal_button_color | default: '#000' }};
+  color: {{ block.settings.modal_Button_text_color | default: '#fff' }};
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 14px;
 }
 
-.cb-add-to-cart-btn:hover,
-.cb-add-to-cart-btn:focus {
-  background-color: #222;
-  outline: none;
-}
-
-/* Discount Badge */
 .cb-discount-badge {
-  background-color: #ff4747;
+  background: linear-gradient(135deg, #ff4747 0%, #ff8e53 100%);
   color: white;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  font-weight: bold;
-  margin-bottom: 10px;
-  display: inline-block;
-  align-self: flex-start;
-  animation: pulse 2s infinite;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  box-shadow: 0 4px 10px rgba(255, 71, 71, 0.3);
 }
 
 @keyframes pulse {
@@ -656,8 +665,11 @@ function showUpsellDisplay(message, cart) {
        variantInput.value = numericId;
     }
 
+    const popupPos = "{{ block.settings.popup_position }}";
+    if (popupPos === 'center') {
+      document.getElementById('chatbot-backdrop').style.display = 'block';
+    }
     document.getElementById('chatbot-messages').style.display = 'block';
-    document.getElementById('chatbot-backdrop').style.display = 'block';
   };
 
   const showInline = () => {
@@ -1134,87 +1146,127 @@ form.addEventListener('submit', () => {
         "default": 2
       },
       {
-      "type": "color",
-      "id": "modal_background_color",
-      "label": "Background Color",
-      "default": "#ffffff"
-    },
-    {
-      "type": "color",
-      "id": "image_section_Background_color",
-      "label": "Image Section Background Color",
-      "default": "#ffffff"
-    },
-    {
-      "type": "range",
-      "id": "modal_border_radius",
-      "label": "Border Radius",
-      "min": 0,
-      "max": 50,
-      "step": 1,
-      "unit": "px",
-      "default": 12
-    },
-    {
-      "type": "color",
-      "id": "modal_title_color",
-      "label": "Title Color",
-      "default": "#333333"
-    },
-    {
-      "type": "range",
-      "id": "modal_title_fontSize",
-      "label": "Modal Title Font Size",
-      "min": 0,
-      "max": 50,
-      "step": 1,
-      "unit": "px",
-      "default": 16
-    },
-    {
-      "type": "color",
-      "id": "modal_price_color",
-      "label": "Title Color",
-      "default": "#333333"
-    },
-    {
-      "type": "range",
-      "id": "modal_price_fontSize",
-      "label": "Price Font Size",
-      "min": 0,
-      "max": 50,
-      "step": 1,
-      "unit": "px",
-      "default": 14
-    },
-    {
-      "type": "color",
-      "id": "modal_text_color",
-      "label": "Title Color",
-      "default": "#555"
-    },
-    {
-      "type": "range",
-      "id": "modal_text_fontSize",
-      "label": "Text Font Size",
-      "min": 0,
-      "max": 50,
-      "step": 1,
-      "unit": "px",
-      "default": 16
-    },
-    {
-      "type": "color",
-      "id": "modal_button_color",
-      "label": "Button Background Color",
-      "default": "#000"
-    },
-    {
-      "type": "color",
-      "id": "modal_Button_text_color",
-      "label": "Button Title Color",
-      "default": "#FFF"
-    }
+        "type": "select",
+        "id": "popup_type",
+        "label": "Popup Style",
+        "options": [
+          { "value": "modal", "label": "Standard Modal" },
+          { "value": "toast", "label": "Minimalist Toast" },
+          { "value": "floating", "label": "Floating Card" }
+        ],
+        "default": "modal"
+      },
+      {
+        "type": "select",
+        "id": "popup_position",
+        "label": "Popup Position",
+        "options": [
+          { "value": "center", "label": "Center" },
+          { "value": "bottom_left", "label": "Bottom Left" },
+          { "value": "bottom_right", "label": "Bottom Right" },
+          { "value": "top_center", "label": "Top Center" }
+        ],
+        "default": "center"
+      },
+      {
+        "type": "select",
+        "id": "animation_style",
+        "label": "Entrance Animation",
+        "options": [
+          { "value": "fade", "label": "Fade In" },
+          { "value": "slide_up", "label": "Slide Up" },
+          { "value": "bounce", "label": "Bounce" }
+        ],
+        "default": "slide_up"
+      },
+      {
+        "type": "checkbox",
+        "id": "enable_glassmorphism",
+        "label": "Enable Glassmorphism Effect",
+        "default": true
+      },
+      {
+        "type": "color",
+        "id": "modal_background_color",
+        "label": "Background Color",
+        "default": "#ffffff"
+      },
+      {
+        "type": "color",
+        "id": "image_section_Background_color",
+        "label": "Image Section Background Color",
+        "default": "#ffffff"
+      },
+      {
+        "type": "range",
+        "id": "modal_border_radius",
+        "label": "Border Radius",
+        "min": 0,
+        "max": 50,
+        "step": 1,
+        "unit": "px",
+        "default": 12
+      },
+      {
+        "type": "color",
+        "id": "modal_title_color",
+        "label": "Title Color",
+        "default": "#333333"
+      },
+      {
+        "type": "range",
+        "id": "modal_title_fontSize",
+        "label": "Modal Title Font Size",
+        "min": 0,
+        "max": 50,
+        "step": 1,
+        "unit": "px",
+        "default": 16
+      },
+      {
+        "type": "color",
+        "id": "modal_price_color",
+        "label": "Price Color",
+        "default": "#333333"
+      },
+      {
+        "type": "range",
+        "id": "modal_price_fontSize",
+        "label": "Price Font Size",
+        "min": 0,
+        "max": 50,
+        "step": 1,
+        "unit": "px",
+        "default": 14
+      },
+      {
+        "type": "color",
+        "id": "modal_text_color",
+        "label": "Description Text Color",
+        "default": "#555555"
+      },
+      {
+        "type": "range",
+        "id": "modal_text_fontSize",
+        "label": "Text Font Size",
+        "min": 0,
+        "max": 50,
+        "step": 1,
+        "unit": "px",
+        "default": 16
+      },
+      {
+        "type": "color",
+        "id": "modal_button_color",
+        "label": "Button Background Color",
+        "default": "#000000"
+      },
+      {
+        "type": "color",
+        "id": "modal_Button_text_color",
+        "label": "Button Title Color",
+        "default": "#FFFFFF"
+      }
     
     ]
   }
