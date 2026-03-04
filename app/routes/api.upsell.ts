@@ -1054,23 +1054,12 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
 // Enhanced cross-sell logic with better filtering and prompting
 
 const generateAIUpsell = async (cartItems, products, historyContext = [], shopConfig = null) => {
-  // Calculate cart total for gamification
-  const cartTotal = cartItems.reduce((sum, item) => sum + (parseFloat(item.price) * (item.quantity || 1)), 0);
-  const threshold = shopConfig?.freeShippingThreshold || 0;
-  const gap = threshold > 0 && cartTotal < threshold ? (threshold - cartTotal).toFixed(2) : 0;
-
   // Use shopConfig for dynamic rules
   const discountRule = shopConfig ?
     `You are authorized to offer a discount of ${shopConfig.discountPercentage}%. Only offer it if the product is > $${shopConfig.minProductPrice}.` :
     `You are authorized to offer a discount of 5%, 10%, or 15%. Only offer it if the product is > $20.`;
 
   const strategyRule = shopConfig?.offerStrategy || "Focus on: - UP-MARKET synergy: If they bought a basic item, suggest a premium accessory. - NEED-BASED synergy: If they bought a gift, suggest gift wrapping or a card.";
-
-  const gamificationRule = gap > 0 ?
-    `GAMIFICATION: The customer is only $${gap} away from FREE SHIPPING (Threshold: $${threshold}). 
-    PRIORITY: Suggest a product from the pool that costs at least $${gap}. 
-    MESSAGING: Use the 'gamification' field to congratulate them on being close and show how this product unlocks the reward.` :
-    "No active threshold goals for this cart.";
 
   // 1. Extract cart product IDs and titles for filtering
   const cartProductIds = new Set();
@@ -1132,9 +1121,6 @@ ${JSON.stringify(productContext, null, 2)}
 💰 SMART DISCOUNTING (Merchant Policy):
 ${discountRule}
 
-🎯 AOV GAMIFIER GOAL:
-${gamificationRule}
-
 🎨 SALES MESSAGE PSYCHOLOGY & STRATEGY:
 ${strategyRule}
 - Use "Future Pacing": Describe how they will feel once they have both items.
@@ -1148,7 +1134,6 @@ RESPONSE FORMAT (JSON only):
   "price": "exact_price_from_data",
   "image": "exact_image_url",
   "message": "highly_persuasive_message_with_emotional_hook",
-  "gamification": "optional_text_about_unlocking_reward_e.g._You_are_just_one_item_away_from_FREE_shipping!",
   "discount": {
     "percentage": "number_or_null",
     "code": "SMART-AI-REWARD",

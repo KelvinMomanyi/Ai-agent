@@ -11,12 +11,11 @@ datasource db {
 }
 
 model ShopConfig {
-  shopDomain            String   @id
-  discountPercentage    Int      @default(10)
-  offerStrategy         String   @default("Focus on high-value complementary items with a gentle discount sweetener.")
-  minProductPrice       Float    @default(20.0)
-  freeShippingThreshold Float    @default(0)
-  updatedAt             DateTime @updatedAt
+  shopDomain         String @id
+  discountPercentage Int    @default(10)
+  offerStrategy      String @default("Focus on high-value complementary items with a gentle discount sweetener.")
+  minProductPrice    Float  @default(20.0)
+  updatedAt          DateTime @updatedAt
 }
 
 model Session {

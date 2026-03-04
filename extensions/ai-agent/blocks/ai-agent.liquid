@@ -90,7 +90,6 @@
     </div>
     <div class="cb-info-section">
       <div id="cb-discount-badge" class="cb-discount-badge" style="display: none;"></div>
-      <div id="cb-gamification-msg" class="cb-gamification-msg" style="display: none;"></div>
       <h3 id="chatbot-title"></h3>
       <div class="cb-price-row">
         <span class="cb-currency" id="chatbot-currency">{{ shop.currency }}</span>
@@ -114,7 +113,6 @@
     </div>
     <div class="cb-info-section">
       <div id="cb-inline-discount-badge" class="cb-discount-badge" style="display: none;"></div>
-      <div id="cb-inline-gamification-msg" class="cb-gamification-msg" style="display: none;"></div>
       <h3 id="cb-inline-title"></h3>
       <div class="cb-price-row">
         <span class="cb-currency" id="cb-inline-currency"></span>
@@ -286,20 +284,6 @@
   text-transform: uppercase;
   color: #fff;
   background: #e63946; /* Professional solid accent */
-  margin-bottom: 4px;
-}
-
-/* ---------- GAMIFICATION MSG ---------- */
-.cb-gamification-msg {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #155724;
-  background: #d4edda;
-  border: 1px solid #c3e6cb;
-  margin-bottom: 8px;
 }
 
 /* =================================================================
@@ -685,23 +669,12 @@ function showUpsellDisplay(message, cart) {
     if (textEl) textEl.textContent = message.message || '';
     if (imageEl) imageEl.src = message.image;
     
-    // Handle Gamification Message
-    const gamificationBadge = document.getElementById('cb-gamification-msg');
-    if (gamificationBadge) {
-      if (message.gamification) {
-        gamificationBadge.textContent = message.gamification;
-        gamificationBadge.style.display = 'inline-block';
-      } else {
-        gamificationBadge.style.display = 'none';
-      }
-    }
-
     // Handle Discount
     const discountBadge = document.getElementById('cb-discount-badge');
     currentDiscountCode = null; // Reset
     if (discountBadge) {
       if (message.discount && message.discount.percentage) {
-        discountBadge.textContent = `🔥 SPECIAL: ${message.discount.percentage}% OFF`;
+        discountBadge.textContent = `ðŸ”¥ SPECIAL: ${message.discount.percentage}% OFF`;
         discountBadge.style.display = 'inline-block';
         currentDiscountCode = message.discount.code || 'SMART-AI-REWARD';
       } else {
@@ -736,23 +709,13 @@ function showUpsellDisplay(message, cart) {
     if (priceCurrency) priceCurrency.textContent = cart.currency;
     if (textEl) textEl.textContent = message.message || '';
     if (imageEl) imageEl.src = message.image;
-
-    // Handle Inline Gamification Message
-    const inlineGamificationBadge = document.getElementById('cb-inline-gamification-msg');
-    if (inlineGamificationBadge) {
-      if (message.gamification) {
-        inlineGamificationBadge.textContent = message.gamification;
-        inlineGamificationBadge.style.display = 'inline-block';
-      } else {
-        inlineGamificationBadge.style.display = 'none';
-      }
-    }
     
     // Handle Discount
     const inlineDiscountBadge = document.getElementById('cb-inline-discount-badge');
+    currentDiscountCode = null; // Reset
     if (inlineDiscountBadge) {
       if (message.discount && message.discount.percentage) {
-        inlineDiscountBadge.textContent = `🔥 SAVE ${message.discount.percentage}% NOW`;
+        inlineDiscountBadge.textContent = `ðŸ”¥ SAVE ${message.discount.percentage}% NOW`;
         inlineDiscountBadge.style.display = 'inline-block';
         currentDiscountCode = message.discount.code || 'SMART-AI-REWARD';
       } else {
@@ -1141,8 +1104,6 @@ form.addEventListener('submit', () => {
 
     // Add to cart via AJAX
     try {
-      if (!variantId) throw new Error('No variant ID provided');
-
       const response = await fetch('/cart/add.js', {
         method: 'POST',
         headers: {
@@ -1154,24 +1115,20 @@ form.addEventListener('submit', () => {
         })
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Cart add error response:', errorText);
-        throw new Error('Failed to add to cart');
-      }
+      if (!response.ok) throw new Error('Failed to add to cart');
       
       const cartData = await response.json();
       console.log('Item added to cart:', cartData);
 
-      btn.innerHTML = 'Added!'; // Removed garbled characters
+      btn.innerHTML = 'âœ“ Added!';
       
       // Optional: Refresh the page or redirect to checkout to see the discount
       // For now, let's just show the success state
       setTimeout(() => {
           btn.innerHTML = originalText;
           btn.disabled = false;
-          closeChatbotModal(); // Close modal on success
-          // window.location.href = '/checkout'; // Redirect removed
+          // closeChatbotModal(); // Optionally close modal
+          window.location.href = '/checkout'; // Redirect to checkout to show discount
       }, 1000);
 
     } catch (err) {

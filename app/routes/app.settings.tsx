@@ -32,7 +32,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 discountPercentage: 10,
                 offerStrategy: "Focus on high-value complementary items with a gentle discount sweetener.",
                 minProductPrice: 20.0,
-                freeShippingThreshold: 0,
             },
         });
     }
@@ -48,7 +47,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const discountPercentage = parseInt(formData.get("discountPercentage") as string);
     const offerStrategy = formData.get("offerStrategy") as string;
     const minProductPrice = parseFloat(formData.get("minProductPrice") as string);
-    const freeShippingThreshold = parseFloat(formData.get("freeShippingThreshold") as string);
 
     try {
         const config = await prisma.shopConfig.upsert({
@@ -57,14 +55,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 discountPercentage,
                 offerStrategy,
                 minProductPrice,
-                freeShippingThreshold,
             },
             create: {
                 shopDomain: shop,
                 discountPercentage,
                 offerStrategy,
                 minProductPrice,
-                freeShippingThreshold,
             },
         });
 
@@ -85,7 +81,6 @@ export default function Settings() {
         discountPercentage: config.discountPercentage.toString(),
         offerStrategy: config.offerStrategy,
         minProductPrice: config.minProductPrice.toString(),
-        freeShippingThreshold: (config.freeShippingThreshold || 0).toString(),
     });
 
     const isSaving =
@@ -140,16 +135,6 @@ export default function Settings() {
                                     onChange={(value) => setFormState({ ...formState, minProductPrice: value })}
                                     prefix="$"
                                     helpText="Only products above this price will be eligible for an AI-generated discount."
-                                    autoComplete="off"
-                                />
-
-                                <TextField
-                                    label="Free Shipping Threshold"
-                                    type="number"
-                                    value={formState.freeShippingThreshold}
-                                    onChange={(value) => setFormState({ ...formState, freeShippingThreshold: value })}
-                                    prefix="$"
-                                    helpText="The AI will use this to suggest products that unlock rewards for the customer. Set to 0 to disable."
                                     autoComplete="off"
                                 />
 
