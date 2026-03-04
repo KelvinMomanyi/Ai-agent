@@ -763,6 +763,11 @@ const generateFallbackUpsell = (products, cartItems) => {
     price: upsellProduct.price,
     image: upsellProduct.image?.src || upsellProduct.image,
     message: generateAIMessage(upsellProduct, cartItems),
+    discount: {
+      percentage: 10, // Will be overridden in action if config exists
+      code: "SMART-AI-REWARD",
+      text: "10% OFF applied at checkout"
+    },
     reasoning: generateReasoning(upsellProduct, cartItems),
     confidence: Math.floor(Math.random() * 15) + 85, // 85-100% confidence
     processingTime: addRandomDelay(),
@@ -887,15 +892,11 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
     price: selectedProduct.price,
     image: selectedProduct.image?.src || selectedProduct.image,
     message: generatePersonalizedMessage(selectedProduct, cartAnalysis, userBehavior),
-    // reasoning: `Advanced ML algorithm analyzed cart composition, price sensitivity, and behavioral patterns to identify optimal cross-sell opportunity with ${Math.floor(selectedProduct.aiScore * 100)}% compatibility score.`,
-    // confidence: Math.floor(selectedProduct.aiScore * 100),
-    // processingTime: Math.floor(Math.random() * 300) + 150,
-    // source: 'ai-enhanced-fallback',
-    // metadata: {
-    //   cartAnalysis: cartAnalysis,
-    //   aiScore: selectedProduct.aiScore,
-    //   strategy: 'ml-powered-recommendation'
-    // }
+    discount: {
+      percentage: 10, // Will be overridden in action if config exists
+      code: "SMART-AI-REWARD",
+      text: "10% OFF applied at checkout"
+    }
   };
 };
 
@@ -1056,7 +1057,7 @@ const generateAdvancedFallbackUpsell = (products, cartItems, userBehavior = {}) 
 const generateAIUpsell = async (cartItems, products, historyContext = [], shopConfig = null) => {
   // Use shopConfig for dynamic rules
   const discountRule = shopConfig ?
-    `You are authorized to offer a discount of ${shopConfig.discountPercentage}%. Only offer it if the product is > $${shopConfig.minProductPrice}.` :
+    `CRITICAL: You MUST offer a discount of exactly ${shopConfig.discountPercentage}% to the customer. Do NOT use any other number like 10% or 5% unless it equals ${shopConfig.discountPercentage}%. Only offer it if the product is > $${shopConfig.minProductPrice}.` :
     `You are authorized to offer a discount of 5%, 10%, or 15%. Only offer it if the product is > $20.`;
 
   const strategyRule = shopConfig?.offerStrategy || "Focus on: - UP-MARKET synergy: If they bought a basic item, suggest a premium accessory. - NEED-BASED synergy: If they bought a gift, suggest gift wrapping or a card.";
@@ -1412,22 +1413,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
       }
 
-      if (parsed && parsed.discount && parsed.discount.code) {
+      if (parsed && parsed.discount) {
         // Enforce merchant's configured percentage if it exists
         const finalPercentage = shopConfig?.discountPercentage ?? parsed.discount.percentage ?? 10;
 
-        // Sync the suggestion object so the UI shows the correct (configured) percentage
-        if (typeof suggestion === 'object' && suggestion.discount) {
-          suggestion.discount.percentage = finalPercentage;
-        } else if (typeof suggestion === 'string' && parsed.discount) {
-          // If it's a string from AI, we've already parsed it, 
-          // but the original suggestion string might still be sent back.
-          // Let's ensure 'parsed' is used or 'suggestion' is updated.
-          parsed.discount.percentage = finalPercentage;
-          suggestion = parsed; // Send back the object for reliability
+        // Dynamically name the discount code based on the percentage to avoid caching issues in Shopify
+        const dynamicCode = `AI-SAVE-${finalPercentage}`;
+
+        // Synchronize the message text if the AI used the wrong percentage (e.g., 10% instead of 20%)
+        if (parsed.message) {
+          // Replace any mention of "10%", "5%", etc. with the actual percentage if the AI hallucinated
+          // We use a safe regex to only replace percentage-like numbers followed by %
+          const percentageRegex = /\b(10|5|15|20|25|30)%\b/g;
+          parsed.message = parsed.message.replace(percentageRegex, `${finalPercentage}%`);
         }
 
-        await createDiscountCode(admin, parsed.discount.code, finalPercentage);
+        // Sync the suggestion object so the UI shows the correct (configured) percentage
+        parsed.discount.percentage = finalPercentage;
+        parsed.discount.code = dynamicCode;
+        parsed.discount.text = `${finalPercentage}% OFF applied at checkout`;
+
+        suggestion = parsed; // Ensure we send back the modernized/corrected object
+
+        await createDiscountCode(admin, dynamicCode, finalPercentage);
       }
     } catch (discountErr) {
       console.log('Discount creation skipped or failed:', discountErr.message);
