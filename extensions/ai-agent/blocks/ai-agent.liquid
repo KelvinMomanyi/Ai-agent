@@ -750,7 +750,6 @@ function showUpsellDisplay(message, cart) {
     
     // Handle Discount
     const inlineDiscountBadge = document.getElementById('cb-inline-discount-badge');
-    currentDiscountCode = null; // Reset
     if (inlineDiscountBadge) {
       if (message.discount && message.discount.percentage) {
         inlineDiscountBadge.textContent = `🔥 SAVE ${message.discount.percentage}% NOW`;
@@ -1142,6 +1141,8 @@ form.addEventListener('submit', () => {
 
     // Add to cart via AJAX
     try {
+      if (!variantId) throw new Error('No variant ID provided');
+
       const response = await fetch('/cart/add.js', {
         method: 'POST',
         headers: {
@@ -1153,20 +1154,24 @@ form.addEventListener('submit', () => {
         })
       });
 
-      if (!response.ok) throw new Error('Failed to add to cart');
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Cart add error response:', errorText);
+        throw new Error('Failed to add to cart');
+      }
       
       const cartData = await response.json();
       console.log('Item added to cart:', cartData);
 
-      btn.innerHTML = 'âœ“ Added!';
+      btn.innerHTML = 'Added!'; // Removed garbled characters
       
       // Optional: Refresh the page or redirect to checkout to see the discount
       // For now, let's just show the success state
       setTimeout(() => {
           btn.innerHTML = originalText;
           btn.disabled = false;
-          // closeChatbotModal(); // Optionally close modal
-          window.location.href = '/checkout'; // Redirect to checkout to show discount
+          closeChatbotModal(); // Close modal on success
+          // window.location.href = '/checkout'; // Redirect removed
       }, 1000);
 
     } catch (err) {
