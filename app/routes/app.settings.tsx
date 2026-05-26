@@ -23,6 +23,7 @@ import {
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { ensureRevenueEngineConfigSchema } from "../models/shop-config.server";
 
 const defaultConfig = {
   discountPercentage: 10,
@@ -65,6 +66,8 @@ const urgencyOptions = [
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  await ensureRevenueEngineConfigSchema(prisma);
+
   const config = await prisma.shopConfig.findUnique({
     where: { shopDomain: session.shop },
   });
@@ -74,6 +77,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  await ensureRevenueEngineConfigSchema(prisma);
+
   const formData = await request.formData();
 
   const discountPercentage = clampNumber(

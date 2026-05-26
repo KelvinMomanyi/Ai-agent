@@ -8,6 +8,7 @@ import {
   type ProductCandidate,
   type RevenueOffer,
 } from "../models/revenue-engine.server";
+import { ensureRevenueEngineConfigSchema } from "../models/shop-config.server";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -42,6 +43,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const body = (await request.json()) as UpsellRequestBody;
     const { session, admin } = await authenticate.public.appProxy(request);
+    await ensureRevenueEngineConfigSchema(prisma);
+
     const cartItems = Array.isArray(body.cartItems) ? body.cartItems : [];
     const behaviorContext: BehaviorContext = {
       ...(body.behaviorContext || {}),
