@@ -52,14 +52,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   await prisma.shop.upsert({
     where: { shopDomain: session.shop },
     update: {
-      accessToken: session.accessToken,
-      productCatalog: session.productCatalog,
+      accessToken: session.accessToken || "",
+      productCatalog,
     },
     create: {
       shopDomain: session.shop,
-      accessToken: session.accessToken,
+      accessToken: session.accessToken || "",
       scope: session.scope,
-      productCatalog: session.productCatalog,
+      productCatalog,
     }
   });
 
@@ -81,8 +81,8 @@ export default function App() {
         <Link to="/app" rel="home">
           Home
         </Link>
-        <Link to="/app/analytics">Analytics</Link>
-        <Link to="/app/settings">Settings</Link>
+        <Link to="/app/analytics">Revenue Dashboard</Link>
+        <Link to="/app/settings">Revenue Engine</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>

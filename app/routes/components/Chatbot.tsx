@@ -1,11 +1,8 @@
-import React from 'react'
 import { useState } from 'react'
 import './Chatbot.css'
 import { Form, useFetcher } from '@remix-run/react'
 
-type Props = {}
-
-const Chatbot = (props: Props) => {
+const Chatbot = () => {
   const [isOpen, setIsOpen ] = useState(false)
   const toggleChatbox = ( ) => setIsOpen(!isOpen)
 
@@ -18,8 +15,8 @@ const Chatbot = (props: Props) => {
         encType:'multipart/form-data',
         action:'/api/chat'
       })
-    } catch (error) {
-      
+    } catch {
+      // Ignore chat submission failures in the floating widget.
     }
   }
   return (

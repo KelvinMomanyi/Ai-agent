@@ -1,6 +1,8 @@
+import React from "react";
 import {
     extend,
     render,
+    useExtensionInput,
     BlockStack,
     Button,
     CalloutBanner,
@@ -12,12 +14,9 @@ import {
     View,
 } from "@shopify/post-purchase-ui-extensions-react";
 
-// This runs BEFORE the post-purchase page is shown.
-// Use it to decide whether to show an upsell offer.
 export const ShouldRender = extend(
     "Checkout::PostPurchase::ShouldRender",
     async ({ inputData, storage }) => {
-        // Call our AI upsell API to get a suggestion based on what was just purchased
         try {
             const lineItems = inputData.initialPurchase.lineItems;
             const cartItems = lineItems.map((item) => ({
@@ -27,10 +26,7 @@ export const ShouldRender = extend(
                 product_title: item.title,
             }));
 
-            // Store the cart context so the Render phase can use it
             await storage.update({ cartItems: JSON.stringify(cartItems) });
-
-            // Show the post-purchase page
             return { render: true };
         } catch (error) {
             console.error("ShouldRender error:", error);
@@ -39,7 +35,6 @@ export const ShouldRender = extend(
     }
 );
 
-// This renders the actual post-purchase upsell UI
 render("Checkout::PostPurchase::Render", () => <PostPurchaseUpsell />);
 
 function PostPurchaseUpsell() {
@@ -57,13 +52,19 @@ function PostPurchaseUpsell() {
                 const storedData = await storage.initialData;
                 const cartItems = JSON.parse(storedData.cartItems || "[]");
 
-                // Call the upsell API
                 const response = await fetch(
                     `${inputData.shop.storefrontUrl}/apps/upsell`,
                     {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ cartItems }),
+                        body: JSON.stringify({
+                            cartItems,
+                            behaviorContext: {
+                                pageType: "post_purchase",
+                                trafficSource: "checkout",
+                                itemCount: cartItems.length,
+                            },
+                        }),
                     }
                 );
 
@@ -97,30 +98,29 @@ function PostPurchaseUpsell() {
         }
 
         try {
-            // Extract numeric variant ID
-            const variantId = upsellData.id.includes("/")
-                ? upsellData.id.split("/").pop()
-                : upsellData.id;
-
             const token = inputData.token;
-
-            // Calculate what changes would look like
+            const offerItems = getOfferItems(upsellData);
             const changeset = await calculateChangeset({
-                changes: [
-                    {
+                changes: offerItems.map((item) => {
+                    const variantId = item.id.includes("/")
+                        ? item.id.split("/").pop()
+                        : item.id;
+
+                    return {
                         type: "add_variant",
                         variantId: parseInt(variantId, 10),
                         quantity: 1,
-                        discount: upsellData.discount?.percentage ? {
-                            value: upsellData.discount.percentage,
-                            valueType: "percentage",
-                            title: upsellData.discount.text || "AI Upsell Discount",
-                        } : undefined,
-                    },
-                ],
+                        discount: upsellData.discount?.percentage
+                            ? {
+                                value: upsellData.discount.percentage,
+                                valueType: "percentage",
+                                title: upsellData.discount.text || "AI Revenue Engine Discount",
+                            }
+                            : undefined,
+                    };
+                }),
             });
 
-            // Apply the one-click purchase
             await applyChangeset(token, changeset);
             done();
         } catch (err) {
@@ -138,24 +138,26 @@ function PostPurchaseUpsell() {
         return (
             <BlockStack spacing="loose" alignment="center">
                 <TextContainer>
-                    <Text size="medium">Finding the perfect add-on for your order...</Text>
+                    <Text size="medium">Building a relevant post-purchase offer...</Text>
                 </TextContainer>
             </BlockStack>
         );
     }
 
     if (!upsellData) {
-        // No upsell available, silently complete
         done();
         return null;
     }
 
+    const offerItems = getOfferItems(upsellData);
+    const primaryItem = offerItems[0];
+    const offerPrice = upsellData.bundle?.discountedTotal || upsellData.price;
+
     return (
         <BlockStack spacing="loose">
-            <CalloutBanner title="🎁 Exclusive One-Time Offer">
+            <CalloutBanner title={upsellData.modeLabel || "AI Revenue Engine Offer"}>
                 <Text>
-                    This special deal is only available right now — add it to your order
-                    with one click!
+                    This offer was selected for your order context and can be added with one click.
                 </Text>
             </CalloutBanner>
 
@@ -167,10 +169,10 @@ function PostPurchaseUpsell() {
                 ]}
             >
                 <View>
-                    {upsellData.image && (
+                    {primaryItem?.image && (
                         <Image
-                            source={upsellData.image}
-                            alt={upsellData.title}
+                            source={primaryItem.image}
+                            alt={primaryItem.title}
                             aspectRatio={1}
                             fit="cover"
                             cornerRadius="base"
@@ -181,14 +183,19 @@ function PostPurchaseUpsell() {
                 <View />
 
                 <BlockStack spacing="tight">
-                    <Heading>{upsellData.title}</Heading>
+                    <Heading>{upsellData.bundle?.title || upsellData.title}</Heading>
                     <Text size="large" emphasized>
-                        ${upsellData.price}
+                        ${offerPrice}
                     </Text>
                     {upsellData.discount?.percentage && (
                         <Text size="small" appearance="success">
-                            🔥 {upsellData.discount.percentage}% OFF applied automatically!
+                            {upsellData.discount.percentage}% off applied automatically.
                         </Text>
+                    )}
+                    {offerItems.length > 1 && (
+                        <TextContainer>
+                            <Text>{offerItems.map((item) => item.title).join(" + ")}</Text>
+                        </TextContainer>
                     )}
                     <TextContainer>
                         <Text>{upsellData.message}</Text>
@@ -201,7 +208,7 @@ function PostPurchaseUpsell() {
                             loading={accepted}
                             disabled={declining}
                         >
-                            {accepted ? "Adding..." : `Add to Order — $${upsellData.price}`}
+                            {accepted ? "Adding..." : `Add to order - $${offerPrice}`}
                         </Button>
                         <Button
                             onPress={handleDecline}
@@ -216,4 +223,17 @@ function PostPurchaseUpsell() {
             </Layout>
         </BlockStack>
     );
+}
+
+function getOfferItems(offer) {
+    if (offer?.bundle?.items?.length) return offer.bundle.items;
+
+    return [
+        {
+            id: offer.id,
+            title: offer.title,
+            price: offer.price,
+            image: offer.image,
+        },
+    ];
 }

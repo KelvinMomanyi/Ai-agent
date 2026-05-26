@@ -1,8 +1,6 @@
-import crypto from "crypto";
 import prisma from "app/db.server";
 import { authenticate } from "app/shopify.server";
 import type { ActionFunctionArgs } from "@remix-run/node";
-import { v4 as uuidv4 } from "uuid";
 
 // export const action = async ({ request } : ActionFunctionArgs) => {
 //   console.log("Webhook route hit"); // ✅ should appear first

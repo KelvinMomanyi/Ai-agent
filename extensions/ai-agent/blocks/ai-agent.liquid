@@ -1,1298 +1,834 @@
-﻿{% comment %} 
-<!-- Modal Backdrop -->
-<div id="chatbot-backdrop" style="
-  display: none;
-  position: fixed;
-  inset: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  z-index: 9998;
-"></div>
+<div
+  id="ai-revenue-engine-{{ block.id }}"
+  class="are-root"
+  data-block-id="{{ block.id }}"
+>
+  <div id="are-backdrop-{{ block.id }}" class="are-backdrop" hidden></div>
 
+  <section
+    id="are-offer-{{ block.id }}"
+    class="are-offer"
+    aria-live="polite"
+    hidden
+  >
+    <button
+      type="button"
+      id="are-close-{{ block.id }}"
+      class="are-close"
+      aria-label="Close offer"
+    >
+      &times;
+    </button>
 
-<!-- NEW Modal -->
-<div id="chatbot-messages" style="
-  display: none;
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: white;
-  padding: 0;
-  border-radius: 12px;
-  width: 90%;
-  max-width: 700px;
-  box-shadow: 0 15px 30px rgba(0,0,0,0.2);
-  z-index: 9999;
-  font-family: 'DM Sans', sans-serif;
-  overflow: hidden;
-">
-  <!-- Close Button -->
-  <button onclick="closeChatbotModal()" style="
-    position: absolute;
-    top: 15px;
-    right: 20px;
-    background: none;
-    border: none;
-    font-size: 22px;
-    font-weight: bold;
-    color: #333;
-    cursor: pointer;
-    z-index: 10;
-  ">&times;</button>
+    <div class="are-media" id="are-media-{{ block.id }}"></div>
 
-  <!-- Flex Container -->
-  <div style="display: flex; flex-direction: row; height: 100%;">
-    <!-- Image Section -->
-    <div style="flex: 1; background-color: #f9f9f9; display: flex; align-items: center; justify-content: center;">
-      <img id="chatbot-image" src="" alt="" style="width: 100%; height: auto; object-fit: contain; max-height: 100%;" />
-    </div>
-
-    <!-- Info Section -->
-    <div style="flex: 1; padding: 30px; display: flex; flex-direction: column; justify-content: center;">
-      <h3 id="chatbot-title" style="margin: 0 0 10px; font-size: 1.5rem; font-weight: 600;"></h3>
-      <p id="chatbot-price" style="font-weight: bold; font-size: 1.2rem; margin-bottom: 10px;"></p>
-      <p id="chatbot-text" style="margin-bottom: 20px; color: #555;"></p>
-
-      <form method="POST" action="/cart/add" style="margin-top: auto;">
-        <input type="hidden" name="id" id="upsell-variant-id" />
-        <button type="submit" style="
-          background-color: #000;
-          color: #fff;
-          padding: 12px 24px;
-          font-size: 1rem;
-          border: none;
-          border-radius: 6px;
-          cursor: pointer;
-          width: 100%;
-          transition: background 0.3s ease;
-        ">Add to Cart</button>
-      </form>
-    </div>
-  </div>
-</div> {% endcomment %}
-<!-- Modal Backdrop -->
-<div id="chatbot-backdrop" class="cb-backdrop"></div>
-
-<!-- Modal / Popup Container -->
-<div id="chatbot-messages"
-     class="cb-modal cb-type-{{ block.settings.popup_type }} cb-pos-{{ block.settings.popup_position }} cb-anim-{{ block.settings.animation_style }} {% if block.settings.enable_glassmorphism %}cb-glass{% endif %}"
-     style="display: none;">
-
-  <button onclick="closeChatbotModal()" class="cb-close-btn" aria-label="Close">
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-    </svg>
-  </button>
-
-  <div class="cb-flex-container">
-    <div class="cb-image-section">
-      <img id="chatbot-image" src="" alt="" />
-    </div>
-    <div class="cb-info-section">
-      <div id="cb-discount-badge" class="cb-discount-badge" style="display: none;"></div>
-      <h3 id="chatbot-title"></h3>
-      <div class="cb-price-row">
-        <span class="cb-currency" id="chatbot-currency">{{ shop.currency }}</span>
-        <span class="cb-price-value" id="chatbot-price"></span>
+    <div class="are-content">
+      <div class="are-meta">
+        <span id="are-mode-{{ block.id }}" class="are-pill">AI Revenue Engine</span>
+        <span id="are-experiment-{{ block.id }}" class="are-pill are-pill-muted">Testing</span>
       </div>
-      <p id="chatbot-text" class="cb-text"></p>
-      <form method="POST" action="/cart/add" onsubmit="handleSubmit(event, this)">
-        <input type="hidden" name="id" id="upsell-variant-id" value="" />
-        <input type="hidden" name="quantity" value="1" />
-        <button type="submit" class="cb-add-to-cart-btn">Add to Cart</button>
-      </form>
-    </div>
-  </div>
-</div>
 
-<!-- Inline Upsell Container -->
-<div id="cb-inline-display" class="cb-inline-container {% if block.settings.enable_glassmorphism %}cb-glass{% endif %}">
-  <div class="cb-flex-container">
-    <div class="cb-image-section">
-      <img id="cb-inline-image" src="" alt="">
-    </div>
-    <div class="cb-info-section">
-      <div id="cb-inline-discount-badge" class="cb-discount-badge" style="display: none;"></div>
-      <h3 id="cb-inline-title"></h3>
-      <div class="cb-price-row">
-        <span class="cb-currency" id="cb-inline-currency"></span>
-        <span class="cb-price-value" id="cb-inline-price"></span>
+      <h3 id="are-title-{{ block.id }}" class="are-title"></h3>
+
+      <div class="are-price-row">
+        <span id="are-currency-{{ block.id }}" class="are-currency">{{ shop.currency }}</span>
+        <span id="are-price-{{ block.id }}" class="are-price"></span>
+        <span id="are-compare-{{ block.id }}" class="are-compare"></span>
       </div>
-      <p id="cb-inline-text" class="cb-text"></p>
-      <form onsubmit="handleSubmit(event, this)" action="/cart/add" method="post">
-        <input type="hidden" name="id" id="cb-inline-variant-id" value="">
-        <input type="hidden" name="quantity" value="1" />
-        <button type="submit" class="cb-add-to-cart-btn">Add to Cart</button>
+
+      <p id="are-message-{{ block.id }}" class="are-message"></p>
+      <ul id="are-items-{{ block.id }}" class="are-items"></ul>
+      <p id="are-insight-{{ block.id }}" class="are-insight"></p>
+
+      <form id="are-form-{{ block.id }}" class="are-form" action="/cart/add" method="post">
+        <button type="submit" id="are-submit-{{ block.id }}" class="are-submit">
+          Add revenue offer
+        </button>
       </form>
     </div>
-  </div>
+  </section>
 </div>
 
 <style>
-/* ===================================================================
-   AI AGENT UPSELL — DESIGN SYSTEM
-   Professionally balanced & theme-integrated. z-index: 2147483647
-   =================================================================== */
+  #ai-revenue-engine-{{ block.id }},
+  #ai-revenue-engine-{{ block.id }} * {
+    box-sizing: border-box;
+  }
 
-/* ---------- SCOPED RESET ---------- */
-.cb-modal, .cb-modal *,
-.cb-inline-container, .cb-inline-container * {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  font-family: inherit; /* Use theme typography */
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-}
+  #ai-revenue-engine-{{ block.id }} {
+    font-family: inherit;
+  }
 
-/* ---------- BACKDROP ---------- */
-.cb-backdrop {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 2147483646;
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
-}
+  #ai-revenue-engine-{{ block.id }} .are-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483640;
+    background: rgba(17, 24, 39, 0.42);
+  }
 
-/* ---------- BASE MODAL ---------- */
-.cb-modal {
-  display: none;
-  position: fixed;
-  z-index: 2147483647;
-  width: 92%;
-  max-width: 540px;
-  background: {{ block.settings.modal_background_color | default: '#ffffff' }};
-  border-radius: {{ block.settings.modal_border_radius | default: 12 }}px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
-  overflow: hidden;
-  border: 1px solid rgba(0,0,0,0.05);
-}
+  #ai-revenue-engine-{{ block.id }} .are-offer {
+    position: relative;
+    width: 100%;
+    max-width: 760px;
+    margin: 16px 0;
+    display: grid;
+    grid-template-columns: minmax(140px, 0.42fr) minmax(0, 0.58fr);
+    overflow: hidden;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    border-radius: {{ block.settings.modal_border_radius | default: 8 }}px;
+    background: {{ block.settings.modal_background_color | default: '#ffffff' }};
+    color: {{ block.settings.modal_title_color | default: '#111827' }};
+    box-shadow: 0 12px 32px rgba(17, 24, 39, 0.12);
+  }
 
-/* ---------- GLASS EFFECT ---------- */
-.cb-glass {
-  background: rgba(255, 255, 255, 0.8) !important;
-  backdrop-filter: blur(12px) saturate(160%);
-  -webkit-backdrop-filter: blur(12px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-}
+  #ai-revenue-engine-{{ block.id }} .are-offer[hidden],
+  #ai-revenue-engine-{{ block.id }} .are-backdrop[hidden] {
+    display: none;
+  }
 
-/* ---------- POSITIONS ---------- */
-.cb-pos-center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
-.cb-pos-bottom_left { bottom: 20px; left: 20px; transform: none; }
-.cb-pos-bottom_right { bottom: 20px; right: 20px; transform: none; }
-.cb-pos-top_center { top: 20px; left: 50%; transform: translateX(-50%); }
+  #ai-revenue-engine-{{ block.id }} .are-offer.are-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    z-index: 2147483641;
+    transform: translate(-50%, -50%);
+    width: min(760px, calc(100vw - 28px));
+    margin: 0;
+  }
 
-/* ---------- CLOSE BUTTON ---------- */
-.cb-close-btn {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.04);
-  color: #666;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.cb-close-btn:hover { background: rgba(0, 0, 0, 0.08); color: #000; }
+  #ai-revenue-engine-{{ block.id }} .are-offer.are-slide {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 2147483641;
+    width: min(520px, calc(100vw - 28px));
+    margin: 0;
+    grid-template-columns: 150px minmax(0, 1fr);
+  }
 
-/* ---------- FLEX CONTAINER ---------- */
-.cb-flex-container { display: flex; flex-direction: row; min-height: 200px; }
+  #ai-revenue-engine-{{ block.id }} .are-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 2;
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(17, 24, 39, 0.08);
+    color: #111827;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+  }
 
-/* ---------- IMAGE SECTION ---------- */
-.cb-image-section {
-  flex: 0 0 40%;
-  background: {{ block.settings.image_section_Background_color | default: '#f7f7f7' }};
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
-}
-.cb-image-section img {
-  width: 100%;
-  height: auto;
-  max-height: 240px;
-  object-fit: contain;
-  border-radius: 6px;
-}
+  #ai-revenue-engine-{{ block.id }} .are-media {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    align-content: center;
+    padding: 14px;
+    background: {{ block.settings.image_section_Background_color | default: '#f3f4f6' }};
+  }
 
-/* ---------- INFO SECTION ---------- */
-.cb-info-section {
-  flex: 1;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 8px;
-  max-height: 80vh;
-  overflow-y: auto;
-}
-.cb-info-section h3 {
-  font-size: {{ block.settings.modal_title_fontSize | default: 18 }}px;
-  font-weight: 600;
-  color: {{ block.settings.modal_title_color | default: '#000' }};
-}
+  #ai-revenue-engine-{{ block.id }} .are-media.are-single {
+    grid-template-columns: 1fr;
+  }
 
-/* ---------- PRICE ---------- */
-.cb-price-row {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  font-weight: 600;
-  font-size: {{ block.settings.modal_price_fontSize | default: 16 }}px;
-  color: {{ block.settings.modal_price_color | default: '#000' }};
-}
-.cb-currency { font-size: 0.8em; opacity: 0.5; }
+  #ai-revenue-engine-{{ block.id }} .are-media img {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: contain;
+    border-radius: 6px;
+    background: #ffffff;
+  }
 
-/* ---------- DESCRIPTION ---------- */
-.cb-text {
-  font-size: {{ block.settings.modal_text_fontSize | default: 14 }}px;
-  color: {{ block.settings.modal_text_color | default: '#444' }};
-  line-height: 1.5;
-}
+  #ai-revenue-engine-{{ block.id }} .are-content {
+    min-width: 0;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
 
-/* ---------- BUTTON ---------- */
-.cb-add-to-cart-btn {
-  width: 100%;
-  padding: 12px;
-  margin-top: 4px;
-  border: none;
-  border-radius: 8px;
-  background: {{ block.settings.modal_button_color | default: '#000' }};
-  color: {{ block.settings.modal_Button_text_color | default: '#fff' }};
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-.cb-add-to-cart-btn:hover { opacity: 0.9; }
+  #ai-revenue-engine-{{ block.id }} .are-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-right: 26px;
+  }
 
-/* ---------- DISCOUNT BADGE ---------- */
-.cb-discount-badge {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: #fff;
-  background: #e63946; /* Professional solid accent */
-}
+  #ai-revenue-engine-{{ block.id }} .are-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: {{ block.settings.modal_button_color | default: '#111827' }};
+    color: {{ block.settings.modal_Button_text_color | default: '#ffffff' }};
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
 
-/* =================================================================
-   LAYOUT VARIANTS
-   ================================================================= */
+  #ai-revenue-engine-{{ block.id }} .are-pill-muted {
+    background: rgba(17, 24, 39, 0.08);
+    color: #374151;
+  }
 
-/* Toast - Balanced proportions */
-.cb-type-toast { max-width: 380px; }
-.cb-type-toast .cb-image-section { flex: 0 0 90px; }
-.cb-type-toast .cb-image-section img { max-height: 100px; }
-.cb-type-toast .cb-info-section { padding: 16px; gap: 4px; }
-.cb-type-toast h3 { font-size: 1rem; }
-.cb-type-toast .cb-text { font-size: 0.85rem; }
+  #ai-revenue-engine-{{ block.id }} .are-title {
+    margin: 0;
+    font-size: {{ block.settings.modal_title_fontSize | default: 20 }}px;
+    line-height: 1.2;
+    color: {{ block.settings.modal_title_color | default: '#111827' }};
+    letter-spacing: 0;
+  }
 
-/* Floating Card - Stacked */
-.cb-type-floating { max-width: 300px; }
-.cb-type-floating .cb-flex-container { flex-direction: column; }
-.cb-type-floating .cb-image-section { flex: none; height: 140px; padding: 10px 10px 0; background: transparent; }
-.cb-type-floating .cb-image-section img { height: 100%; object-fit: cover; }
-.cb-type-floating .cb-info-section { padding: 12px 16px 16px; }
+  #ai-revenue-engine-{{ block.id }} .are-price-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    color: {{ block.settings.modal_price_color | default: '#111827' }};
+  }
 
-/* =================================================================
-   ANIMATIONS
-   ================================================================= */
-.cb-anim-fade   { animation: cb-fadeIn 0.3s ease both; }
-.cb-anim-slide_up { animation: cb-slideUp 0.4s ease-out both; }
-.cb-anim-bounce { animation: cb-bounceIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) both; }
+  #ai-revenue-engine-{{ block.id }} .are-price {
+    font-size: {{ block.settings.modal_price_fontSize | default: 18 }}px;
+    font-weight: 700;
+  }
 
-@keyframes cb-fadeIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes cb-slideUp {
-  from { opacity: 0; transform: translate(-50%,-45%); }
-  to   { opacity: 1; transform: translate(-50%,-50%); }
-}
-.cb-pos-bottom_left.cb-anim-slide_up,
-.cb-pos-bottom_right.cb-anim-slide_up { animation-name: cb-slideUpCorner; }
-@keyframes cb-slideUpCorner { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  #ai-revenue-engine-{{ block.id }} .are-currency,
+  #ai-revenue-engine-{{ block.id }} .are-compare {
+    color: #6B7280;
+    font-size: 13px;
+  }
 
-@keyframes cb-bounceIn {
-  from { opacity: 0; transform: translate(-50%,-50%) scale(0.8); }
-  to   { opacity: 1; transform: translate(-50%,-50%) scale(1); }
-}
+  #ai-revenue-engine-{{ block.id }} .are-compare {
+    text-decoration: line-through;
+  }
 
-/* =================================================================
-   INLINE
-   ================================================================= */
-.cb-inline-container {
-  display: none;
-  max-width: 100%;
-  margin: 15px 0;
-  border-radius: {{ block.settings.modal_border_radius | default: 8 }}px;
-  background: {{ block.settings.modal_background_color | default: '#ffffff' }};
-  border: 1px solid rgba(0,0,0,0.08);
-  overflow: hidden;
-}
+  #ai-revenue-engine-{{ block.id }} .are-message,
+  #ai-revenue-engine-{{ block.id }} .are-insight {
+    margin: 0;
+    color: {{ block.settings.modal_text_color | default: '#374151' }};
+    font-size: {{ block.settings.modal_text_fontSize | default: 14 }}px;
+    line-height: 1.5;
+  }
 
-/* =================================================================
-   RESPONSIVE
-   ================================================================= */
-@media (max-width: 600px) {
-  .cb-modal { width: calc(100% - 20px); max-width: none; border-radius: 8px; }
-  .cb-pos-center { top: auto; bottom: 10px; left: 10px; right: 10px; transform: none; }
-  .cb-pos-bottom_left, .cb-pos-bottom_right, .cb-pos-top_center { left: 10px; right: 10px; bottom: 10px; top: auto; width: auto; transform: none; }
-  
-  .cb-flex-container { flex-direction: column !important; }
-  .cb-image-section { flex: none !important; height: 160px; }
-  .cb-info-section { padding: 16px !important; }
+  #ai-revenue-engine-{{ block.id }} .are-insight {
+    padding: 10px 12px;
+    border-left: 3px solid {{ block.settings.modal_button_color | default: '#111827' }};
+    background: rgba(17, 24, 39, 0.05);
+    color: #374151;
+  }
 
-  .cb-type-toast .cb-flex-container { flex-direction: row !important; }
-  .cb-type-toast .cb-image-section { flex: 0 0 80px !important; height: auto !important; }
-}
+  #ai-revenue-engine-{{ block.id }} .are-items {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-items li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: #374151;
+    font-size: 13px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-submit {
+    width: 100%;
+    min-height: 44px;
+    border: 0;
+    border-radius: 6px;
+    background: {{ block.settings.modal_button_color | default: '#111827' }};
+    color: {{ block.settings.modal_Button_text_color | default: '#ffffff' }};
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-submit:disabled {
+    cursor: wait;
+    opacity: 0.7;
+  }
+
+  @media (max-width: 640px) {
+    #ai-revenue-engine-{{ block.id }} .are-offer,
+    #ai-revenue-engine-{{ block.id }} .are-offer.are-slide,
+    #ai-revenue-engine-{{ block.id }} .are-offer.are-modal {
+      grid-template-columns: 1fr;
+      width: calc(100vw - 20px);
+      max-width: none;
+      left: 10px;
+      right: 10px;
+      bottom: 10px;
+      top: auto;
+      transform: none;
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-media {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      padding: 12px;
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-content {
+      padding: 18px;
+    }
+  }
 </style>
 
-
-
 <script>
-const button = document.getElementById('chatbot-button');
-const messages = document.getElementById('chatbot-messages');
-const textContainer = document.getElementById('chatbot-text');
-
-
-
-//ORIGINAL FUNCTION
-//async function fetchUpsellSuggestion() {
-//  try {
-//    const cart = await fetch('/cart.js').then(res => res.json());
-//    const response = await fetch('/apps/upsell', {
-//      method: 'POST',
-//      headers: {
-//        'Content-Type': 'application/json',
-//        "Access-Control-Allow-Origin": "*",
-//      },
-//      body: JSON.stringify({
-//        cartItems: cart.items,
-//      }),
-//    });
-
-//    const data = await response.json();
-//    console.log(data, 'upsell response');
-//   // showChatbotModal(data.suggestion);
-
-//   const modelMessage = data.suggestion
-
-//   const jsonMatch = modelMessage.match(/\{[\s\S]*?\}/);
-
-let currentDiscountCode = null;
-
-//    if (!jsonMatch) {
-//      throw new Error('No valid JSON found in model response');
-//    }
-
-//    // Clean and parse the JSON block
-//    const cleanedJson = jsonMatch[0]
-//      .replace(/[\n\r\t]/g, '')     // remove newlines, tabs, etc.
-//      .replace(/\\(?=")/g, '');     // remove unnecessary backslashes before quotes
-
-//    const upsellData = JSON.parse(cleanedJson);
-//    console.log('Parsed upsell data:', upsellData);
-  
-//   showChatbotModal(upsellData, cart)
-//   trackEvent('upsell_impression', { id: upsellData.id }); // impression
-//  } catch (err) {
-//    console.error('Upsell API error:', err);
-//   // showChatbotModal("Something went wrong. Please try again.");
-//  }
-//}
-
-
-
-async function fetchUpsellSuggestion() {
-  try {
-    // Get cart data with error handling
-    let cart;
-    try {
-      cart = await fetch('/cart.js').then(res => {
-        if (!res.ok) throw new Error(`Cart fetch failed: ${res.status}`);
-        return res.json();
-      });
-    } catch (cartError) {
-     // console.error('Failed to fetch cart:', cartError);
-      throw new Error('Unable to load cart data');
-    }
-
-  //  console.log('Cart data:', cart); // Debug cart structure
-
-    // Validate cart data before sending
-    if (!cart || !cart.items || !Array.isArray(cart.items)) {
-      throw new Error('Invalid cart data structure');
-    }
-
-    // Make upsell request with comprehensive error handling
-    const response = await fetch('/apps/upsell', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        // Remove CORS header - it's not needed for same-origin requests
-         "Access-Control-Allow-Origin": "*", 
-      },
-      body: JSON.stringify({
-        cartItems: cart.items,
-        // Add additional context that might be needed
-        cartTotal: cart.total_price,
-        currency: cart.currency,
-        itemCount: cart.item_count
-      }),
-    });
-
-    // Handle different HTTP status codes
-    if (!response.ok) {
-      let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-      
-      try {
-        // Try to get error details from response
-        const errorData = await response.text();
-      //  console.error('Server error response:', errorData);
-        
-        // Try to parse as JSON for structured error
-        try {
-          const errorJson = JSON.parse(errorData);
-          errorMessage = errorJson.message || errorJson.error || errorMessage;
-        } catch (e) {
-          // Not JSON, use text response
-          if (errorData) errorMessage += ` - ${errorData}`;
-        }
-      } catch (e) {
-      //  console.error('Could not read error response:', e);
-      }
-      
-      throw new Error(errorMessage);
-    }
-
-    // Parse response with error handling
-    let data;
-    try {
-      data = await response.json();
-    } catch (parseError) {
-    //  console.error('Failed to parse response as JSON:', parseError);
-      const responseText = await response.text();
-    //  console.error('Raw response:', responseText);
-      throw new Error('Invalid JSON response from server');
-    }
-
-   // console.log('Upsell API response:', data);
-
-    // Validate response structure
-    if (!data || !data.suggestion) {
-      throw new Error('Invalid response: missing suggestion data');
-    }
-
-  //  const modelMessage = data.suggestion;
-    
-    // Robust JSON extraction
-  //  const jsonMatch = modelMessage.match(/\{(?:[^{}]|{[^{}]*})*\}/);
-  //  if (!jsonMatch) {
-  //    console.error('No JSON found in model response:', modelMessage);
-  //    throw new Error('No valid JSON found in model response');
-  //  }
-
-    // Clean and parse JSON
-  //  let cleanedJson = jsonMatch[0]
-  //    .replace(/[\n\r\t]/g, '')
-  //    .replace(/\s+/g, ' ')
-  //    .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
-  //    .trim();
-
-  //  console.log('Extracted JSON:', cleanedJson);
-
-  //  let upsellData;
-  //  try {
-  //    upsellData = JSON.parse(cleanedJson);
-  ///  } catch (jsonError) {
-  //    console.error('JSON parsing failed:', jsonError);
-  //    console.error('Problematic JSON:', cleanedJson);
-  //    throw new Error(`JSON parsing error: ${jsonError.message}`);
-  //  }
-
-  //  console.log('Parsed upsell data:', upsellData);
-
-    // Validate required fields
-  //  if (!upsellData.id) {
-  //    throw new Error('Invalid upsell data: missing id');
-  //  }
-
-  //  showChatbotModal(upsellData, cart);
-   // trackEvent('upsell_impression', { id: upsellData.id, title:upsellData.title });
-   const modelMessage = data.suggestion;
-   let upsellData;
- 
-   try {
-     // Handle different possible formats
-     if (typeof modelMessage === 'string') {
-      // console.log('Processing as string (AI response)');
-       
-       // Try to parse as direct JSON first
-       try {
-         upsellData = JSON.parse(modelMessage);
-      //   console.log('Direct JSON parse successful');
-       } catch (directParseError) {
-      //   console.log('Direct parse failed, trying regex extraction');
-         
-         // Fallback to regex extraction
-         const jsonMatch = modelMessage.match(/\{(?:[^{}]|{[^{}]*})*\}/);
-         if (!jsonMatch) {
-        //   console.error('No JSON found in model response:', modelMessage);
-           throw new Error('No valid JSON found in model response');
-         }
- 
-         let cleanedJson = jsonMatch[0]
-           .replace(/[\n\r\t]/g, '')
-           .replace(/\s+/g, ' ')
-           .replace(/,(\s*[}\]])/g, '$1')
-           .trim();
- 
-        // console.log('Extracted JSON:', cleanedJson);
-         upsellData = JSON.parse(cleanedJson);
-       }
-     } else if (typeof modelMessage === 'object' && modelMessage !== null) {
-      // console.log('Processing as object (fallback response)');
-       upsellData = modelMessage;
-     } else {
-      // console.error('Unexpected modelMessage format:', typeof modelMessage, modelMessage);
-       throw new Error(`Invalid suggestion format: ${typeof modelMessage}`);
-     }
- 
-    // console.log('Final parsed upsell data:', upsellData);
- 
-     // Validate required fields
-     if (!upsellData || !upsellData.id) {
-       throw new Error('Invalid upsell data: missing id');
-     }
- 
-     showUpsellDisplay(upsellData, cart);
-     trackEvent('upsell_impression', { 
-       id: upsellData.id, 
-       title: upsellData.title,
-       source: typeof modelMessage === 'object' ? 'fallback' : 'ai'
-     });  } catch (processingError) {
-    ///  console.error('Error processing upsell suggestion:', processingError);
-    //  console.error('Original modelMessage:', modelMessage);
-      throw processingError;
-    }
-  } catch (err) {
-   // console.error('Upsell API error:', err);
-    
-    // Log detailed error info for debugging
-    //console.group('Upsell Error Details');
-    //console.error('Error type:', err.constructor.name);
-    //console.error('Error message:', err.message);
-    //console.error('Stack trace:', err.stack);
-  //  console.groupEnd();
-    
-    // Optional: Show user-friendly error
-    // showChatbotModal({
-    //   error: true,
-    //   message: "Unable to load recommendations. Please try again."
-    // });
-  }
-}
-
-// Enhanced cart polling with retry logic
-async function pollCart() {
-  const maxRetries = 3;
-  let retryCount = 0;
-  
-  while (retryCount < maxRetries) {
-    try {
-      await fetchUpsellSuggestion();
-      break; // Success, exit retry loop
-    } catch (error) {
-      retryCount++;
-    //  console.warn(`Upsell attempt ${retryCount} failed:`, error.message);
-      
-      if (retryCount < maxRetries) {
-        // Wait before retrying (exponential backoff)
-        const delay = Math.pow(2, retryCount) * 1000;
-    //    console.log(`Retrying in ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      } else {
-    //    console.error('All upsell attempts failed');
-      }
-    }
-  }
-}
-
-// Alternative: Check if endpoint exists before calling
-async function checkUpsellEndpoint() {
-  try {
-    const response = await fetch('/apps/upsell', {
-      method: 'OPTIONS' // Pre-flight check
-    });
-    return response.ok;
-  } catch (error) {
-  //  console.warn('Upsell endpoint check failed:', error);
-    return false;
-  }
-}
-
-
-
-
-
-
-
-
-
-function showUpsellDisplay(message, cart) {
-  const displayMode = "{{ block.settings.display_mode | default: 'modal' }}";
-  const smartDelay = {{ block.settings.smart_delay | default: 2 }} * 1000;
-  
-  // Logic to determine which display to show
-  const showModal = () => {
-    const modal = document.getElementById('chatbot-messages');
-    const titleEl = document.getElementById('chatbot-title');
-    const imageEl = document.getElementById('chatbot-image');
-    const priceEl = document.getElementById('chatbot-price');
-    const priceCurrency = document.getElementById('chatbot-currency');
-    const textEl = document.getElementById('chatbot-text');
-    const variantInput = document.getElementById('upsell-variant-id');
-
-    if (titleEl) titleEl.textContent = message.title || '';
-    if (priceEl) priceEl.textContent = message.price;
-    if (priceCurrency) priceCurrency.textContent = cart.currency;
-    if (textEl) textEl.textContent = message.message || '';
-    if (imageEl) imageEl.src = message.image;
-    
-    // Handle Discount
-    const discountBadge = document.getElementById('cb-discount-badge');
-    currentDiscountCode = null; // Reset
-    if (discountBadge) {
-      if (message.discount && message.discount.percentage) {
-        discountBadge.textContent = `ðŸ”¥ SPECIAL: ${message.discount.percentage}% OFF`;
-        discountBadge.style.display = 'inline-block';
-        currentDiscountCode = message.discount.code || 'SMART-AI-REWARD';
-      } else {
-        discountBadge.style.display = 'none';
-      }
-    }
-    
-    if (variantInput && message.id) {
-       const gid = message.id;
-       const numericId = gid.includes('/') ? gid.split("/").pop() : gid;
-       variantInput.value = numericId;
-    }
-
-    const popupPos = "{{ block.settings.popup_position }}";
-    if (popupPos === 'center') {
-      document.getElementById('chatbot-backdrop').style.display = 'block';
-    }
-    document.getElementById('chatbot-messages').style.display = 'block';
+(() => {
+  const blockId = "{{ block.id }}";
+  const settings = {
+    displayMode: "{{ block.settings.display_mode | default: 'autopilot' }}",
+    smartDelay: Number({{ block.settings.smart_delay | default: 1 }}) * 1000,
+    triggerOnLoad: {{ block.settings.trigger_on_load | default: true | json }},
+    redirectToCheckout: {{ block.settings.redirect_to_checkout | default: false | json }},
+    currency: "{{ shop.currency }}"
   };
 
-  const showInline = () => {
-    const inlineContainer = document.getElementById('cb-inline-display');
-    const titleEl = document.getElementById('cb-inline-title');
-    const imageEl = document.getElementById('cb-inline-image');
-    const priceEl = document.getElementById('cb-inline-price');
-    const priceCurrency = document.getElementById('cb-inline-currency');
-    const textEl = document.getElementById('cb-inline-text');
-    const variantInput = document.getElementById('cb-inline-variant-id');
+  const root = document.getElementById(`ai-revenue-engine-${blockId}`);
+  const offerEl = document.getElementById(`are-offer-${blockId}`);
+  const backdropEl = document.getElementById(`are-backdrop-${blockId}`);
+  const closeEl = document.getElementById(`are-close-${blockId}`);
+  const formEl = document.getElementById(`are-form-${blockId}`);
+  const submitEl = document.getElementById(`are-submit-${blockId}`);
 
-    if (titleEl) titleEl.textContent = message.title || '';
-    if (priceEl) priceEl.textContent = message.price;
-    if (priceCurrency) priceCurrency.textContent = cart.currency;
-    if (textEl) textEl.textContent = message.message || '';
-    if (imageEl) imageEl.src = message.image;
-    
-    // Handle Discount
-    const inlineDiscountBadge = document.getElementById('cb-inline-discount-badge');
-    currentDiscountCode = null; // Reset
-    if (inlineDiscountBadge) {
-      if (message.discount && message.discount.percentage) {
-        inlineDiscountBadge.textContent = `ðŸ”¥ SAVE ${message.discount.percentage}% NOW`;
-        inlineDiscountBadge.style.display = 'inline-block';
-        currentDiscountCode = message.discount.code || 'SMART-AI-REWARD';
-      } else {
-        inlineDiscountBadge.style.display = 'none';
-      }
-    }
+  if (!root || !offerEl || window[`__are_${blockId}`]) return;
+  window[`__are_${blockId}`] = true;
 
-    if (variantInput && message.id) {
-       const gid = message.id;
-       const numericId = gid.includes('/') ? gid.split("/").pop() : gid;
-       variantInput.value = numericId;
-    }
+  let activeOffer = null;
+  let activeBehavior = null;
+  let currentDiscountCode = null;
+  let inFlight = false;
+  let lastCartSignature = "";
 
-    if (inlineContainer) inlineContainer.style.display = 'block';
-  };
+  recordViewedProduct();
 
-  // Apply Smart Delay
-  setTimeout(() => {
-    if (displayMode === 'modal') {
-      showModal();
-    } else if (displayMode === 'inline') {
-      showInline();
-    } else { // 'both'
-      // Show inline first, if it's already there, maybe skip modal? 
-      // For now, let's just show both if both are configured
-      showInline();
-      // Optional: Wait more for modal?
-    }
-  }, smartDelay);
-}
-
-
-
-function closeChatbotModal() {
-  document.getElementById('chatbot-messages').style.display = 'none';
-  document.getElementById('chatbot-backdrop').style.display = 'none';
-}
-
-
-
-(function () {
-  const originalFetch = window.fetch;
-
-  window.fetch = async (...args) => {
-    const response = await originalFetch(...args);
-
-    const url = args[0];
-
-    if (typeof url === 'string' && url.includes('/cart/add')) {
-    //  console.log('[Cart Alert] Add to cart triggered via fetch:', url);
-
-      // Use .clone() if you need to read the body here
-      try {
-        const clonedResponse = response.clone();
-        const data = await clonedResponse.json();
-      //  console.log('[Cart Alert] Added item:', data);
-        trackEvent('upsell_add_to_cart', { ...data })
-        fetchUpsellSuggestion(); // Custom logic
-      } catch (err) {
-      //  console.error('Error reading response:', err);
-      }
-    }
-
-    return response; // ðŸš¨ Always return the response
-  };
-})();
-
-
-(function () {
-  const originalXHROpen = XMLHttpRequest.prototype.open;
-
-  XMLHttpRequest.prototype.open = function (method, url) {
-    if (url.includes('/cart/add')) {
-      this.addEventListener('load', function () {
-      //  console.log('[Cart Alert - XHR] Add to cart triggered via XMLHttpRequest:', url);
-        fetchUpsellSuggestion(); // custom logic
-      });
-    }
-    return originalXHROpen.apply(this, arguments);
-  };
-})();
-
-
-document.addEventListener('submit', function (e) {
-  const form = e.target;
-  if (form.action.includes('/cart/add')) {
-  //  console.log('[Cart Alert - Form] Add to cart triggered via form submission');
-  
-   // fetchUpsellSuggestion();   //Changed cart function
-  }
-});
-
-(function () {
-//  console.log('[ðŸ›’ Intercepting cart/add]');
-
-  function onCartAddIntercept(data, metadata = {}) {
-  //  console.log('ðŸŸ¢ Cart Add Intercepted:', data, metadata);
-    // ðŸ‘‰ Do your own logic: upsell, show modal, analytics, etc.
-  }
-
-  // âœ… Hook into form submissions that post to /cart/add
-  document.addEventListener("submit", async function (event) {
-    const form = event.target;
-    if (
-      form.tagName === "FORM" &&
-      form.action &&
-      form.action.includes("/cart/add")
-    ) {
-      // You can also skip if event.defaultPrevented
-
-      event.preventDefault(); // Optional: only if you want to hijack it
-
-      const formData = new FormData(form);
-      const postData = new URLSearchParams(formData);
-    
-      
-      // Send form manually (if you prevented default)
-      const response = await fetch(form.action, {
-        method: form.method,
-        body: postData,
-        headers: {
-          "Accept": "application/json",
-        },
-      });
-
-      try {
-        const json = await response.json();
-        // âœ… ADD DELAY HERE - Wait before triggering upsell
-      setTimeout(() => {
-        onCartAddIntercept(json, {
-          source: 'form',
-          productId: formData.get("id"),
-          quantity: formData.get("quantity"),
-        });
-      }, 500);
-
-      } catch (e) {
-    //    console.warn("âŒ Failed to parse cart/add response", e);
-      }
+  closeEl?.addEventListener("click", () => {
+    hideOffer();
+    if (activeOffer) {
+      trackEvent("offer_dismissed", buildTrackingPayload(activeOffer, activeBehavior));
     }
   });
 
+  backdropEl?.addEventListener("click", hideOffer);
+  formEl?.addEventListener("submit", handleOfferSubmit);
 
-
-
-
-
-  
-  // âœ… Monkey-patch XMLHttpRequest to intercept /cart/add (like the code you shared)
-  const originalOpen = XMLHttpRequest.prototype.open;
-  const originalSend = XMLHttpRequest.prototype.send;
-
-  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-    this._url = url;
-    this._method = method;
-    return originalOpen.call(this, method, url, ...rest);
-  };
-
-  XMLHttpRequest.prototype.send = function (body) {
-    const xhr = this;
-    const url = xhr._url;
-
-    xhr.addEventListener("load", function () {
-      if (url && url.includes("/cart/add")) {
-        try {
-          const contentType = xhr.getResponseHeader("content-type");
-          if (contentType && contentType.includes("application/json")) {
-            const json = JSON.parse(xhr.responseText);
-            onCartAddIntercept(json, { source: "xhr", url, body });
-          }
-        } catch (e) {
-      //    console.warn("âŒ Error parsing XHR cart/add", e);
-        }
-      }
-    });
-
-    return originalSend.call(this, body);
-  };
-})();
-
-
-
-
- // document.addEventListener('DOMContentLoaded', () => {
- //   const addToCartForms = document.querySelectorAll('form[action^="/cart/add"]');
-  
-//    addToCartForms.forEach((form) => {
-//      form.addEventListener('submit', (e) => {
-//        const sellingPlanId = window.getCurrentSellingPlanId();
-  
-        // You can now use this ID however you want:
-//        console.log('Selected Selling Plan ID:', sellingPlanId);
-  
-        // Example: append to the form as a hidden input (if not already there)
-//        if (!form.querySelector('input[name="selling_plan"]')) {
-//          const input = document.createElement('input');
-//          input.type = 'hidden';
-//          input.name = 'selling_plan';
- //         input.value = sellingPlanId;
- //         form.appendChild(input);
- //       } else {
- //         form.querySelector('input[name="selling_plan"]').value = sellingPlanId;
- //       }
-  
-        // OPTIONAL: You could also trigger your own logic here
-        // someOtherClassInstance.handleSellingPlan(sellingPlanId);
- //     });
- //   });
- // });
-  
-// async function fetchCart() {
- //   const variantId = '43726492881045'; // Replace with your actual variant ID
-///    const quantity = 1;
-  
-//    try {
-//      const response = await fetch('/cart/add.js', {
-//        method: 'POST',
-//        headers: {
-//          'Content-Type': 'application/json'
-//        },
-//        body: JSON.stringify({
-//         id: variantId,
-//          quantity: quantity
-//        })
-//      });
-  
-//      const data = await response.json();
- //     console.log('Item added:', data);
-//    } catch (error) {
-//      console.error('Error adding item to cart:', error);
-//    }
-//  }
-  
-  //fetchCart(); 
-
-
-
-let lastCartState = null;
-
-// Function to fetch current cart state
-async function fetchCartState() {
-  try {
-    const res = await fetch('/cart.js', { cache: 'no-store' }); // no-cache to get fresh data
-    if (!res.ok) throw new Error('Failed to fetch cart');
-    return await res.json();
-  } catch (err) {
-  //  console.error('Error fetching cart:', err);
-    return null;
+  if (settings.triggerOnLoad) {
+    window.setTimeout(() => requestRevenueOffer("page_load"), settings.smartDelay);
   }
-}
 
-// Function to compare carts simply (by item count or total price)
-function isCartChanged(oldCart, newCart) {
-  if (!oldCart || !newCart) return true;
-  if (oldCart.item_count !== newCart.item_count) return true;
-  if (oldCart.total_price !== newCart.total_price) return true;
-  return false;
-}
+  installCartHooks();
 
-// What to do when cart changes
-function onCartChange(cart) {
-//  console.log('Cart changed:', cart);
-  fetchUpsellSuggestion()
-  // TODO: Your upsell logic, UI update, etc.
-}
+  async function requestRevenueOffer(trigger) {
+    if (inFlight) return;
+    inFlight = true;
 
-// Polling loop
-//async function pollCart(interval = 3000) {
-//  const cart = await fetchCartState();
-//  if (isCartChanged(lastCartState, cart)) {
-//    lastCartState = cart;
- //   onCartChange(cart);
- // }
- // setTimeout(() => pollCart(interval), interval);
-//}
-
-// Start polling on page load
-//document.addEventListener('DOMContentLoaded', () => {
-//  pollCart(3000); // every 3 seconds (adjust as needed)
-//});
-
-
-
-function initCartPolling() {
-  if (window._cartPollingInitialized) return; // prevent multiple initializations
-  window._cartPollingInitialized = true;
-  pollCart(3000);
-}
-
-// Standard page load
-document.addEventListener('DOMContentLoaded', initCartPolling);
-
-// Optional: Re-trigger for themes using Ajax navigation (e.g., Shopify sections)
-document.addEventListener('page:load', initCartPolling); // e.g., if your theme uses it
-
-
-
-
-
-
-
-//CONVERSIONS
-//function trackEvent(eventName, data = {}) {
-//  fetch('/apps/upsell/track', {
-//    method: 'POST',
-//    headers: { 'Content-Type': 'application/json' },
-//    body: JSON.stringify({
-//      event: eventName,
-//      timestamp: new Date().toISOString(),
-//      data: data,
-//    }),
-//  }).then(res => {
-//    if (!res.ok) {
-//      console.error(`Failed to track ${eventName}`);
-//    }
-//  }).catch(err => {
-//    console.error('Tracking error:', err);
-//  });
-//}
-
-
-
-
-//!function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init be ws Ss me gs ys capture Ne calculateEventProperties xs register register_once register_for_session unregister unregister_for_session Rs getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSurveysLoaded onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey canRenderSurveyAsync identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty Is ks createPersonProfile Ps bs opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing $s debug Es getPageViewId captureTraceFeedback captureTraceMetric".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
-//    posthog.init('phc_zkMJOrumvelzuPftnMe7Abq4axgeNojQXaL33zrerTL', {
-//        api_host: 'https://us.i.posthog.com',
-//        defaults: '2025-05-24',
-//        person_profiles: 'identified_only', // or 'always' to create profiles for anonymous users as well
-//    })
-
-//function trackEvent(name, props = {}) {
-//  if (window.posthog) {
-//    posthog.capture(name, props);
-//  } else {
-//    console.warn('PostHog not loaded yet.');
-//  }
-//}
-
-
-
-function trackEvent(eventName, data = {}) {
-  fetch('/apps/upsell/track', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-      event: eventName,
-      timestamp: new Date().toISOString(),
-      data,
-    }),
-   });
-}
-
-
-const form = document.querySelector('#chatbot-messages form');
-form.addEventListener('submit', () => {
-  //trackEvent('upsell_add_to_cart', { id: document.getElementById('upsell-variant-id').value });
-});
-
-
-// Place this in a <script> tag or separate JS file loaded in your Shopify theme
-
-
-
-
-  async function handleSubmit(event, form) {
-    event.preventDefault(); 
-    const btn = form.querySelector('.cb-add-to-cart-btn');
-    const originalText = btn.innerHTML;
-    const variantId = form.querySelector('input[name="id"]').value;
-    const quantity = form.querySelector('input[name="quantity"]').value || 1;
-    
-    // Show loading
-    btn.innerHTML = 'Adding...';
-    btn.disabled = true;
-
-    // Apply discount if exists
-    if (currentDiscountCode) {
-      try {
-        // This sets the discount cookie in the browser
-        await fetch(`/discount/${currentDiscountCode}`);
-        console.log('Discount applied:', currentDiscountCode);
-      } catch (err) {
-        console.error('Failed to apply discount:', err);
-      }
-    }
-
-    // Add to cart via AJAX
     try {
-      const response = await fetch('/cart/add.js', {
-        method: 'POST',
+      const cart = await fetchCart();
+      if (!cart || !Array.isArray(cart.items)) return;
+
+      const signature = getCartSignature(cart);
+      if (trigger !== "page_load" && signature === lastCartSignature) return;
+      lastCartSignature = signature;
+
+      if (cart.item_count === 0 && getPageType() !== "product") return;
+
+      const behaviorContext = collectBehaviorContext(cart);
+      const response = await fetch("/apps/upsell", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json'
+          "Content-Type": "application/json",
+          "Accept": "application/json"
         },
         body: JSON.stringify({
-          id: variantId,
-          quantity: parseInt(quantity)
+          cartItems: cart.items,
+          cartTotal: cart.total_price,
+          currency: cart.currency,
+          itemCount: cart.item_count,
+          behaviorContext
         })
       });
 
-      if (!response.ok) throw new Error('Failed to add to cart');
-      
-      const cartData = await response.json();
-      console.log('Item added to cart:', cartData);
+      if (!response.ok) return;
 
-      btn.innerHTML = 'âœ“ Added!';
-      
-      // Optional: Refresh the page or redirect to checkout to see the discount
-      // For now, let's just show the success state
-      setTimeout(() => {
-          btn.innerHTML = originalText;
-          btn.disabled = false;
-          // closeChatbotModal(); // Optionally close modal
-          window.location.href = '/checkout'; // Redirect to checkout to show discount
-      }, 1000);
+      const data = await response.json();
+      const offer = parseOffer(data.suggestion);
+      if (!offer || !offer.id) return;
 
-    } catch (err) {
-      console.error('Cart add error:', err);
-      btn.innerHTML = 'Error!';
-      setTimeout(() => {
-        btn.innerHTML = originalText;
-        btn.disabled = false;
-      }, 2000);
+      activeBehavior = behaviorContext;
+      renderOffer(offer, behaviorContext, cart);
+    } catch (error) {
+      console.warn("AI Revenue Engine skipped:", error);
+    } finally {
+      inFlight = false;
     }
-}
+  }
+
+  function renderOffer(offer, behaviorContext, cart) {
+    activeOffer = offer;
+    currentDiscountCode = offer.discount?.code || null;
+
+    const renderMode = resolveRenderMode(offer.placement);
+    offerEl.classList.remove("are-modal", "are-slide", "are-inline");
+    offerEl.classList.add(`are-${renderMode}`);
+    backdropEl.hidden = renderMode !== "modal";
+
+    setText("are-mode", offer.modeLabel || "AI Revenue Engine");
+    setText("are-experiment", offer.experiment?.variant || "Adaptive offer");
+    setText("are-title", offer.bundle?.title || offer.title || "Recommended offer");
+    setText("are-message", offer.message || "");
+    setText("are-insight", offer.insight || offer.autopilotAction || "");
+    setText("are-currency", cart.currency || settings.currency);
+
+    const price = offer.bundle?.discountedTotal || offer.price || "";
+    const compare = offer.bundle?.subtotal && offer.bundle.subtotal !== price ? offer.bundle.subtotal : "";
+    setText("are-price", price);
+    setText("are-compare", compare);
+
+    const items = getOfferItems(offer);
+    renderMedia(items);
+    renderItems(items);
+
+    submitEl.textContent = offer.offerType === "bundle" ? "Add bundle to cart" : "Add to cart";
+    offerEl.hidden = false;
+
+    trackEvent("upsell_impression", buildTrackingPayload(offer, behaviorContext));
+  }
+
+  function renderMedia(items) {
+    const media = document.getElementById(`are-media-${blockId}`);
+    if (!media) return;
+
+    media.classList.toggle("are-single", items.length === 1);
+    media.innerHTML = items
+      .slice(0, 4)
+      .map((item) => `<img src="${escapeHtml(item.image || "")}" alt="${escapeHtml(item.title || "")}" loading="lazy">`)
+      .join("");
+  }
+
+  function renderItems(items) {
+    const list = document.getElementById(`are-items-${blockId}`);
+    if (!list) return;
+
+    list.innerHTML = items
+      .map((item) => `<li><span>${escapeHtml(item.title || "")}</span><strong>${escapeHtml(item.price || "")}</strong></li>`)
+      .join("");
+  }
+
+  async function handleOfferSubmit(event) {
+    event.preventDefault();
+    if (!activeOffer) return;
+
+    const originalText = submitEl.textContent;
+    submitEl.disabled = true;
+    submitEl.textContent = "Adding...";
+
+    try {
+      if (currentDiscountCode) {
+        await fetch(`/discount/${encodeURIComponent(currentDiscountCode)}`);
+      }
+
+      const items = getOfferItems(activeOffer).map((item) => ({
+        id: toNumericVariantId(item.id),
+        quantity: 1
+      }));
+
+      const response = await fetch("/cart/add.js", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify(items.length > 1 ? { items } : items[0])
+      });
+
+      if (!response.ok) throw new Error("Unable to add offer to cart");
+
+      const cartResponse = await response.json();
+      trackEvent("upsell_add_to_cart", {
+        ...buildTrackingPayload(activeOffer, activeBehavior),
+        cartResponse
+      });
+
+      submitEl.textContent = "Added";
+
+      window.setTimeout(() => {
+        submitEl.disabled = false;
+        submitEl.textContent = originalText;
+        hideOffer();
+
+        if (settings.redirectToCheckout) {
+          window.location.href = "/checkout";
+        }
+      }, 800);
+    } catch (error) {
+      console.warn("Offer add failed:", error);
+      submitEl.textContent = "Try again";
+      window.setTimeout(() => {
+        submitEl.disabled = false;
+        submitEl.textContent = originalText;
+      }, 1200);
+    }
+  }
+
+  function installCartHooks() {
+    const originalFetch = window.fetch;
+
+    window.fetch = async function(...args) {
+      const response = await originalFetch.apply(this, args);
+      const url = getRequestUrl(args[0]);
+
+      if (isCartAddUrl(url) && !url.includes("/apps/upsell")) {
+        window.setTimeout(() => requestRevenueOffer("cart_add"), settings.smartDelay || 500);
+      }
+
+      return response;
+    };
+
+    const originalOpen = XMLHttpRequest.prototype.open;
+    const originalSend = XMLHttpRequest.prototype.send;
+
+    XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+      this.__areUrl = String(url || "");
+      return originalOpen.call(this, method, url, ...rest);
+    };
+
+    XMLHttpRequest.prototype.send = function(body) {
+      this.addEventListener("load", function() {
+        if (isCartAddUrl(this.__areUrl || "")) {
+          window.setTimeout(() => requestRevenueOffer("cart_add"), settings.smartDelay || 500);
+        }
+      });
+
+      return originalSend.call(this, body);
+    };
+
+    document.addEventListener("submit", (event) => {
+      const form = event.target;
+      if (form?.tagName === "FORM" && isCartAddUrl(form.action || "")) {
+        window.setTimeout(() => requestRevenueOffer("cart_form"), settings.smartDelay || 500);
+      }
+    }, true);
+  }
+
+  async function fetchCart() {
+    const response = await fetch("/cart.js", {
+      headers: { "Accept": "application/json" },
+      cache: "no-store"
+    });
+
+    if (!response.ok) return null;
+    return response.json();
+  }
+
+  function collectBehaviorContext(cart) {
+    return {
+      cartTotal: cart.total_price,
+      itemCount: cart.item_count,
+      currency: cart.currency,
+      device: getDevice(),
+      trafficSource: getTrafficSource(),
+      referrer: document.referrer || "",
+      pageType: getPageType(),
+      path: window.location.pathname,
+      viewportWidth: window.innerWidth,
+      localHour: new Date().getHours(),
+      viewedProducts: getViewedProducts()
+    };
+  }
+
+  function buildTrackingPayload(offer, behaviorContext) {
+    return {
+      id: offer.id,
+      title: offer.title,
+      price: offer.price,
+      image: offer.image,
+      offerType: offer.offerType,
+      mode: offer.mode,
+      modeLabel: offer.modeLabel,
+      placement: offer.placement,
+      segment: offer.segment,
+      insight: offer.insight,
+      bundleId: offer.bundle?.id,
+      bundleTitle: offer.bundle?.title,
+      bundle: offer.bundle,
+      experimentId: offer.experiment?.id,
+      experimentVariant: offer.experiment?.variant,
+      discount: offer.discount,
+      behavior: behaviorContext || {}
+    };
+  }
+
+  function trackEvent(eventName, data) {
+    fetch("/apps/upsell/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event: eventName,
+        timestamp: new Date().toISOString(),
+        data
+      })
+    }).catch(() => {});
+  }
+
+  function parseOffer(value) {
+    if (!value) return null;
+    if (typeof value === "object") return value;
+
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      const match = String(value).match(/\{[\s\S]*\}/);
+      if (!match) return null;
+
+      try {
+        return JSON.parse(match[0]);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  function getOfferItems(offer) {
+    if (offer.bundle?.items?.length) return offer.bundle.items;
+
+    return [{
+      id: offer.id,
+      title: offer.title,
+      price: offer.price,
+      image: offer.image
+    }];
+  }
+
+  function resolveRenderMode(placement) {
+    const requested = settings.displayMode === "autopilot" ? placement : settings.displayMode;
+
+    if (requested === "modal") return "modal";
+    if (requested === "slide_cart") return "slide";
+    if (requested === "both") return "inline";
+
+    return "inline";
+  }
+
+  function hideOffer() {
+    offerEl.hidden = true;
+    backdropEl.hidden = true;
+  }
+
+  function setText(idPrefix, value) {
+    const element = document.getElementById(`${idPrefix}-${blockId}`);
+    if (element) element.textContent = value || "";
+  }
+
+  function toNumericVariantId(id) {
+    const value = String(id || "");
+    return value.includes("/") ? value.split("/").pop() : value;
+  }
+
+  function getCartSignature(cart) {
+    return [
+      cart.item_count,
+      cart.total_price,
+      ...(cart.items || []).map((item) => `${item.variant_id}:${item.quantity}`)
+    ].join("|");
+  }
+
+  function getDevice() {
+    if (window.innerWidth < 768) return "mobile";
+    if (window.innerWidth < 1024) return "tablet";
+    return "desktop";
+  }
+
+  function getPageType() {
+    return window.ShopifyAnalytics?.meta?.page?.pageType || document.body.dataset.template || "unknown";
+  }
+
+  function getTrafficSource() {
+    const params = new URLSearchParams(window.location.search);
+    const utmSource = params.get("utm_source");
+    if (utmSource) return utmSource;
+
+    if (!document.referrer) return "direct";
+
+    try {
+      return new URL(document.referrer).hostname.replace(/^www\./, "");
+    } catch {
+      return "referral";
+    }
+  }
+
+  function recordViewedProduct() {
+    const product = window.ShopifyAnalytics?.meta?.product;
+    if (!product) return;
+
+    const views = getViewedProducts().filter((item) => String(item.id) !== String(product.id));
+    views.unshift({
+      id: product.id,
+      title: product.title,
+      handle: product.handle
+    });
+
+    localStorage.setItem("are_viewed_products", JSON.stringify(views.slice(0, 8)));
+  }
+
+  function getViewedProducts() {
+    try {
+      return JSON.parse(localStorage.getItem("are_viewed_products") || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  function getRequestUrl(request) {
+    if (typeof request === "string") return request;
+    if (request?.url) return request.url;
+    return "";
+  }
+
+  function isCartAddUrl(url) {
+    return String(url || "").includes("/cart/add");
+  }
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+})();
 </script>
 
 {% schema %}
-  {
-    "name": "AI Agent",
-    "target": "section",
-    "class": "chatbot-section",
-    "settings": [
-      {
-        "type": "select",
-        "id": "display_mode",
-        "label": "Display Mode",
-        "options": [
-          { "value": "modal", "label": "Pop-up Modal" },
-          { "value": "inline", "label": "Inline Section" },
-          { "value": "both", "label": "Both (Inline first, Modal on retry)" }
-        ],
-        "default": "both"
-      },
-      {
-        "type": "range",
-        "id": "smart_delay",
-        "label": "Smart Delay (seconds)",
-        "min": 0,
-        "max": 10,
-        "step": 1,
-        "default": 2
-      },
-      {
-        "type": "select",
-        "id": "popup_type",
-        "label": "Popup Style",
-        "options": [
-          { "value": "modal", "label": "Standard Modal" },
-          { "value": "toast", "label": "Minimalist Toast" },
-          { "value": "floating", "label": "Floating Card" }
-        ],
-        "default": "modal"
-      },
-      {
-        "type": "select",
-        "id": "popup_position",
-        "label": "Popup Position",
-        "options": [
-          { "value": "center", "label": "Center" },
-          { "value": "bottom_left", "label": "Bottom Left" },
-          { "value": "bottom_right", "label": "Bottom Right" },
-          { "value": "top_center", "label": "Top Center" }
-        ],
-        "default": "center"
-      },
-      {
-        "type": "select",
-        "id": "animation_style",
-        "label": "Entrance Animation",
-        "options": [
-          { "value": "fade", "label": "Fade In" },
-          { "value": "slide_up", "label": "Slide Up" },
-          { "value": "bounce", "label": "Bounce" }
-        ],
-        "default": "slide_up"
-      },
-      {
-        "type": "checkbox",
-        "id": "enable_glassmorphism",
-        "label": "Enable Glassmorphism Effect",
-        "default": true
-      },
-      {
-        "type": "color",
-        "id": "modal_background_color",
-        "label": "Background Color",
-        "default": "#ffffff"
-      },
-      {
-        "type": "color",
-        "id": "image_section_Background_color",
-        "label": "Image Section Background Color",
-        "default": "#ffffff"
-      },
-      {
-        "type": "range",
-        "id": "modal_border_radius",
-        "label": "Border Radius",
-        "min": 0,
-        "max": 50,
-        "step": 1,
-        "unit": "px",
-        "default": 12
-      },
-      {
-        "type": "color",
-        "id": "modal_title_color",
-        "label": "Title Color",
-        "default": "#333333"
-      },
-      {
-        "type": "range",
-        "id": "modal_title_fontSize",
-        "label": "Modal Title Font Size",
-        "min": 0,
-        "max": 50,
-        "step": 1,
-        "unit": "px",
-        "default": 16
-      },
-      {
-        "type": "color",
-        "id": "modal_price_color",
-        "label": "Price Color",
-        "default": "#333333"
-      },
-      {
-        "type": "range",
-        "id": "modal_price_fontSize",
-        "label": "Price Font Size",
-        "min": 0,
-        "max": 50,
-        "step": 1,
-        "unit": "px",
-        "default": 14
-      },
-      {
-        "type": "color",
-        "id": "modal_text_color",
-        "label": "Description Text Color",
-        "default": "#555555"
-      },
-      {
-        "type": "range",
-        "id": "modal_text_fontSize",
-        "label": "Text Font Size",
-        "min": 0,
-        "max": 50,
-        "step": 1,
-        "unit": "px",
-        "default": 16
-      },
-      {
-        "type": "color",
-        "id": "modal_button_color",
-        "label": "Button Background Color",
-        "default": "#000000"
-      },
-      {
-        "type": "color",
-        "id": "modal_Button_text_color",
-        "label": "Button Title Color",
-        "default": "#FFFFFF"
-      }
-    
-    ]
-  }
+{
+  "name": "AI Revenue Engine",
+  "target": "section",
+  "class": "ai-revenue-engine-section",
+  "settings": [
+    {
+      "type": "select",
+      "id": "display_mode",
+      "label": "Placement strategy",
+      "options": [
+        { "value": "autopilot", "label": "Autopilot" },
+        { "value": "inline", "label": "Inline native block" },
+        { "value": "slide_cart", "label": "Slide cart" },
+        { "value": "modal", "label": "Modal fallback" }
+      ],
+      "default": "autopilot"
+    },
+    {
+      "type": "range",
+      "id": "smart_delay",
+      "label": "Smart delay",
+      "min": 0,
+      "max": 10,
+      "step": 1,
+      "unit": "s",
+      "default": 1
+    },
+    {
+      "type": "checkbox",
+      "id": "trigger_on_load",
+      "label": "Evaluate offer on page load",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "redirect_to_checkout",
+      "label": "Go to checkout after offer is added",
+      "default": false
+    },
+    {
+      "type": "color",
+      "id": "modal_background_color",
+      "label": "Offer background",
+      "default": "#ffffff"
+    },
+    {
+      "type": "color",
+      "id": "image_section_Background_color",
+      "label": "Media background",
+      "default": "#f3f4f6"
+    },
+    {
+      "type": "range",
+      "id": "modal_border_radius",
+      "label": "Border radius",
+      "min": 0,
+      "max": 24,
+      "step": 1,
+      "unit": "px",
+      "default": 8
+    },
+    {
+      "type": "color",
+      "id": "modal_title_color",
+      "label": "Title color",
+      "default": "#111827"
+    },
+    {
+      "type": "range",
+      "id": "modal_title_fontSize",
+      "label": "Title font size",
+      "min": 14,
+      "max": 32,
+      "step": 1,
+      "unit": "px",
+      "default": 20
+    },
+    {
+      "type": "color",
+      "id": "modal_price_color",
+      "label": "Price color",
+      "default": "#111827"
+    },
+    {
+      "type": "range",
+      "id": "modal_price_fontSize",
+      "label": "Price font size",
+      "min": 12,
+      "max": 28,
+      "step": 1,
+      "unit": "px",
+      "default": 18
+    },
+    {
+      "type": "color",
+      "id": "modal_text_color",
+      "label": "Body text color",
+      "default": "#374151"
+    },
+    {
+      "type": "range",
+      "id": "modal_text_fontSize",
+      "label": "Body text size",
+      "min": 12,
+      "max": 22,
+      "step": 1,
+      "unit": "px",
+      "default": 14
+    },
+    {
+      "type": "color",
+      "id": "modal_button_color",
+      "label": "Action color",
+      "default": "#111827"
+    },
+    {
+      "type": "color",
+      "id": "modal_Button_text_color",
+      "label": "Action text color",
+      "default": "#ffffff"
+    }
+  ]
+}
 {% endschema %}
-
-

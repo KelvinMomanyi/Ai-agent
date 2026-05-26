@@ -1,150 +1,116 @@
-import { useEffect } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useFetcher } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import {
   Page,
   Layout,
   Text,
   Card,
-  Button,
   BlockStack,
   Box,
   List,
-  Link,
-  InlineStack, 
+  InlineStack,
   Badge,
-
+  Button,
 } from "@shopify/polaris";
-import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
-
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
-  
   return null;
 };
 
-
-
 export default function Index() {
-  
   return (
-    <Page title="Welcome to AOVBoost">
-    <Layout>
-      <Layout.Section>
-        <Card>
-          <BlockStack gap="500">
-            <Box>
-              <Text as="h1" variant="headingXl">
-                Boost Your Average Order Value with AI
-              </Text>
-              <Text as="p" variant="bodyMd" tone="subdued">
-                AOVBoost uses AI to recommend smart cross-sell and upsell products — no manual setup required.
-              </Text>
-            </Box>
+    <Page
+      title="AI Revenue Engine"
+      subtitle="Autonomous Shopify revenue optimization for offers, bundles, experiments, and insights."
+      primaryAction={{ content: "Configure engine", url: "/app/settings" }}
+      secondaryActions={[{ content: "View dashboard", url: "/app/analytics" }]}
+    >
+      <Layout>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="500">
+              <Box>
+                <Text as="h1" variant="headingXl">
+                  Sell revenue outcomes, not recommendations
+                </Text>
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  The app now acts like an AI merchandiser: it chooses a revenue
+                  goal, builds contextual offers, tests variants, and reports the
+                  money left in the funnel.
+                </Text>
+              </Box>
 
-            <Box>
-              <InlineStack gap="400">
-                <Badge status="success">Live AI Recommendations</Badge>
-                <Badge>Cart Integration</Badge>
-                <Badge>Shopify Native</Badge>
+              <InlineStack gap="200">
+                <Badge>AOV Mode</Badge>
+                <Badge>Profit Mode</Badge>
+                <Badge>Dynamic Bundles</Badge>
+                <Badge>AI Experiments</Badge>
+                <Badge>Autopilot</Badge>
               </InlineStack>
-            </Box>
-          </BlockStack>
-        </Card>
-      </Layout.Section>
 
-      <Layout.Section>
-        <Card>
-          <BlockStack gap="400">
-            <Box>
+              <InlineStack gap="300">
+                <Button url="/app/settings" variant="primary">
+                  Configure strategy
+                </Button>
+                <Button url="/app/analytics">Open revenue dashboard</Button>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
               <Text as="h2" variant="headingMd">
-                Key Features
+                What Changed
               </Text>
-            </Box>
-            <Box>
               <List>
                 <List.Item>
-                  Automatically display cross-sell offers based on what customers are shopping.
+                  Behavioral context is sent with each offer request, including
+                  device, traffic source, page type, cart value, and viewed products.
                 </List.Item>
                 <List.Item>
-                  Works out of the box on product and cart pages — no code needed.
+                  The engine can optimize for AOV, profit, inventory clearance,
+                  subscription adoption, lifetime value, or seasonal strategy.
                 </List.Item>
                 <List.Item>
-                  Track added revenue with real-time AOV analytics.
+                  Offers can become dynamic bundles with generated titles,
+                  discounts, native placement metadata, and bundle-aware tracking.
                 </List.Item>
                 <List.Item>
-                  AI-powered product matching for higher conversion rates.
-                </List.Item>
-                <List.Item>
-                  Seamless integration with your existing theme design.
+                  Experiment data is attached to impressions and add-to-cart events
+                  so the dashboard can surface winning variants.
                 </List.Item>
               </List>
-            </Box>
-          </BlockStack>
-        </Card>
-      </Layout.Section>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
 
-      <Layout.Section>
-        <Card>
-          <BlockStack gap="400">
-            <Box>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
               <Text as="h2" variant="headingMd">
-                Quick Setup Guide
+                Recommended Rollout
               </Text>
-              <Text as="p" variant="bodyMd" tone="subdued">
-                Get AOVBoost running on your store in 3 simple steps:
-              </Text>
-            </Box>
-            <Box>
               <List type="number">
                 <List.Item>
-                  <Text as="span" variant="bodyMd" fontWeight="semibold">Access Theme Editor:</Text> Go to your Shopify admin → Online Store → Themes
+                  Start with Autopilot placement and AOV Mode to validate lift
+                  without heavy merchant setup.
                 </List.Item>
                 <List.Item>
-                  <Text as="span" variant="bodyMd" fontWeight="semibold">Customize Theme:</Text> Click "Customize" on your active theme
+                  Turn on dynamic bundles once product catalog coverage looks good
+                  in the dashboard.
                 </List.Item>
                 <List.Item>
-                  <Text as="span" variant="bodyMd" fontWeight="semibold">Add AOVBoost Sections:</Text> Use the "Add section" option to place AOVBoost on your desired pages
+                  Move high-volume stores into Profit, Inventory Clear, or LTV
+                  modes when they have enough event data to compare outcomes.
                 </List.Item>
               </List>
-            </Box>
-          </BlockStack>
-        </Card>
-      </Layout.Section>
-
-      <Layout.Section>
-        <Card>
-          <BlockStack gap="400">
-            <Box>
-              <Text as="h2" variant="headingMd">
-                Recommended Page Placements
-              </Text>
-              <Text as="p" variant="bodyMd" tone="subdued">
-                Choose where to display recommendations for maximum impact:
-              </Text>
-            </Box>
-            <Box>
-              <List>
-                <List.Item>
-                  <Text as="span" variant="bodyMd" fontWeight="semibold">Homepage:</Text> Featured product recommendations to showcase popular items
-                </List.Item>
-                <List.Item>
-                  <Text as="span" variant="bodyMd" fontWeight="semibold">Product Pages:</Text> Related product upsells and complementary items
-                </List.Item>
-                <List.Item>
-                  <Text as="span" variant="bodyMd" fontWeight="semibold">Collection Pages:</Text> Cross-category suggestions to expand browsing
-                </List.Item>
-                <List.Item>
-                  <Text as="span" variant="bodyMd" fontWeight="semibold">Cart Page:</Text> Last-minute add-ons before checkout
-                </List.Item>
-              </List>
-            </Box>
-          </BlockStack>
-        </Card>
-      </Layout.Section>
-    </Layout>
-  </Page>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+      </Layout>
+    </Page>
   );
 }

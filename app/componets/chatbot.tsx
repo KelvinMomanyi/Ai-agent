@@ -1,13 +1,10 @@
 // app/components/ChatBot.tsx
 import { useState } from "react";
 import {
-  Card,
   Page,
-  TextField,
   Button,
   Layout,
   Text,
-  InlineError,
 } from '@shopify/polaris';
 
 export default function ChatBot() {
