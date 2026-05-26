@@ -6,47 +6,215 @@
   <div id="are-backdrop-{{ block.id }}" class="are-backdrop" hidden></div>
 
   <section
-    id="are-offer-{{ block.id }}"
-    class="are-offer"
+    id="are-companion-{{ block.id }}"
+    class="are-surface are-companion"
     aria-live="polite"
     hidden
   >
-    <button
-      type="button"
-      id="are-close-{{ block.id }}"
-      class="are-close"
-      aria-label="Close offer"
-    >
+    <button type="button" class="are-close" data-are-close aria-label="Close recommendation">
       &times;
     </button>
 
-    <div class="are-media" id="are-media-{{ block.id }}"></div>
+    <div class="are-panel-glow" aria-hidden="true"></div>
 
-    <div class="are-content">
-      <div class="are-meta">
-        <span id="are-mode-{{ block.id }}" class="are-pill">AI Revenue Engine</span>
-        <span id="are-experiment-{{ block.id }}" class="are-pill are-pill-muted">Testing</span>
+    <div class="are-surface-head">
+      <div class="are-title-stack">
+        <span class="are-kicker">
+          <span class="are-ai-mark" aria-hidden="true"></span>
+          <span data-are-field="surfaceLabel">AI Product Companion</span>
+        </span>
+        <h3 class="are-title" data-are-field="title">Complete your setup</h3>
       </div>
+      <span class="are-score" data-are-field="confidence">Live fit</span>
+    </div>
 
-      <h3 id="are-title-{{ block.id }}" class="are-title"></h3>
+    <div class="are-companion-layout">
+      <div class="are-media" data-are-media></div>
 
-      <div class="are-price-row">
-        <span id="are-currency-{{ block.id }}" class="are-currency">{{ shop.currency }}</span>
-        <span id="are-price-{{ block.id }}" class="are-price"></span>
-        <span id="are-compare-{{ block.id }}" class="are-compare"></span>
+      <div class="are-offer-copy">
+        <p class="are-message" data-are-field="message"></p>
+
+        <div class="are-context-row" data-are-context></div>
+
+        <ul class="are-items" data-are-items></ul>
       </div>
+    </div>
 
-      <p id="are-message-{{ block.id }}" class="are-message"></p>
-      <ul id="are-items-{{ block.id }}" class="are-items"></ul>
-      <p id="are-insight-{{ block.id }}" class="are-insight"></p>
+    <div class="are-journey" data-are-progress-wrap>
+      <div class="are-journey-top">
+        <span>Performance setup progress</span>
+        <strong data-are-field="progressLabel">72%</strong>
+      </div>
+      <div class="are-progress-track" aria-hidden="true">
+        <span data-are-progress-bar></span>
+      </div>
+      <p data-are-field="nextStep"></p>
+    </div>
 
-      <form id="are-form-{{ block.id }}" class="are-form" action="/cart/add" method="post">
-        <button type="submit" id="are-submit-{{ block.id }}" class="are-submit">
-          Add revenue offer
-        </button>
-      </form>
+    <details class="are-reasoning" data-are-reasoning-wrap>
+      <summary>Why this?</summary>
+      <p data-are-field="insight"></p>
+    </details>
+
+    <div class="are-actions">
+      <button type="button" class="are-submit" data-are-add>
+        Add bundle
+      </button>
+      <span class="are-savings" data-are-field="savings"></span>
     </div>
   </section>
+
+  <section
+    id="are-progress-{{ block.id }}"
+    class="are-surface are-progress-card"
+    aria-live="polite"
+    hidden
+  >
+    <div class="are-surface-head">
+      <div class="are-title-stack">
+        <span class="are-kicker">
+          <span class="are-ai-mark" aria-hidden="true"></span>
+          AI Progress Journey
+        </span>
+        <h3 class="are-title">Your setup is taking shape</h3>
+      </div>
+      <span class="are-score" data-are-field="confidence">Live fit</span>
+    </div>
+
+    <div class="are-journey are-journey-large">
+      <div class="are-journey-top">
+        <span>Commerce completion</span>
+        <strong data-are-field="progressLabel">72%</strong>
+      </div>
+      <div class="are-progress-track" aria-hidden="true">
+        <span data-are-progress-bar></span>
+      </div>
+      <p data-are-field="nextStep"></p>
+    </div>
+
+    <ul class="are-items are-items-compact" data-are-items></ul>
+
+    <details class="are-reasoning" data-are-reasoning-wrap>
+      <summary>Why this?</summary>
+      <p data-are-field="insight"></p>
+    </details>
+
+    <div class="are-actions">
+      <button type="button" class="are-submit" data-are-add>
+        Add recommended products
+      </button>
+      <span class="are-savings" data-are-field="savings"></span>
+    </div>
+  </section>
+
+  <section
+    id="are-banner-{{ block.id }}"
+    class="are-surface are-banner"
+    aria-live="polite"
+    hidden
+  >
+    <div class="are-banner-copy">
+      <span class="are-kicker">
+        <span class="are-ai-mark" aria-hidden="true"></span>
+        AI Revenue Banner
+      </span>
+      <h3 class="are-title" data-are-field="title">Adaptive offer</h3>
+      <p class="are-message" data-are-field="message"></p>
+    </div>
+    <div class="are-banner-side">
+      <div class="are-mini-media" data-are-media></div>
+      <button type="button" class="are-submit" data-are-add>
+        Add offer
+      </button>
+    </div>
+  </section>
+
+  <aside
+    id="are-drawer-{{ block.id }}"
+    class="are-drawer"
+    aria-live="polite"
+    aria-label="AI cart intelligence"
+    hidden
+  >
+    <div class="are-drawer-shell">
+      <button type="button" class="are-close are-drawer-close" data-are-close aria-label="Close cart intelligence">
+        &times;
+      </button>
+
+      <div class="are-drawer-head">
+        <span class="are-kicker">
+          <span class="are-ai-mark" aria-hidden="true"></span>
+          AI Cart Intelligence
+        </span>
+        <h3 class="are-title">Your setup is almost complete</h3>
+        <p class="are-message" data-are-field="message"></p>
+      </div>
+
+      <div class="are-journey">
+        <div class="are-journey-top">
+          <span>Setup progress</span>
+          <strong data-are-field="progressLabel">72%</strong>
+        </div>
+        <div class="are-progress-track" aria-hidden="true">
+          <span data-are-progress-bar></span>
+        </div>
+        <p data-are-field="nextStep"></p>
+      </div>
+
+      <div class="are-drawer-section">
+        <div class="are-section-title">
+          <span>Recommended for this cart</span>
+          <strong data-are-field="savings"></strong>
+        </div>
+        <ul class="are-items are-drawer-items" data-are-items></ul>
+      </div>
+
+      <details class="are-reasoning" data-are-reasoning-wrap>
+        <summary>Why this?</summary>
+        <p data-are-field="insight"></p>
+      </details>
+
+      <button type="button" class="are-submit are-submit-large" data-are-add>
+        Add all to cart
+      </button>
+    </div>
+  </aside>
+
+  <button
+    type="button"
+    id="are-orb-{{ block.id }}"
+    class="are-orb"
+    aria-label="Open AI shopping assistant"
+    hidden
+  >
+    AI
+  </button>
+
+  <aside
+    id="are-assistant-{{ block.id }}"
+    class="are-assistant"
+    aria-live="polite"
+    aria-label="AI shopping assistant"
+    hidden
+  >
+    <button type="button" class="are-close" data-are-close aria-label="Close assistant">
+      &times;
+    </button>
+    <span class="are-kicker">
+      <span class="are-ai-mark" aria-hidden="true"></span>
+      Storefront Concierge
+    </span>
+    <h3 class="are-title" data-are-field="title">Complete your setup</h3>
+    <div class="are-mini-media" data-are-media></div>
+    <p class="are-message" data-are-field="message"></p>
+    <details class="are-reasoning" data-are-reasoning-wrap>
+      <summary>Why this?</summary>
+      <p data-are-field="insight"></p>
+    </details>
+    <button type="button" class="are-submit" data-are-add>
+      Add recommendation
+    </button>
+  </aside>
 </div>
 
 <style>
@@ -56,227 +224,616 @@
   }
 
   #ai-revenue-engine-{{ block.id }} {
+    --are-surface: {{ block.settings.modal_background_color | default: '#ffffff' }};
+    --are-media-bg: {{ block.settings.image_section_Background_color | default: '#f5f7fb' }};
+    --are-ink: {{ block.settings.modal_title_color | default: '#111827' }};
+    --are-muted: {{ block.settings.modal_text_color | default: '#4b5563' }};
+    --are-price: {{ block.settings.modal_price_color | default: '#111827' }};
+    --are-action: {{ block.settings.modal_button_color | default: '#111827' }};
+    --are-action-text: {{ block.settings.modal_Button_text_color | default: '#ffffff' }};
+    --are-radius: {{ block.settings.modal_border_radius | default: 8 }}px;
+    --are-line: rgba(17, 24, 39, 0.12);
+    --are-soft-line: rgba(17, 24, 39, 0.08);
+    --are-shadow: 0 24px 70px rgba(17, 24, 39, 0.16);
+    --are-blue: #dbeafe;
+    --are-green: #d1fae5;
+    --are-warm: #fef3c7;
+    width: 100%;
     font-family: inherit;
+    color: var(--are-ink);
+  }
+
+  #ai-revenue-engine-{{ block.id }} [hidden] {
+    display: none !important;
   }
 
   #ai-revenue-engine-{{ block.id }} .are-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 2147483640;
-    background: rgba(17, 24, 39, 0.42);
+    z-index: 2147483638;
+    background: rgba(15, 23, 42, 0.28);
+    backdrop-filter: blur(8px);
   }
 
-  #ai-revenue-engine-{{ block.id }} .are-offer {
+  #ai-revenue-engine-{{ block.id }} .are-surface {
     position: relative;
     width: 100%;
-    max-width: 760px;
+    max-width: 860px;
     margin: 16px 0;
-    display: grid;
-    grid-template-columns: minmax(140px, 0.42fr) minmax(0, 0.58fr);
     overflow: hidden;
-    border: 1px solid rgba(17, 24, 39, 0.12);
-    border-radius: {{ block.settings.modal_border_radius | default: 8 }}px;
-    background: {{ block.settings.modal_background_color | default: '#ffffff' }};
-    color: {{ block.settings.modal_title_color | default: '#111827' }};
-    box-shadow: 0 12px 32px rgba(17, 24, 39, 0.12);
+    border: 1px solid var(--are-line);
+    border-radius: var(--are-radius);
+    background:
+      linear-gradient(135deg, rgba(219, 234, 254, 0.42), rgba(209, 250, 229, 0.22) 38%, rgba(255, 255, 255, 0.88)),
+      var(--are-surface);
+    box-shadow: 0 18px 48px rgba(17, 24, 39, 0.10);
+    animation: are-rise 420ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  #ai-revenue-engine-{{ block.id }} .are-offer[hidden],
-  #ai-revenue-engine-{{ block.id }} .are-backdrop[hidden] {
-    display: none;
-  }
-
-  #ai-revenue-engine-{{ block.id }} .are-offer.are-modal {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    z-index: 2147483641;
-    transform: translate(-50%, -50%);
-    width: min(760px, calc(100vw - 28px));
-    margin: 0;
-  }
-
-  #ai-revenue-engine-{{ block.id }} .are-offer.are-slide {
-    position: fixed;
-    right: 18px;
-    bottom: 18px;
-    z-index: 2147483641;
-    width: min(520px, calc(100vw - 28px));
-    margin: 0;
-    grid-template-columns: 150px minmax(0, 1fr);
-  }
-
-  #ai-revenue-engine-{{ block.id }} .are-close {
+  #ai-revenue-engine-{{ block.id }} .are-panel-glow {
     position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 2;
-    width: 28px;
-    height: 28px;
-    border: 0;
-    border-radius: 999px;
-    background: rgba(17, 24, 39, 0.08);
-    color: #111827;
-    cursor: pointer;
-    font-size: 18px;
-    line-height: 1;
+    inset: auto 28px 28px auto;
+    width: 170px;
+    height: 170px;
+    pointer-events: none;
+    background: radial-gradient(circle, rgba(14, 165, 233, 0.14), rgba(14, 165, 233, 0));
+    transform: translate(38%, 38%);
   }
 
-  #ai-revenue-engine-{{ block.id }} .are-media {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    align-content: center;
-    padding: 14px;
-    background: {{ block.settings.image_section_Background_color | default: '#f3f4f6' }};
+  #ai-revenue-engine-{{ block.id }} .are-companion {
+    padding: clamp(18px, 3vw, 28px);
   }
 
-  #ai-revenue-engine-{{ block.id }} .are-media.are-single {
-    grid-template-columns: 1fr;
+  #ai-revenue-engine-{{ block.id }} .are-progress-card {
+    padding: clamp(18px, 3vw, 28px);
   }
 
-  #ai-revenue-engine-{{ block.id }} .are-media img {
-    width: 100%;
-    aspect-ratio: 1 / 1;
-    object-fit: contain;
-    border-radius: 6px;
-    background: #ffffff;
-  }
-
-  #ai-revenue-engine-{{ block.id }} .are-content {
-    min-width: 0;
-    padding: 24px;
+  #ai-revenue-engine-{{ block.id }} .are-surface-head,
+  #ai-revenue-engine-{{ block.id }} .are-journey-top,
+  #ai-revenue-engine-{{ block.id }} .are-section-title,
+  #ai-revenue-engine-{{ block.id }} .are-actions,
+  #ai-revenue-engine-{{ block.id }} .are-context-row {
     display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  #ai-revenue-engine-{{ block.id }} .are-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding-right: 26px;
-  }
-
-  #ai-revenue-engine-{{ block.id }} .are-pill {
-    display: inline-flex;
     align-items: center;
-    min-height: 22px;
-    padding: 3px 8px;
-    border-radius: 999px;
-    background: {{ block.settings.modal_button_color | default: '#111827' }};
-    color: {{ block.settings.modal_Button_text_color | default: '#ffffff' }};
-    font-size: 11px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-surface-head,
+  #ai-revenue-engine-{{ block.id }} .are-actions {
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-title-stack {
+    min-width: 0;
+    display: grid;
+    gap: 7px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-kicker {
+    display: inline-flex;
+    width: fit-content;
+    align-items: center;
+    gap: 8px;
+    color: #334155;
+    font-size: 12px;
     font-weight: 700;
     letter-spacing: 0;
+    line-height: 1.2;
     text-transform: uppercase;
   }
 
-  #ai-revenue-engine-{{ block.id }} .are-pill-muted {
-    background: rgba(17, 24, 39, 0.08);
-    color: #374151;
+  #ai-revenue-engine-{{ block.id }} .are-ai-mark {
+    position: relative;
+    width: 10px;
+    height: 10px;
+    flex: 0 0 10px;
+    border-radius: 999px;
+    background: #10b981;
+    box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.16);
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-ai-mark::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    border-radius: inherit;
+    border: 1px solid rgba(16, 185, 129, 0.38);
+    animation: are-pulse 1800ms ease-out infinite;
   }
 
   #ai-revenue-engine-{{ block.id }} .are-title {
     margin: 0;
-    font-size: {{ block.settings.modal_title_fontSize | default: 20 }}px;
-    line-height: 1.2;
-    color: {{ block.settings.modal_title_color | default: '#111827' }};
+    color: var(--are-ink);
+    font-size: {{ block.settings.modal_title_fontSize | default: 22 }}px;
+    font-weight: 750;
     letter-spacing: 0;
+    line-height: 1.15;
   }
 
-  #ai-revenue-engine-{{ block.id }} .are-price-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 6px;
-    color: {{ block.settings.modal_price_color | default: '#111827' }};
-  }
-
-  #ai-revenue-engine-{{ block.id }} .are-price {
-    font-size: {{ block.settings.modal_price_fontSize | default: 18 }}px;
+  #ai-revenue-engine-{{ block.id }} .are-score,
+  #ai-revenue-engine-{{ block.id }} .are-savings {
+    flex: 0 0 auto;
+    border: 1px solid rgba(15, 23, 42, 0.10);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.70);
+    color: #0f172a;
+    font-size: 12px;
     font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1.2;
+    padding: 7px 10px;
   }
 
-  #ai-revenue-engine-{{ block.id }} .are-currency,
-  #ai-revenue-engine-{{ block.id }} .are-compare {
-    color: #6B7280;
-    font-size: 13px;
+  #ai-revenue-engine-{{ block.id }} .are-companion-layout {
+    display: grid;
+    grid-template-columns: minmax(150px, 0.36fr) minmax(0, 0.64fr);
+    gap: clamp(16px, 3vw, 24px);
+    margin-top: 22px;
   }
 
-  #ai-revenue-engine-{{ block.id }} .are-compare {
-    text-decoration: line-through;
+  #ai-revenue-engine-{{ block.id }} .are-media,
+  #ai-revenue-engine-{{ block.id }} .are-mini-media {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    align-content: center;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: max(6px, calc(var(--are-radius) - 2px));
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.76), rgba(245, 247, 251, 0.56)),
+      var(--are-media-bg);
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-media.are-single,
+  #ai-revenue-engine-{{ block.id }} .are-mini-media.are-single {
+    grid-template-columns: 1fr;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-media img,
+  #ai-revenue-engine-{{ block.id }} .are-mini-media img,
+  #ai-revenue-engine-{{ block.id }} .are-item-image {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: contain;
+    border: 1px solid rgba(15, 23, 42, 0.06);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.78);
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-offer-copy {
+    min-width: 0;
+    display: grid;
+    align-content: start;
+    gap: 14px;
   }
 
   #ai-revenue-engine-{{ block.id }} .are-message,
-  #ai-revenue-engine-{{ block.id }} .are-insight {
+  #ai-revenue-engine-{{ block.id }} .are-reasoning p,
+  #ai-revenue-engine-{{ block.id }} .are-journey p {
     margin: 0;
-    color: {{ block.settings.modal_text_color | default: '#374151' }};
+    color: var(--are-muted);
     font-size: {{ block.settings.modal_text_fontSize | default: 14 }}px;
-    line-height: 1.5;
+    letter-spacing: 0;
+    line-height: 1.55;
   }
 
-  #ai-revenue-engine-{{ block.id }} .are-insight {
-    padding: 10px 12px;
-    border-left: 3px solid {{ block.settings.modal_button_color | default: '#111827' }};
-    background: rgba(17, 24, 39, 0.05);
-    color: #374151;
+  #ai-revenue-engine-{{ block.id }} .are-context-row {
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.62);
+    color: #475569;
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0;
+    line-height: 1.2;
+    padding: 5px 9px;
   }
 
   #ai-revenue-engine-{{ block.id }} .are-items {
     display: grid;
-    gap: 6px;
+    gap: 9px;
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
-  #ai-revenue-engine-{{ block.id }} .are-items li {
-    display: flex;
+  #ai-revenue-engine-{{ block.id }} .are-item {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    min-width: 0;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.68);
+    padding: 8px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-items-compact .are-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-item-main {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-item-title {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--are-ink);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1.25;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-item-reason {
+    color: #64748b;
+    font-size: 12px;
+    letter-spacing: 0;
+    line-height: 1.35;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-item-price {
+    color: var(--are-price);
+    font-size: 13px;
+    font-weight: 750;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-journey {
+    display: grid;
+    gap: 9px;
+    margin-top: 18px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.58);
+    padding: 12px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-journey-large {
+    margin: 20px 0 12px;
+    padding: 16px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-journey-top {
     justify-content: space-between;
     gap: 12px;
-    color: #374151;
+    color: #334155;
     font-size: 13px;
+    font-weight: 750;
+    letter-spacing: 0;
+    line-height: 1.2;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-progress-track {
+    position: relative;
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.10);
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-progress-track span {
+    display: block;
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #10b981, #38bdf8);
+    transition: width 650ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-reasoning {
+    margin-top: 14px;
+    border-top: 1px solid var(--are-soft-line);
+    padding-top: 12px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-reasoning summary {
+    width: fit-content;
+    cursor: pointer;
+    color: #0f172a;
+    font-size: 13px;
+    font-weight: 750;
+    letter-spacing: 0;
+    line-height: 1.2;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-reasoning p {
+    margin-top: 8px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-actions {
+    margin-top: 18px;
+    flex-wrap: wrap;
   }
 
   #ai-revenue-engine-{{ block.id }} .are-submit {
-    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: min(100%, 190px);
     min-height: 44px;
     border: 0;
-    border-radius: 6px;
-    background: {{ block.settings.modal_button_color | default: '#111827' }};
-    color: {{ block.settings.modal_Button_text_color | default: '#ffffff' }};
+    border-radius: 8px;
+    background: var(--are-action);
+    color: var(--are-action-text);
     cursor: pointer;
     font: inherit;
-    font-weight: 700;
+    font-size: 14px;
+    font-weight: 750;
+    letter-spacing: 0;
+    line-height: 1.15;
+    padding: 12px 18px;
+    text-align: center;
+    transition:
+      transform 180ms ease,
+      box-shadow 180ms ease,
+      opacity 180ms ease;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-submit:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 28px rgba(17, 24, 39, 0.18);
   }
 
   #ai-revenue-engine-{{ block.id }} .are-submit:disabled {
     cursor: wait;
-    opacity: 0.7;
+    opacity: 0.72;
+    transform: none;
+    box-shadow: none;
   }
 
-  @media (max-width: 640px) {
-    #ai-revenue-engine-{{ block.id }} .are-offer,
-    #ai-revenue-engine-{{ block.id }} .are-offer.are-slide,
-    #ai-revenue-engine-{{ block.id }} .are-offer.are-modal {
+  #ai-revenue-engine-{{ block.id }} .are-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.72);
+    color: #0f172a;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-banner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 18px;
+    padding: clamp(16px, 3vw, 24px);
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-banner-copy {
+    min-width: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-banner-side {
+    display: grid;
+    grid-template-columns: 110px;
+    gap: 10px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-mini-media {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 6px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 2147483639;
+    width: min(440px, 100vw);
+    height: 100dvh;
+    max-height: 100dvh;
+    padding: 14px;
+    animation: are-drawer-in 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-drawer-shell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    height: 100%;
+    overflow-y: auto;
+    border: 1px solid rgba(255, 255, 255, 0.34);
+    border-radius: var(--are-radius);
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(245, 247, 251, 0.78)),
+      var(--are-surface);
+    box-shadow: var(--are-shadow);
+    backdrop-filter: blur(18px);
+    padding: 22px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-drawer-close {
+    top: 16px;
+    right: 16px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-drawer-head {
+    display: grid;
+    gap: 10px;
+    padding-right: 34px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-drawer-section {
+    display: grid;
+    gap: 10px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-section-title {
+    justify-content: space-between;
+    gap: 12px;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 750;
+    letter-spacing: 0;
+    line-height: 1.2;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-drawer-items {
+    gap: 10px;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-submit-large {
+    width: 100%;
+    margin-top: auto;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-orb {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 2147483636;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border: 1px solid rgba(255, 255, 255, 0.50);
+    border-radius: 999px;
+    background:
+      linear-gradient(145deg, rgba(17, 24, 39, 0.96), rgba(30, 41, 59, 0.92)),
+      #111827;
+    color: #ffffff;
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0;
+    box-shadow: 0 18px 38px rgba(17, 24, 39, 0.28);
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-assistant {
+    position: fixed;
+    right: 18px;
+    bottom: 86px;
+    z-index: 2147483637;
+    display: grid;
+    gap: 12px;
+    width: min(360px, calc(100vw - 28px));
+    max-height: calc(100dvh - 112px);
+    overflow-y: auto;
+    border: 1px solid rgba(255, 255, 255, 0.36);
+    border-radius: var(--are-radius);
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(245, 247, 251, 0.82)),
+      var(--are-surface);
+    box-shadow: var(--are-shadow);
+    backdrop-filter: blur(18px);
+    padding: 18px;
+    animation: are-rise 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @keyframes are-rise {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes are-drawer-in {
+    from {
+      opacity: 0;
+      transform: translateX(28px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes are-pulse {
+    from {
+      opacity: 0.7;
+      transform: scale(0.75);
+    }
+    to {
+      opacity: 0;
+      transform: scale(1.65);
+    }
+  }
+
+  @media (max-width: 720px) {
+    #ai-revenue-engine-{{ block.id }} .are-companion-layout,
+    #ai-revenue-engine-{{ block.id }} .are-banner {
       grid-template-columns: 1fr;
-      width: calc(100vw - 20px);
-      max-width: none;
-      left: 10px;
-      right: 10px;
-      bottom: 10px;
-      top: auto;
-      transform: none;
     }
 
-    #ai-revenue-engine-{{ block.id }} .are-media {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      padding: 12px;
+    #ai-revenue-engine-{{ block.id }} .are-surface-head,
+    #ai-revenue-engine-{{ block.id }} .are-actions {
+      align-items: flex-start;
+      flex-direction: column;
     }
 
-    #ai-revenue-engine-{{ block.id }} .are-content {
+    #ai-revenue-engine-{{ block.id }} .are-score,
+    #ai-revenue-engine-{{ block.id }} .are-savings {
+      white-space: normal;
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-banner-side {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-drawer {
+      width: 100vw;
+      padding: 8px;
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-drawer-shell {
+      border-radius: 8px;
       padding: 18px;
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-item {
+      grid-template-columns: 44px minmax(0, 1fr);
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-item-price {
+      grid-column: 2;
+      justify-self: start;
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-submit {
+      width: 100%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #ai-revenue-engine-{{ block.id }} *,
+    #ai-revenue-engine-{{ block.id }} *::after {
+      animation-duration: 1ms !important;
+      transition-duration: 1ms !important;
     }
   }
 </style>
@@ -285,46 +842,74 @@
 (() => {
   const blockId = "{{ block.id }}";
   const settings = {
+    surface: "{{ block.settings.surface | default: 'adaptive_commerce' }}",
     displayMode: "{{ block.settings.display_mode | default: 'autopilot' }}",
     smartDelay: Number({{ block.settings.smart_delay | default: 1 }}) * 1000,
     triggerOnLoad: {{ block.settings.trigger_on_load | default: true | json }},
     redirectToCheckout: {{ block.settings.redirect_to_checkout | default: false | json }},
+    assistantEnabled: {{ block.settings.assistant_enabled | default: true | json }},
+    showReasoning: {{ block.settings.show_reasoning | default: true | json }},
+    freeShippingThreshold: Number({{ block.settings.free_shipping_threshold | default: 100 }}),
     currency: "{{ shop.currency }}"
   };
 
   const root = document.getElementById(`ai-revenue-engine-${blockId}`);
-  const offerEl = document.getElementById(`are-offer-${blockId}`);
+  const companionEl = document.getElementById(`are-companion-${blockId}`);
+  const progressEl = document.getElementById(`are-progress-${blockId}`);
+  const bannerEl = document.getElementById(`are-banner-${blockId}`);
+  const drawerEl = document.getElementById(`are-drawer-${blockId}`);
+  const assistantEl = document.getElementById(`are-assistant-${blockId}`);
   const backdropEl = document.getElementById(`are-backdrop-${blockId}`);
-  const closeEl = document.getElementById(`are-close-${blockId}`);
-  const formEl = document.getElementById(`are-form-${blockId}`);
-  const submitEl = document.getElementById(`are-submit-${blockId}`);
+  const orbEl = document.getElementById(`are-orb-${blockId}`);
 
-  if (!root || !offerEl || window[`__are_${blockId}`]) return;
+  if (!root || window[`__are_${blockId}`]) return;
   window[`__are_${blockId}`] = true;
+
+  const surfaces = {
+    companion: companionEl,
+    progress: progressEl,
+    banner: bannerEl,
+    drawer: drawerEl,
+    assistant: assistantEl
+  };
 
   let activeOffer = null;
   let activeBehavior = null;
+  let activeCart = null;
+  let activeSurface = null;
   let currentDiscountCode = null;
   let inFlight = false;
   let lastCartSignature = "";
 
   recordViewedProduct();
+  installCartHooks();
 
-  closeEl?.addEventListener("click", () => {
-    hideOffer();
-    if (activeOffer) {
-      trackEvent("offer_dismissed", buildTrackingPayload(activeOffer, activeBehavior));
-    }
+  root.querySelectorAll("[data-are-close]").forEach((button) => {
+    button.addEventListener("click", () => {
+      hideSurfaces();
+      if (activeOffer) {
+        trackEvent("offer_dismissed", buildTrackingPayload(activeOffer, activeBehavior));
+      }
+    });
   });
 
-  backdropEl?.addEventListener("click", hideOffer);
-  formEl?.addEventListener("submit", handleOfferSubmit);
+  root.querySelectorAll("[data-are-add]").forEach((button) => {
+    button.addEventListener("click", handleOfferAdd);
+  });
+
+  backdropEl?.addEventListener("click", hideSurfaces);
+  orbEl?.addEventListener("click", () => {
+    if (!activeOffer) {
+      requestRevenueOffer("assistant_open");
+      return;
+    }
+
+    renderSurface("assistant", activeOffer, activeBehavior || {}, activeCart || {}, "assistant_open");
+  });
 
   if (settings.triggerOnLoad) {
     window.setTimeout(() => requestRevenueOffer("page_load"), settings.smartDelay);
   }
-
-  installCartHooks();
 
   async function requestRevenueOffer(trigger) {
     if (inFlight) return;
@@ -335,7 +920,7 @@
       if (!cart || !Array.isArray(cart.items)) return;
 
       const signature = getCartSignature(cart);
-      if (trigger !== "page_load" && signature === lastCartSignature) return;
+      if (!["page_load", "assistant_open"].includes(trigger) && signature === lastCartSignature) return;
       lastCartSignature = signature;
 
       if (cart.item_count === 0 && getPageType() !== "product") return;
@@ -362,8 +947,13 @@
       const offer = parseOffer(data.suggestion);
       if (!offer || !offer.id) return;
 
+      activeOffer = offer;
       activeBehavior = behaviorContext;
-      renderOffer(offer, behaviorContext, cart);
+      activeCart = cart;
+      currentDiscountCode = offer.discount?.code || null;
+
+      const surface = resolveSurface(trigger, offer, behaviorContext, cart);
+      renderSurface(surface, offer, behaviorContext, cart, trigger);
     } catch (error) {
       console.warn("AI Revenue Engine skipped:", error);
     } finally {
@@ -371,64 +961,143 @@
     }
   }
 
-  function renderOffer(offer, behaviorContext, cart) {
-    activeOffer = offer;
-    currentDiscountCode = offer.discount?.code || null;
+  function renderSurface(surface, offer, behaviorContext, cart, trigger) {
+    const target = surfaces[surface] || companionEl;
+    if (!target) return;
 
-    const renderMode = resolveRenderMode(offer.placement);
-    offerEl.classList.remove("are-modal", "are-slide", "are-inline");
-    offerEl.classList.add(`are-${renderMode}`);
-    backdropEl.hidden = renderMode !== "modal";
+    activeSurface = surface;
 
-    setText("are-mode", offer.modeLabel || "AI Revenue Engine");
-    setText("are-experiment", offer.experiment?.variant || "Adaptive offer");
-    setText("are-title", offer.bundle?.title || offer.title || "Recommended offer");
-    setText("are-message", offer.message || "");
-    setText("are-insight", offer.insight || offer.autopilotAction || "");
-    setText("are-currency", cart.currency || settings.currency);
+    hideSurfaces({ keepOrb: true });
+    hydrateSurface(target, offer, behaviorContext, cart, surface);
 
-    const price = offer.bundle?.discountedTotal || offer.price || "";
-    const compare = offer.bundle?.subtotal && offer.bundle.subtotal !== price ? offer.bundle.subtotal : "";
-    setText("are-price", price);
-    setText("are-compare", compare);
+    if (surface === "drawer") {
+      backdropEl.hidden = false;
+    }
+
+    target.hidden = false;
+
+    if (settings.assistantEnabled || settings.surface === "floating_assistant") {
+      orbEl.hidden = false;
+    }
+
+    trackEvent("upsell_impression", {
+      ...buildTrackingPayload(offer, behaviorContext),
+      surface,
+      trigger
+    });
+  }
+
+  function hydrateSurface(surfaceEl, offer, behaviorContext, cart, surface) {
+    if (!surfaceEl) return;
 
     const items = getOfferItems(offer);
-    renderMedia(items);
-    renderItems(items);
+    const progress = calculateProgress(cart, items);
+    const savings = getSavingsLabel(offer);
+    const insight = getInsightText(offer, behaviorContext);
 
-    submitEl.textContent = offer.offerType === "bundle" ? "Add bundle to cart" : "Add to cart";
-    offerEl.hidden = false;
+    setAll(surfaceEl, "surfaceLabel", getSurfaceLabel(surface));
+    setAll(surfaceEl, "title", offer.bundle?.title || offer.title || "Complete your setup");
+    setAll(surfaceEl, "message", offer.message || "A contextual recommendation selected for this cart.");
+    setAll(surfaceEl, "insight", insight);
+    setAll(surfaceEl, "confidence", getConfidenceLabel(offer));
+    setAll(surfaceEl, "progressLabel", `${progress.value}%`);
+    setAll(surfaceEl, "nextStep", progress.nextStep);
+    setAll(surfaceEl, "savings", savings);
 
-    trackEvent("upsell_impression", buildTrackingPayload(offer, behaviorContext));
+    surfaceEl.querySelectorAll("[data-are-progress-bar]").forEach((bar) => {
+      bar.style.width = `${progress.value}%`;
+    });
+
+    surfaceEl.querySelectorAll("[data-are-reasoning-wrap]").forEach((element) => {
+      element.hidden = !settings.showReasoning || !insight;
+    });
+
+    surfaceEl.querySelectorAll("[data-are-add]").forEach((button) => {
+      button.textContent = getButtonLabel(offer);
+      button.disabled = false;
+    });
+
+    surfaceEl.querySelectorAll("[data-are-media]").forEach((media) => renderMedia(media, items));
+    surfaceEl.querySelectorAll("[data-are-items]").forEach((list) => {
+      renderItems(list, items, offer, behaviorContext, surface);
+    });
+    surfaceEl.querySelectorAll("[data-are-context]").forEach((row) => {
+      renderContext(row, offer, behaviorContext);
+    });
   }
 
-  function renderMedia(items) {
-    const media = document.getElementById(`are-media-${blockId}`);
-    if (!media) return;
-
-    media.classList.toggle("are-single", items.length === 1);
+  function renderMedia(media, items) {
+    media.classList.toggle("are-single", items.length <= 1);
     media.innerHTML = items
       .slice(0, 4)
-      .map((item) => `<img src="${escapeHtml(item.image || "")}" alt="${escapeHtml(item.title || "")}" loading="lazy">`)
+      .map((item) => {
+        const image = escapeHtml(item.image || "");
+        const title = escapeHtml(item.title || "Recommended product");
+        return `<img src="${image}" alt="${title}" loading="lazy">`;
+      })
       .join("");
   }
 
-  function renderItems(items) {
-    const list = document.getElementById(`are-items-${blockId}`);
-    if (!list) return;
-
+  function renderItems(list, items, offer, behaviorContext, surface) {
+    const compact = surface === "progress";
     list.innerHTML = items
-      .map((item) => `<li><span>${escapeHtml(item.title || "")}</span><strong>${escapeHtml(item.price || "")}</strong></li>`)
+      .map((item, index) => {
+        const title = escapeHtml(item.title || "Recommended product");
+        const price = escapeHtml(item.price || "");
+        const reason = escapeHtml(getItemReason(item, index, offer, behaviorContext));
+        const image = escapeHtml(item.image || "");
+
+        if (compact) {
+          return `
+            <li class="are-item">
+              <span class="are-item-main">
+                <span class="are-item-title">${title}</span>
+                <span class="are-item-reason">${reason}</span>
+              </span>
+              <strong class="are-item-price">${price}</strong>
+            </li>
+          `;
+        }
+
+        return `
+          <li class="are-item">
+            <img class="are-item-image" src="${image}" alt="${title}" loading="lazy">
+            <span class="are-item-main">
+              <span class="are-item-title">${title}</span>
+              <span class="are-item-reason">${reason}</span>
+            </span>
+            <strong class="are-item-price">${price}</strong>
+          </li>
+        `;
+      })
       .join("");
   }
 
-  async function handleOfferSubmit(event) {
+  function renderContext(row, offer, behaviorContext) {
+    const viewedCount = behaviorContext.viewedProducts?.length || 0;
+    const chips = [
+      offer.modeLabel || "Revenue mode",
+      formatPlacement(offer.placement || activeSurface),
+      viewedCount ? `${viewedCount} product signals` : "Live cart signal",
+      formatDevice(behaviorContext.device)
+    ].filter(Boolean);
+
+    row.innerHTML = chips
+      .slice(0, 4)
+      .map((chip) => `<span class="are-chip">${escapeHtml(chip)}</span>`)
+      .join("");
+  }
+
+  async function handleOfferAdd(event) {
     event.preventDefault();
     if (!activeOffer) return;
 
-    const originalText = submitEl.textContent;
-    submitEl.disabled = true;
-    submitEl.textContent = "Adding...";
+    const buttons = Array.from(root.querySelectorAll("[data-are-add]"));
+    const originalLabels = buttons.map((button) => button.textContent);
+    buttons.forEach((button) => {
+      button.disabled = true;
+      button.textContent = "Adding...";
+    });
 
     try {
       if (currentDiscountCode) {
@@ -454,27 +1123,36 @@
       const cartResponse = await response.json();
       trackEvent("upsell_add_to_cart", {
         ...buildTrackingPayload(activeOffer, activeBehavior),
+        surface: activeSurface,
         cartResponse
       });
 
-      submitEl.textContent = "Added";
+      buttons.forEach((button) => {
+        button.textContent = "Added";
+      });
 
       window.setTimeout(() => {
-        submitEl.disabled = false;
-        submitEl.textContent = originalText;
-        hideOffer();
+        buttons.forEach((button, index) => {
+          button.disabled = false;
+          button.textContent = originalLabels[index] || getButtonLabel(activeOffer);
+        });
+        hideSurfaces({ keepOrb: true });
 
         if (settings.redirectToCheckout) {
           window.location.href = "/checkout";
         }
-      }, 800);
+      }, 850);
     } catch (error) {
       console.warn("Offer add failed:", error);
-      submitEl.textContent = "Try again";
+      buttons.forEach((button) => {
+        button.textContent = "Try again";
+      });
       window.setTimeout(() => {
-        submitEl.disabled = false;
-        submitEl.textContent = originalText;
-      }, 1200);
+        buttons.forEach((button, index) => {
+          button.disabled = false;
+          button.textContent = originalLabels[index] || getButtonLabel(activeOffer);
+        });
+      }, 1300);
     }
   }
 
@@ -544,6 +1222,154 @@
     };
   }
 
+  function resolveSurface(trigger, offer, behaviorContext, cart) {
+    if (settings.surface === "product_companion") return "companion";
+    if (settings.surface === "cart_intelligence") return "drawer";
+    if (settings.surface === "progress_journey") return "progress";
+    if (settings.surface === "revenue_banner") return "banner";
+    if (settings.surface === "floating_assistant") return "assistant";
+
+    if (settings.displayMode === "slide_cart") return "drawer";
+    if (settings.displayMode === "inline") return "companion";
+    if (settings.displayMode === "both") return "companion";
+
+    const placement = String(offer.placement || "").toLowerCase();
+    const pageType = String(behaviorContext.pageType || "").toLowerCase();
+
+    if (["cart_add", "cart_form"].includes(trigger)) return "drawer";
+    if (placement.includes("cart") || pageType.includes("cart")) return "drawer";
+    if (settings.displayMode === "modal") return "drawer";
+    if (settings.displayMode === "modal_fallback") return "drawer";
+    if (placement.includes("checkout")) return "progress";
+    if (placement.includes("product") || pageType.includes("product")) return "companion";
+    if (cart.item_count > 0) return "progress";
+
+    return "banner";
+  }
+
+  function hideSurfaces(options = {}) {
+    Object.values(surfaces).forEach((surface) => {
+      if (surface) surface.hidden = true;
+    });
+    backdropEl.hidden = true;
+
+    if (!options.keepOrb && orbEl) {
+      orbEl.hidden = true;
+    }
+  }
+
+  function setAll(scope, field, value) {
+    scope.querySelectorAll(`[data-are-field="${field}"]`).forEach((element) => {
+      element.textContent = value || "";
+    });
+  }
+
+  function getOfferItems(offer) {
+    if (offer.bundle?.items?.length) return offer.bundle.items;
+
+    return [{
+      id: offer.id,
+      title: offer.title,
+      price: offer.price,
+      image: offer.image
+    }];
+  }
+
+  function calculateProgress(cart, items) {
+    const itemCount = Number(cart.item_count || 0);
+    const cartTotal = normalizeCartTotal(cart);
+    const signalBoost = Math.min(items.length, 3) * 6;
+    const valueBoost = cartTotal >= 150 ? 14 : cartTotal >= 75 ? 9 : cartTotal >= 30 ? 5 : 0;
+    const value = clamp(36 + Math.min(itemCount, 4) * 10 + signalBoost + valueBoost, 42, 92);
+    const shippingText = getShippingText(cartTotal);
+    const lead = items[0]?.title || "the next recommended item";
+
+    return {
+      value,
+      nextStep: shippingText || `Add ${lead} to complete the next step.`
+    };
+  }
+
+  function getShippingText(cartTotal) {
+    const threshold = settings.freeShippingThreshold;
+    if (!threshold || threshold <= 0) return "";
+
+    const remaining = threshold - cartTotal;
+    if (remaining <= 0) return "Free shipping is unlocked for this cart.";
+
+    return `Add ${formatMoney(remaining, settings.currency)} more to unlock free shipping.`;
+  }
+
+  function getSavingsLabel(offer) {
+    const percent = offer.discount?.percentage || offer.bundle?.discountPercentage;
+    if (percent) return `Save ${percent}%`;
+    if (offer.bundle?.subtotal && offer.bundle?.discountedTotal && offer.bundle.subtotal !== offer.bundle.discountedTotal) {
+      return `${offer.bundle.discountedTotal} bundle`;
+    }
+    return offer.offerType === "bundle" ? "Bundle ready" : "High-fit add-on";
+  }
+
+  function getButtonLabel(offer) {
+    const savings = offer.discount?.percentage || offer.bundle?.discountPercentage;
+    if (offer.offerType === "bundle") {
+      return savings ? `Add bundle and save ${savings}%` : "Add bundle to cart";
+    }
+    return savings ? `Add recommendation and save ${savings}%` : "Add recommendation";
+  }
+
+  function getConfidenceLabel(offer) {
+    if (offer.confidence) return `${offer.confidence}% match`;
+    return "Live fit";
+  }
+
+  function getSurfaceLabel(surface) {
+    if (surface === "drawer") return "AI Cart Intelligence";
+    if (surface === "progress") return "AI Progress Journey";
+    if (surface === "banner") return "AI Revenue Banner";
+    if (surface === "assistant") return "Storefront Concierge";
+    return "AI Product Companion";
+  }
+
+  function getInsightText(offer, behaviorContext) {
+    return offer.insight || offer.reasoning || offer.autopilotAction || `Selected from ${behaviorContext.trafficSource || "live"} session signals.`;
+  }
+
+  function getItemReason(item, index, offer, behaviorContext) {
+    const reasons = offer.metadata?.scoreReasons || [];
+    if (reasons[index]) return cleanReason(reasons[index]);
+
+    const pageType = String(behaviorContext.pageType || "").toLowerCase();
+    if (index === 0 && offer.offerType === "bundle") return "Anchors the recommended setup.";
+    if (pageType.includes("product")) return "Matches the product being viewed.";
+    if (behaviorContext.viewedProducts?.length) return "Uses recent browsing signals.";
+    if (index === 1) return "Frequently paired before checkout.";
+    return "Selected for current cart intent.";
+  }
+
+  function cleanReason(value) {
+    return String(value || "")
+      .replace(/\.$/, "")
+      .replace(/^Matched /, "Matched ")
+      .replace(/^Fits /, "Fits ");
+  }
+
+  function formatPlacement(value) {
+    const placement = String(value || "").replace(/_/g, " ");
+    if (!placement) return "";
+    return placement.charAt(0).toUpperCase() + placement.slice(1);
+  }
+
+  function formatDevice(value) {
+    if (!value) return "";
+    const device = String(value);
+    return device.charAt(0).toUpperCase() + device.slice(1);
+  }
+
+  function normalizeCartTotal(cart) {
+    const total = Number(cart.total_price || 0);
+    return total / 100;
+  }
+
   function buildTrackingPayload(offer, behaviorContext) {
     return {
       id: offer.id,
@@ -594,37 +1420,6 @@
         return null;
       }
     }
-  }
-
-  function getOfferItems(offer) {
-    if (offer.bundle?.items?.length) return offer.bundle.items;
-
-    return [{
-      id: offer.id,
-      title: offer.title,
-      price: offer.price,
-      image: offer.image
-    }];
-  }
-
-  function resolveRenderMode(placement) {
-    const requested = settings.displayMode === "autopilot" ? placement : settings.displayMode;
-
-    if (requested === "modal") return "modal";
-    if (requested === "slide_cart") return "slide";
-    if (requested === "both") return "inline";
-
-    return "inline";
-  }
-
-  function hideOffer() {
-    offerEl.hidden = true;
-    backdropEl.hidden = true;
-  }
-
-  function setText(idPrefix, value) {
-    const element = document.getElementById(`${idPrefix}-${blockId}`);
-    if (element) element.textContent = value || "";
   }
 
   function toNumericVariantId(id) {
@@ -696,6 +1491,21 @@
     return String(url || "").includes("/cart/add");
   }
 
+  function formatMoney(value, currency) {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: currency || settings.currency || "USD"
+      }).format(value);
+    } catch {
+      return `${Number(value || 0).toFixed(2)}`;
+    }
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(Math.round(value), min), max);
+  }
+
   function escapeHtml(value) {
     return String(value || "")
       .replace(/&/g, "&amp;")
@@ -715,13 +1525,27 @@
   "settings": [
     {
       "type": "select",
+      "id": "surface",
+      "label": "AI surface",
+      "options": [
+        { "value": "adaptive_commerce", "label": "Adaptive commerce layer" },
+        { "value": "product_companion", "label": "AI product companion" },
+        { "value": "cart_intelligence", "label": "AI smart cart drawer" },
+        { "value": "progress_journey", "label": "AI progress journey" },
+        { "value": "revenue_banner", "label": "AI revenue banner" },
+        { "value": "floating_assistant", "label": "Floating shopping assistant" }
+      ],
+      "default": "adaptive_commerce"
+    },
+    {
+      "type": "select",
       "id": "display_mode",
-      "label": "Placement strategy",
+      "label": "Legacy placement fallback",
       "options": [
         { "value": "autopilot", "label": "Autopilot" },
         { "value": "inline", "label": "Inline native block" },
-        { "value": "slide_cart", "label": "Slide cart" },
-        { "value": "modal", "label": "Modal fallback" }
+        { "value": "slide_cart", "label": "AI smart cart drawer" },
+        { "value": "modal", "label": "Cart drawer fallback" }
       ],
       "default": "autopilot"
     },
@@ -743,21 +1567,43 @@
     },
     {
       "type": "checkbox",
+      "id": "assistant_enabled",
+      "label": "Show floating assistant after an offer is ready",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_reasoning",
+      "label": "Show expandable AI reasoning",
+      "default": true
+    },
+    {
+      "type": "checkbox",
       "id": "redirect_to_checkout",
       "label": "Go to checkout after offer is added",
       "default": false
     },
     {
+      "type": "range",
+      "id": "free_shipping_threshold",
+      "label": "Free shipping threshold",
+      "min": 0,
+      "max": 500,
+      "step": 10,
+      "unit": "$",
+      "default": 100
+    },
+    {
       "type": "color",
       "id": "modal_background_color",
-      "label": "Offer background",
+      "label": "Surface background",
       "default": "#ffffff"
     },
     {
       "type": "color",
       "id": "image_section_Background_color",
       "label": "Media background",
-      "default": "#f3f4f6"
+      "default": "#f5f7fb"
     },
     {
       "type": "range",
@@ -783,7 +1629,7 @@
       "max": 32,
       "step": 1,
       "unit": "px",
-      "default": 20
+      "default": 22
     },
     {
       "type": "color",
@@ -805,7 +1651,7 @@
       "type": "color",
       "id": "modal_text_color",
       "label": "Body text color",
-      "default": "#374151"
+      "default": "#475569"
     },
     {
       "type": "range",

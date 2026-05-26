@@ -51,11 +51,11 @@ const revenueModeOptions = [
 
 const placementOptions = [
   { label: "Autopilot", value: "autopilot" },
-  { label: "Inline native block", value: "inline" },
-  { label: "Slide cart", value: "slide_cart" },
-  { label: "Product page", value: "product_page" },
-  { label: "Checkout", value: "checkout" },
-  { label: "Modal fallback", value: "modal" },
+  { label: "AI product companion", value: "inline" },
+  { label: "AI smart cart drawer", value: "slide_cart" },
+  { label: "Product companion page", value: "product_page" },
+  { label: "AI progress journey", value: "checkout" },
+  { label: "Cart drawer fallback", value: "modal" },
 ];
 
 const urgencyOptions = [
@@ -226,13 +226,13 @@ export default function Settings() {
                 />
 
                 <Select
-                  label="Primary placement"
+                  label="Primary AI surface"
                   options={placementOptions}
                   value={formState.primaryPlacement}
                   onChange={(value) =>
                     setFormState({ ...formState, primaryPlacement: value })
                   }
-                  helpText="Autopilot lets the engine choose inline, slide cart, product page, checkout, or modal fallback."
+                  helpText="Autopilot lets the engine choose the product companion, smart cart drawer, progress journey, or fallback drawer."
                 />
 
                 <Select
