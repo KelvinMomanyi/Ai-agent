@@ -51,10 +51,9 @@
       <p data-are-field="nextStep"></p>
     </div>
 
-    <details class="are-reasoning" data-are-reasoning-wrap>
-      <summary>Why this?</summary>
+    <div class="are-reasoning" data-are-reasoning-wrap>
       <p data-are-field="insight"></p>
-    </details>
+    </div>
 
     <div class="are-actions">
       <button type="button" class="are-submit" data-are-add>
@@ -94,10 +93,9 @@
 
     <ul class="are-items are-items-compact" data-are-items></ul>
 
-    <details class="are-reasoning" data-are-reasoning-wrap>
-      <summary>Why this?</summary>
+    <div class="are-reasoning" data-are-reasoning-wrap>
       <p data-are-field="insight"></p>
-    </details>
+    </div>
 
     <div class="are-actions">
       <button type="button" class="are-submit" data-are-add>
@@ -169,10 +167,9 @@
         <ul class="are-items are-drawer-items" data-are-items></ul>
       </div>
 
-      <details class="are-reasoning" data-are-reasoning-wrap>
-        <summary>Why this?</summary>
-        <p data-are-field="insight"></p>
-      </details>
+      <div class="are-reasoning" data-are-reasoning-wrap>
+      <p data-are-field="insight"></p>
+    </div>
 
       <button type="button" class="are-submit are-submit-large" data-are-add>
         Add all to cart
@@ -207,10 +204,9 @@
     <h3 class="are-title" data-are-field="title">Complete your setup</h3>
     <div class="are-mini-media" data-are-media></div>
     <p class="are-message" data-are-field="message"></p>
-    <details class="are-reasoning" data-are-reasoning-wrap>
-      <summary>Why this?</summary>
+    <div class="are-reasoning" data-are-reasoning-wrap>
       <p data-are-field="insight"></p>
-    </details>
+    </div>
     <button type="button" class="are-submit" data-are-add>
       Add recommendation
     </button>
@@ -751,6 +747,34 @@
     animation: are-rise 360ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
+  
+  .are-typewriter {
+    display: inline-block;
+    overflow: hidden;
+    white-space: nowrap;
+    border-right: 2px solid var(--are-muted);
+    animation: are-typing 1.5s steps(40, end) forwards, are-blink-caret 0.75s step-end 3 forwards;
+  }
+  .are-item-price-original {
+    text-decoration: line-through;
+    color: #94a3b8;
+    font-size: 12px;
+    margin-right: 6px;
+    font-weight: normal;
+  }
+  .are-item-price-discounted {
+    color: #10b981;
+  }
+
+  @keyframes are-typing {
+    from { max-width: 0; white-space: nowrap; }
+    to { max-width: 100%; white-space: normal; border-right-color: transparent; }
+  }
+  @keyframes are-blink-caret {
+    from, to { border-color: transparent; }
+    50% { border-color: var(--are-muted); }
+  }
+
   @keyframes are-rise {
     from {
       opacity: 0;
@@ -998,6 +1022,11 @@
     setAll(surfaceEl, "surfaceLabel", getSurfaceLabel(surface));
     setAll(surfaceEl, "title", offer.bundle?.title || offer.title || "Complete your setup");
     setAll(surfaceEl, "message", offer.message || "A contextual recommendation selected for this cart.");
+    surfaceEl.querySelectorAll(`[data-are-field="message"]`).forEach(el => {
+      el.classList.remove("are-typewriter");
+      void el.offsetWidth;
+      el.classList.add("are-typewriter");
+    });
     setAll(surfaceEl, "insight", insight);
     setAll(surfaceEl, "confidence", getConfidenceLabel(offer));
     setAll(surfaceEl, "progressLabel", `${progress.value}%`);
@@ -1047,6 +1076,24 @@
         const reason = escapeHtml(getItemReason(item, index, offer, behaviorContext));
         const image = escapeHtml(item.image || "");
 
+        const discountPct = offer.discount?.percentage || 0;
+        let priceHtml = `<strong class="are-item-price">${price}</strong>`;
+        
+        if (discountPct > 0) {
+            // Rough calculation for display purposes
+            const numericPrice = parseFloat(price.replace(/[^0-9.]/g, ''));
+            if (!isNaN(numericPrice)) {
+                const original = (numericPrice / (1 - (discountPct / 100))).toFixed(2);
+                const currencySymbol = price.replace(/[0-9.,]/g, '');
+                priceHtml = `
+                    <strong class="are-item-price">
+                        <span class="are-item-price-original">${currencySymbol}${original}</span>
+                        <span class="are-item-price-discounted">${price}</span>
+                    </strong>
+                `;
+            }
+        }
+
         if (compact) {
           return `
             <li class="are-item">
@@ -1054,7 +1101,7 @@
                 <span class="are-item-title">${title}</span>
                 <span class="are-item-reason">${reason}</span>
               </span>
-              <strong class="are-item-price">${price}</strong>
+              ${priceHtml}
             </li>
           `;
         }
@@ -1066,7 +1113,7 @@
               <span class="are-item-title">${title}</span>
               <span class="are-item-reason">${reason}</span>
             </span>
-            <strong class="are-item-price">${price}</strong>
+            ${priceHtml}
           </li>
         `;
       })
@@ -1535,7 +1582,7 @@
         { "value": "revenue_banner", "label": "AI revenue banner" },
         { "value": "floating_assistant", "label": "Floating shopping assistant" }
       ],
-      "default": "adaptive_commerce"
+      "default": "cart_intelligence"
     },
     {
       "type": "select",
@@ -1547,7 +1594,7 @@
         { "value": "slide_cart", "label": "AI smart cart drawer" },
         { "value": "modal", "label": "Cart drawer fallback" }
       ],
-      "default": "autopilot"
+      "default": "slide_cart"
     },
     {
       "type": "range",
