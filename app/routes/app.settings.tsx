@@ -29,6 +29,7 @@ const defaultConfig = {
   discountPercentage: 10,
   offerStrategy:
     "Prioritize revenue outcomes. Use bundles for high-intent carts, protect margin, and avoid generic copy.",
+  brandVoice: "",
   minProductPrice: 20,
   revenueMode: "aov",
   enableAutopilot: true,
@@ -102,6 +103,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       update: {
         discountPercentage,
         offerStrategy: String(formData.get("offerStrategy") || ""),
+        brandVoice: String(formData.get("brandVoice") || ""),
         minProductPrice,
         revenueMode: String(formData.get("revenueMode") || "aov"),
         enableAutopilot: parseBoolean(formData.get("enableAutopilot")),
@@ -118,6 +120,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopDomain: session.shop,
         discountPercentage,
         offerStrategy: String(formData.get("offerStrategy") || ""),
+        brandVoice: String(formData.get("brandVoice") || ""),
         minProductPrice,
         revenueMode: String(formData.get("revenueMode") || "aov"),
         enableAutopilot: parseBoolean(formData.get("enableAutopilot")),
@@ -151,6 +154,7 @@ export default function Settings() {
   const [formState, setFormState] = useState({
     discountPercentage: String(config.discountPercentage),
     offerStrategy: config.offerStrategy,
+    brandVoice: config.brandVoice || "",
     minProductPrice: String(config.minProductPrice),
     revenueMode: config.revenueMode,
     enableAutopilot: config.enableAutopilot,
@@ -353,6 +357,17 @@ export default function Settings() {
                   }
                   multiline={4}
                   helpText="Tell the engine how to trade off margin, conversion, inventory, brand voice, and offer aggressiveness."
+                  autoComplete="off"
+                />
+
+                <TextField
+                  label="Brand Voice / Tone"
+                  value={formState.brandVoice}
+                  onChange={(value) =>
+                    setFormState({ ...formState, brandVoice: value })
+                  }
+                  multiline={3}
+                  helpText="Provide guidelines for the LLM on how to sound when presenting the offer (e.g. 'Energetic, urgent, and premium' or 'Calm, consultative, and direct')."
                   autoComplete="off"
                 />
               </FormLayout>

@@ -108,12 +108,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       .filter(Boolean)
       .slice(0, 8);
 
-    const baseOffer = buildRevenueOffer({
+    const baseOffer = await buildRevenueOffer({
       cartItems,
       products,
       historyContext,
       shopConfig,
       behaviorContext,
+      shopDomain: session.shop
     });
 
     if (!baseOffer) {
@@ -123,10 +124,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
-    const aiEnhancement = await generateAiEnhancement(baseOffer, body.currency);
+    const aiEnhancement = await generateAiEnhancement(baseOffer, shopConfig?.brandVoice, body.currency);
     const suggestion = mergeAiEnhancement(baseOffer, aiEnhancement);
 
-    if (suggestion.discount?.percentage) {
+    // Skip generating GraphQL discount code for post-purchase since the UI extension
+    // natively handles discounts in the changeset.
+    if (suggestion.discount?.percentage && behaviorContext.pageType !== "post_purchase") {
       await createDiscountCode(
         admin,
         suggestion.discount.code,
@@ -208,12 +211,18 @@ function toProductCandidates(productResult: any): ProductCandidate[] {
 
 async function generateAiEnhancement(
   offer: RevenueOffer,
+  brandVoice?: string,
   currency?: string,
 ): Promise<Partial<RevenueOffer> | null> {
+  const brandInstruction = brandVoice 
+    ? `\nBrand Voice / Tone:\n${brandVoice}\nWrite the copy strictly matching this brand voice.` 
+    : "";
+
   const prompt = `You are improving an already selected Shopify revenue offer.
 
 Do not change product ids, prices, discount, mode, placement, experiment, or bundle items.
 Improve only customer-facing strategy copy.
+${brandInstruction}
 
 Current offer:
 ${JSON.stringify(

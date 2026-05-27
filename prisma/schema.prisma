@@ -14,6 +14,7 @@ model ShopConfig {
   shopDomain                  String   @id
   discountPercentage          Int      @default(10)
   offerStrategy               String   @default("Focus on high-value complementary items with a gentle discount sweetener.")
+  brandVoice                  String?  @default("")
   minProductPrice             Float    @default(20.0)
   revenueMode                 String   @default("aov")
   enableAutopilot             Boolean  @default(true)

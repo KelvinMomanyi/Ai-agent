@@ -31,6 +31,7 @@ export async function ensureRevenueEngineConfigSchema(prisma: PrismaClient) {
 
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "ShopConfig"
+    ADD COLUMN IF NOT EXISTS "brandVoice" TEXT DEFAULT '',
     ADD COLUMN IF NOT EXISTS "revenueMode" TEXT NOT NULL DEFAULT 'aov',
     ADD COLUMN IF NOT EXISTS "enableAutopilot" BOOLEAN NOT NULL DEFAULT true,
     ADD COLUMN IF NOT EXISTS "enableDynamicBundles" BOOLEAN NOT NULL DEFAULT true,

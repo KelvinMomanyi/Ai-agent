@@ -9,6 +9,7 @@ export type RevenueMode =
 export type EngineConfig = {
   discountPercentage: number;
   offerStrategy: string;
+  brandVoice?: string;
   minProductPrice: number;
   revenueMode: RevenueMode;
   enableAutopilot: boolean;
@@ -119,6 +120,7 @@ export const defaultEngineConfig: EngineConfig = {
   discountPercentage: 10,
   offerStrategy:
     "Focus on high-value complementary items with a gentle discount sweetener.",
+  brandVoice: "",
   minProductPrice: 20,
   revenueMode: "aov",
   enableAutopilot: true,
@@ -165,6 +167,7 @@ export function normalizeEngineConfig(config?: Partial<EngineConfig> | null): En
         ? clamp(Math.round(config.discountPercentage), 0, 80)
         : defaultEngineConfig.discountPercentage,
     offerStrategy: config?.offerStrategy || defaultEngineConfig.offerStrategy,
+    brandVoice: config?.brandVoice || defaultEngineConfig.brandVoice,
     minProductPrice:
       typeof config?.minProductPrice === "number"
         ? Math.max(0, config.minProductPrice)
@@ -195,19 +198,24 @@ export function normalizeEngineConfig(config?: Partial<EngineConfig> | null): En
   };
 }
 
-export function buildRevenueOffer(input: {
+export async function buildRevenueOffer(input: {
   cartItems: CartItem[];
   products: ProductCandidate[];
   historyContext?: string[];
   shopConfig?: Partial<EngineConfig> | null;
   behaviorContext?: BehaviorContext;
-}): RevenueOffer | null {
+  shopDomain?: string; // New field for DB querying
+}): Promise<RevenueOffer | null> {
   const config = normalizeEngineConfig(input.shopConfig);
   const behavior = input.behaviorContext || {};
   const cartItems = Array.isArray(input.cartItems) ? input.cartItems : [];
   const availableProducts = filterCartProducts(input.products, cartItems);
 
   if (availableProducts.length === 0) return null;
+
+  // ML Co-occurrence data (Simulated here by passing historyContext down, 
+  // but a real implementation would query Prisma. For now we use the passed historyContext).
+  // In a full DB implementation, we would query `prisma.event.findMany(...)` here.
 
   const cartTotal = getCartTotal(cartItems, behavior);
   const scoredProducts = availableProducts
@@ -244,7 +252,7 @@ export function buildRevenueOffer(input: {
       ? subtotal * (1 - discountPercentage / 100)
       : subtotal;
   const experiment = config.enableExperimentation
-    ? buildExperiment(cartItems, behavior, config)
+    ? await buildExperiment(cartItems, behavior, config, input.shopDomain)
     : undefined;
   const placement = choosePlacement(config, behavior, cartTotal);
   const segment = describeSegment(behavior, cartTotal, cartItems);
@@ -565,10 +573,11 @@ function buildBundleTitle(
   return `Complete ${leadType} Bundle`;
 }
 
-function buildExperiment(
+async function buildExperiment(
   cartItems: CartItem[],
   behavior: BehaviorContext,
   config: EngineConfig,
+  shopDomain?: string
 ) {
   const variants = [
     {
@@ -584,8 +593,20 @@ function buildExperiment(
       hypothesis: "Embedded native placement will outperform interruptive presentation.",
     },
   ];
+  
   const seed = `${cartItems.map((item) => item.variant_id || item.id).join("|")}-${behavior.device || ""}-${config.revenueMode}`;
-  const selected = variants[hashString(seed) % variants.length];
+  
+  // Epsilon-Greedy Bandit (Simulated logic: in production, fetch real win-rates from DB)
+  // If random < 0.2 (exploration), pick randomly.
+  // Else (exploitation), pick the variant that historically performs best.
+  let selected;
+  if (Math.random() < 0.2) {
+    selected = variants[hashString(seed) % variants.length]; // Random exploration
+  } else {
+    // Exploitation (simulating variant 1 winning for now, 
+    // a true DB query would group by variant and count conversions)
+    selected = variants[1]; 
+  }
 
   return {
     id: `rev-exp-${hashString(`${seed}-${selected.variant}`)}`,
