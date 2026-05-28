@@ -594,7 +594,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             where: { 
               event: "upsell_add_to_cart",
               data: {
-                path: "$.variant_id",
+                path: ["variant_id"],
                 equals: cleanedId
               }
             }
