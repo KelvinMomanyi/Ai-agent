@@ -39,7 +39,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
   const result = await response.json();
 
-  const productCatalog = result.data.products.edges.map(({ node }) => ({
+  const productCatalog = result.data.products.edges.map(({ node }: any) => ({
     id: node.id,
     title: node.title,
     image: {

@@ -11,6 +11,27 @@
     aria-live="polite"
     hidden
   >
+    <div class="are-content">
+      <h3 class="are-title" data-are-field="title"></h3>
+      <div class="are-price" data-are-field="price"></div>
+      <div class="are-message" data-are-field="message"></div>
+      <button class="are-button" data-are-action="accept"></button>
+    </div>
+    
+    <div id="are-chat-container-{{ block.id }}" style="border-top: 1px solid #e2e8f0; margin-top: 16px; padding-top: 16px;">
+      <div id="are-chat-messages-{{ block.id }}" style="max-height: 150px; overflow-y: auto; margin-bottom: 12px; font-size: 13px; display: flex; flex-direction: column; gap: 8px;">
+        <!-- Chat messages go here -->
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <input type="text" id="are-chat-input-{{ block.id }}" placeholder="Ask me anything..." style="flex: 1; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; outline: none;">
+        <button id="are-chat-send-{{ block.id }}" style="background: var(--are-action); color: var(--are-action-text); padding: 0 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;">Send</button>
+      </div>
+    </div>
+
+    <button class="are-close" data-are-close>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"></path></svg>
+    </button>
+    
     <button type="button" class="are-close" data-are-close aria-label="Close recommendation">
       &times;
     </button>
@@ -904,9 +925,19 @@
   let currentDiscountCode = null;
   let inFlight = false;
   let lastCartSignature = "";
+  let isOrbOpen = false;
+  
+  // Behavioral tracking state
+  let behaviorSignals = [];
+  let dwellObserver = null;
+  let lastScrollDepth = 0;
+  let trackingFlushInterval = null;
+
+  const visitorId = getOrCreateVisitorId();
 
   recordViewedProduct();
   installCartHooks();
+  initBehaviorTracking();
 
   root.querySelectorAll("[data-are-close]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -923,12 +954,19 @@
 
   backdropEl?.addEventListener("click", hideSurfaces);
   orbEl?.addEventListener("click", () => {
-    if (!activeOffer) {
-      requestRevenueOffer("assistant_open");
-      return;
-    }
-
-    renderSurface("assistant", activeOffer, activeBehavior || {}, activeCart || {}, "assistant_open");
+      if (!isOrbOpen) {
+        orbEl.classList.add("open");
+        isOrbOpen = true;
+        
+        // Auto-greet on first open
+        if (!window[`__are_greeted_${blockId}`]) {
+          window[`__are_greeted_${blockId}`] = true;
+          addChatMessage("assistant", "Hi there! Looking for anything specific today?");
+        }
+      } else {
+        orbEl.classList.remove("open");
+        isOrbOpen = false;
+      }
   });
 
   if (settings.triggerOnLoad) {
@@ -961,7 +999,8 @@
           cartTotal: cart.total_price,
           currency: cart.currency,
           itemCount: cart.item_count,
-          behaviorContext
+          behaviorContext,
+          visitorId
         })
       });
 
@@ -1212,6 +1251,10 @@
 
       if (isCartAddUrl(url) && !url.includes("/apps/upsell")) {
         window.setTimeout(() => requestRevenueOffer("cart_add"), settings.smartDelay || 500);
+      }
+      
+      if (isCartChangeUrl(url) && isCartRemoveReq(args)) {
+         trackBehavioralSignal("cart_remove", { url });
       }
 
       return response;
@@ -1536,6 +1579,195 @@
 
   function isCartAddUrl(url) {
     return String(url || "").includes("/cart/add");
+  }
+
+  function isCartChangeUrl(url) {
+    return String(url || "").includes("/cart/change") || String(url || "").includes("/cart/update");
+  }
+
+  function isCartRemoveReq(args) {
+    try {
+      if (args.length > 1 && args[1] && args[1].body) {
+        const bodyStr = String(args[1].body);
+        if (bodyStr.includes("quantity=0") || bodyStr.includes('"quantity":0') || bodyStr.includes('"quantity": 0')) {
+           return true;
+        }
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  function getOrCreateVisitorId() {
+    let vid = localStorage.getItem("are_visitor_id");
+    if (!vid) {
+      vid = 'vid_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem("are_visitor_id", vid);
+    }
+    return vid;
+  }
+
+  function trackBehavioralSignal(type, data) {
+    behaviorSignals.push({
+      type,
+      data,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  async function flushBehavioralSignals() {
+    if (behaviorSignals.length === 0) return;
+    
+    const signalsToSend = [...behaviorSignals];
+    behaviorSignals = [];
+
+    try {
+      await fetch("/apps/upsell/behavior", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        keepalive: true,
+        body: JSON.stringify({
+          visitorId,
+          signals: signalsToSend,
+          storeId: window.Shopify?.shop || "{{ shop.domain }}"
+        })
+      });
+    } catch (e) {
+      behaviorSignals = [...signalsToSend, ...behaviorSignals];
+    }
+  }
+
+  function initBehaviorTracking() {
+    trackBehavioralSignal("page_view", {
+      path: window.location.pathname,
+      device: getDevice(),
+      trafficSource: getTrafficSource(),
+      referrer: document.referrer || ""
+    });
+
+    const product = window.ShopifyAnalytics?.meta?.product;
+    if (product) {
+      trackBehavioralSignal("product_view", { id: product.id, title: product.title });
+      
+      let dwellStart = Date.now();
+      const reportDwell = () => {
+         const durationMs = Date.now() - dwellStart;
+         if (durationMs > 2000) {
+            trackBehavioralSignal("dwell", { productId: product.id, durationMs });
+         }
+         dwellStart = Date.now();
+      };
+
+      setInterval(reportDwell, 15000);
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) reportDwell();
+        else dwellStart = Date.now();
+      });
+    }
+
+    let scrollTimeout;
+    window.addEventListener("scroll", () => {
+      if (scrollTimeout) return;
+      scrollTimeout = setTimeout(() => {
+        const scrollPercent = Math.round((window.scrollY / (document.documentElement.scrollHeight - window.innerHeight)) * 100);
+        if (scrollPercent > lastScrollDepth + 10) {
+          lastScrollDepth = scrollPercent;
+          trackBehavioralSignal("scroll_depth", { path: window.location.pathname, depth: scrollPercent });
+        }
+        scrollTimeout = null;
+      }, 500);
+    }, { passive: true });
+
+    if (getDevice() === "desktop") {
+      document.documentElement.addEventListener("mouseleave", (e) => {
+        if (e.clientY <= 0) {
+          trackBehavioralSignal("exit_intent", { path: window.location.pathname });
+          flushBehavioralSignals();
+        }
+      });
+    }
+
+    trackingFlushInterval = setInterval(flushBehavioralSignals, 5000);
+    window.addEventListener("pagehide", flushBehavioralSignals);
+    window.addEventListener("beforeunload", flushBehavioralSignals);
+    
+    const chatInput = document.getElementById(`are-chat-input-${blockId}`);
+    const chatSend = document.getElementById(`are-chat-send-${blockId}`);
+    
+    if (chatInput && chatSend) {
+      const sendHandler = async () => {
+        const text = chatInput.value.trim();
+        if (!text) return;
+        
+        chatInput.value = "";
+        chatInput.disabled = true;
+        chatSend.disabled = true;
+        
+        addChatMessage("user", text);
+        
+        try {
+          const res = await fetch("/apps/upsell/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              visitorId,
+              message: text,
+              storeId: window.Shopify?.shop || "{{ shop.domain }}",
+              context: { cartTotal: activeCart ? normalizeCartTotal(activeCart) : 0 }
+            })
+          });
+          
+          if (res.ok) {
+            const data = await res.json();
+            if (data.reply) {
+              addChatMessage("assistant", data.reply);
+            }
+          } else {
+            addChatMessage("assistant", "Sorry, I had trouble connecting.");
+          }
+        } catch (e) {
+          addChatMessage("assistant", "Sorry, I had a network error.");
+        } finally {
+          chatInput.disabled = false;
+          chatSend.disabled = false;
+          chatInput.focus();
+        }
+      };
+      
+      chatSend.addEventListener("click", sendHandler);
+      chatInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") sendHandler();
+      });
+    }
+  }
+  
+  function addChatMessage(role, text) {
+    const messagesEl = document.getElementById(`are-chat-messages-${blockId}`);
+    if (!messagesEl) return;
+    
+    const msgEl = document.createElement("div");
+    msgEl.style.padding = "8px 12px";
+    msgEl.style.borderRadius = "8px";
+    msgEl.style.maxWidth = "85%";
+    msgEl.style.lineHeight = "1.4";
+    
+    if (role === "user") {
+       msgEl.style.alignSelf = "flex-end";
+       msgEl.style.background = "#e2e8f0";
+       msgEl.style.color = "#1e293b";
+       msgEl.style.borderBottomRightRadius = "2px";
+    } else {
+       msgEl.style.alignSelf = "flex-start";
+       msgEl.style.background = "var(--are-button-bg)";
+       msgEl.style.color = "var(--are-button-color)";
+       msgEl.style.borderBottomLeftRadius = "2px";
+    }
+    
+    msgEl.textContent = text;
+    messagesEl.appendChild(msgEl);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
   function formatMoney(value, currency) {

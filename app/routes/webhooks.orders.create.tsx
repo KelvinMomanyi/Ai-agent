@@ -160,7 +160,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 
 
 
-function extractProductVariantId(id) {
+function extractProductVariantId(id: any) {
   const prefix = "gid://shopify/ProductVariant/";
 
   // first make sure we have a string

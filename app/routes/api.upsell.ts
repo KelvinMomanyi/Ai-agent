@@ -7,8 +7,11 @@ import {
   type BehaviorContext,
   type ProductCandidate,
   type RevenueOffer,
+  type EngineConfig,
 } from "../models/revenue-engine.server";
 import { ensureRevenueEngineConfigSchema } from "../models/shop-config.server";
+import { getSessionForVisitor } from "../models/behavior-engine.server";
+import { evaluateDiscount } from "../models/discount-intelligence.server";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -22,6 +25,7 @@ type UpsellRequestBody = {
   currency?: string;
   itemCount?: number;
   behaviorContext?: BehaviorContext;
+  visitorId?: string;
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -43,6 +47,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const body = (await request.json()) as UpsellRequestBody;
     const { session, admin } = await authenticate.public.appProxy(request);
+    if (!session || !admin) {
+      return json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
+    }
     await ensureRevenueEngineConfigSchema(prisma);
 
     const cartItems = Array.isArray(body.cartItems) ? body.cartItems : [];
@@ -51,6 +58,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       cartTotal: body.behaviorContext?.cartTotal ?? body.cartTotal,
       itemCount: body.behaviorContext?.itemCount ?? body.itemCount,
     };
+    
+    let visitorSession = null;
+    let intentProfile = "browsing";
+    if (body.visitorId) {
+       try {
+         visitorSession = await getSessionForVisitor(session.shop, body.visitorId);
+         intentProfile = visitorSession.intentProfile;
+         behaviorContext.intentProfile = intentProfile;
+       } catch (e) {
+         console.error("Failed to get visitor session:", e);
+       }
+    }
 
     const [productResponse, conversionEvents, shopConfig] = await Promise.all([
       admin.graphql(`#graphql
@@ -90,11 +109,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }),
     ]);
 
-    const productResult = await productResponse.json();
+    const productResult = (await productResponse.json()) as any;
 
     if (productResult.errors) {
       throw new Error(`GraphQL error: ${JSON.stringify(productResult.errors)}`);
     }
+
+    const mappedConfig: Partial<EngineConfig> | undefined = shopConfig
+      ? {
+          discountPercentage: shopConfig.discountPercentage,
+          offerStrategy: shopConfig.offerStrategy,
+          brandVoice: shopConfig.brandVoice ?? undefined,
+          minProductPrice: shopConfig.minProductPrice,
+          revenueMode: shopConfig.revenueMode as any,
+          enableAutopilot: shopConfig.enableAutopilot,
+          enableDynamicBundles: shopConfig.enableDynamicBundles,
+          enableExperimentation: shopConfig.enableExperimentation,
+          enableBehavioralTargeting: shopConfig.enableBehavioralTargeting,
+          primaryPlacement: shopConfig.primaryPlacement,
+          maxBundleItems: shopConfig.maxBundleItems,
+          urgencyLevel: shopConfig.urgencyLevel,
+        }
+      : undefined;
 
     const products = toProductCandidates(productResult);
     const historyContext = conversionEvents
@@ -112,7 +148,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       cartItems,
       products,
       historyContext,
-      shopConfig,
+      shopConfig: mappedConfig,
       behaviorContext,
       shopDomain: session.shop
     });
@@ -123,8 +159,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         { status: 404, headers: corsHeaders },
       );
     }
+    
+    // Apply Discount Intelligence
+    if (visitorSession && mappedConfig) {
+       const discountDecision = evaluateDiscount({
+          intentProfile,
+          cartTotal: behaviorContext.cartTotal || 0,
+          cartItems,
+          visitorSession,
+          shopConfig: mappedConfig as any
+       });
+       
+       if (discountDecision.shouldDiscount) {
+          const discountVal = discountDecision.percentage;
+          baseOffer.discount = {
+             percentage: discountVal,
+             code: `SMART-AI-REWARD-${discountVal}`,
+             text: `${discountVal}% off this revenue-engine offer`,
+          };
+          if (baseOffer.bundle) {
+             baseOffer.bundle.discountPercentage = discountVal;
+             const subtotal = parseFloat(baseOffer.bundle.subtotal);
+             baseOffer.bundle.discountedTotal = (subtotal * (1 - discountVal/100)).toFixed(2);
+          }
+       } else {
+          baseOffer.discount = undefined;
+          if (baseOffer.bundle) {
+             baseOffer.bundle.discountPercentage = null;
+             baseOffer.bundle.discountedTotal = baseOffer.bundle.subtotal;
+          }
+       }
+       baseOffer.insight = discountDecision.reason + " " + baseOffer.insight;
+    }
 
-    const aiEnhancement = await generateAiEnhancement(baseOffer, shopConfig?.brandVoice, body.currency);
+    const aiEnhancement = await generateAiEnhancement(baseOffer, mappedConfig?.brandVoice, body.currency);
     const suggestion = mergeAiEnhancement(baseOffer, aiEnhancement);
 
     // Skip generating GraphQL discount code for post-purchase since the UI extension

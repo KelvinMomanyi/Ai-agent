@@ -6,6 +6,8 @@ export type RevenueMode =
   | "ltv"
   | "seasonal";
 
+import { intentAwareScoreAdjustment } from "./intent-scoring.server";
+
 export type EngineConfig = {
   discountPercentage: number;
   offerStrategy: string;
@@ -35,7 +37,7 @@ export type ProductCandidate = {
   } | string | null;
 };
 
-type CartItem = {
+export type CartItem = {
   id?: string | number;
   variant_id?: string | number;
   product_id?: string | number;
@@ -59,6 +61,7 @@ export type BehaviorContext = {
   viewedProducts?: Array<{ id?: string | number; title?: string; handle?: string }>;
   viewportWidth?: number;
   localHour?: number;
+  intentProfile?: string;
 };
 
 type ScoredProduct = ProductCandidate & {
@@ -392,6 +395,10 @@ function scoreProduct(input: {
 
   if (config.enableBehavioralTargeting) {
     score += scoreBehavior(price, cartTotal, behavior, title, tags, reasons);
+  }
+  
+  if (behavior.intentProfile) {
+     score = intentAwareScoreAdjustment(score, product, behavior.intentProfile, cartTotal, reasons);
   }
 
   return {

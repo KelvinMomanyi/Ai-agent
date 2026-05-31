@@ -282,6 +282,31 @@ export default function RevenueDashboard() {
             </BlockStack>
           </Card>
         </Layout.Section>
+        
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">
+                Visitor Intent Segments
+              </Text>
+              {dashboard.intentRows.length > 0 ? (
+                <DataTable
+                  columnContentTypes={[
+                    "text",
+                    "numeric",
+                    "numeric",
+                  ]}
+                  headings={["Intent Profile", "Visitors", "Average Revenue"]}
+                  rows={dashboard.intentRows}
+                />
+              ) : (
+                <Text as="p" tone="subdued">
+                  No visitor intent data available yet.
+                </Text>
+              )}
+            </BlockStack>
+          </Card>
+        </Layout.Section>
       </Layout>
     </Page>
   );
@@ -300,6 +325,7 @@ function processEvents(events: EventData[]) {
   const modes = new Map<string, number>();
   const placements = new Map<string, number>();
   const trafficSources = new Map<string, { impressions: number; adds: number }>();
+  const intents = new Map<string, { visitors: Set<string>; revenue: number }>();
 
   let generated = 0;
   let impressions = 0;
@@ -361,6 +387,12 @@ function processEvents(events: EventData[]) {
       day.conversions += 1;
       day.revenue += orderRevenue;
       if (experimentKey) ensureExperiment(experiments, experimentKey, data).revenue += orderRevenue;
+      
+      const intentProfile = data.behavior?.intentProfile || "unknown";
+      if (!intents.has(intentProfile)) intents.set(intentProfile, { visitors: new Set(), revenue: 0 });
+      const intentData = intents.get(intentProfile)!;
+      if (data.visitorId) intentData.visitors.add(data.visitorId);
+      intentData.revenue += orderRevenue;
     }
   }
 
@@ -383,6 +415,12 @@ function processEvents(events: EventData[]) {
   const timeSeriesData = Array.from(timeSeries.values()).sort((a, b) =>
     a.date.localeCompare(b.date),
   );
+  
+  const intentRows = Array.from(intents.entries()).map(([intent, data]) => [
+    intent,
+    data.visitors.size.toString(),
+    data.visitors.size ? (data.revenue / data.visitors.size).toFixed(2) : "0.00",
+  ]);
 
   return {
     metrics: {
@@ -401,6 +439,7 @@ function processEvents(events: EventData[]) {
     offerRows,
     experimentRows,
     timeSeriesData,
+    intentRows,
     insights: buildInsights({
       topMode,
       topPlacement,

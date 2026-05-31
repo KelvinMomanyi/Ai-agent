@@ -27,6 +27,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     const { session } = await authenticate.public.appProxy(request);
+    if (!session) {
+      return json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
+    }
     const body = await request.json();
     const { event, timestamp, data } = body;
 

@@ -8,7 +8,7 @@ import {
 } from '@shopify/polaris';
 
 export default function ChatBot() {
-    const [messages, setMessages] = useState([]);
+    const [messages, setMessages] = useState<Array<{ from: string; text: any }>>([]);
     const [loading, setLoading] = useState(false);
   
     const sendMessage = async () => {
@@ -34,12 +34,13 @@ export default function ChatBot() {
             {m.text}
           </Text>
             ))}
-           <Button onClick={sendMessage} disabled={loading} className="mt-2 bg-blue-500 text-white px-3 py-1 rounded">
-              {loading ? 'Thinking...' : 'Suggest an Upsell'}
-            </Button>
+            <div style={{ marginTop: '8px' }}>
+              <Button onClick={sendMessage} disabled={loading}>
+                {loading ? 'Thinking...' : 'Suggest an Upsell'}
+              </Button>
+            </div>
           </Layout.Section>
         </Layout>
       </Page>
     );
   }
-  

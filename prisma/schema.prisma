@@ -42,11 +42,12 @@ model Session {
   accountOwner  Boolean?
   locale        String?
   collaborator  Boolean?
+
+
   emailVerified Boolean?
 
   @@map("session")
 }
-
 
 model Shop {
   shopDomain     String   @id
@@ -71,5 +72,51 @@ model Event {
   @@unique([event, orderId, storeId], name: "event_orderId_storeId")
 }
 
+model VisitorSession {
+  id              String   @id @default(cuid())
+  visitorId       String   // fingerprint or cookie-based anonymous ID
+  storeId         String
+  sessionStart    DateTime @default(now())
+  lastActivity    DateTime @default(now())
+  device          String?
+  trafficSource   String?
+  referrer        String?
 
+  // Intent signals (updated incrementally)
+  viewedProducts  Json     @default("[]")    // [{id, title, viewCount, dwellMs}]
+  cartAdds        Json     @default("[]")    // [{variantId, timestamp}]
+  cartRemoves     Json     @default("[]")    // [{variantId, timestamp}]
+  scrollDepths    Json     @default("{}")    // {"/products/x": 82}
+  pageViews       Int      @default(0)
+  totalDwellMs    Int      @default(0)
 
+  // Computed intent classification
+  intentProfile   String   @default("browsing") // browsing | considering | high_intent | price_sensitive | abandoning
+  intentScore     Float    @default(0)
+
+  @@index([storeId, visitorId])
+  @@index([storeId, lastActivity])
+}
+
+model ChatMessage {
+  id          String   @id @default(cuid())
+  sessionId   String   // links to VisitorSession.id
+  storeId     String
+  role        String   // "assistant" | "user" | "system"
+  content     String
+  metadata    Json?    // {action: "offer_surfaced", offerId: "...", discountApplied: true}
+  timestamp   DateTime @default(now())
+
+  @@index([sessionId, timestamp])
+}
+
+model CrossStoreInsight {
+  id          String   @id @default(cuid())
+  category    String   // e.g. "Athletic Shoes"
+  metricName  String   // e.g. "price_elasticity", "add_to_cart_rate"
+  value       Float
+  confidence  Float
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([category, metricName])
+}
