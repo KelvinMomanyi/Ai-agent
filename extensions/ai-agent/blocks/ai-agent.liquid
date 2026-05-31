@@ -1954,6 +1954,149 @@
   function isCartRemoveReq(args) {
     try {
       if (args.length > 1 && args[1] && args[1].body) {
+        const bodyStr = String(args[1].body);
+        if (bodyStr.includes("quantity=0") || bodyStr.includes('"quantity":0') || bodyStr.includes('"quantity": 0')) {
+           return true;
+        }
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  function getOrCreateVisitorId() {
+    let vid = localStorage.getItem("are_visitor_id");
+    if (!vid) {
+      vid = 'vid_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem("are_visitor_id", vid);
+    }
+    return vid;
+  }
+
+  function trackBehavioralSignal(type, data) {
+    behaviorSignals.push({
+      type,
+      data,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  async function flushBehavioralSignals() {
+    if (behaviorSignals.length === 0) return;
+    
+    const signalsToSend = [...behaviorSignals];
+    behaviorSignals = [];
+
+    try {
+      await fetch("/apps/upsell/behavior", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        keepalive: true,
+        body: JSON.stringify({
+          visitorId,
+          signals: signalsToSend,
+          storeId: window.Shopify?.shop || "{{ shop.domain }}"
+        })
+      });
+    } catch (e) {
+      behaviorSignals = [...signalsToSend, ...behaviorSignals];
+    }
+  }
+
+  function initBehaviorTracking() {
+    trackBehavioralSignal("page_view", {
+      path: window.location.pathname,
+      device: getDevice(),
+      trafficSource: getTrafficSource(),
+      referrer: document.referrer || ""
+    });
+
+    const product = window.ShopifyAnalytics?.meta?.product;
+    if (product) {
+      trackBehavioralSignal("product_view", { id: product.id, title: product.title });
+      
+      let dwellStart = Date.now();
+      const reportDwell = () => {
+         const durationMs = Date.now() - dwellStart;
+         if (durationMs > 2000) {
+            trackBehavioralSignal("dwell", { productId: product.id, durationMs });
+         }
+         dwellStart = Date.now();
+      };
+
+      setInterval(reportDwell, 15000);
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) reportDwell();
+        else dwellStart = Date.now();
+      });
+    }
+
+    let scrollTimeout;
+    window.addEventListener("scroll", () => {
+      if (scrollTimeout) return;
+      scrollTimeout = setTimeout(() => {
+        const scrollPercent = Math.round((window.scrollY / (document.documentElement.scrollHeight - window.innerHeight)) * 100);
+        if (scrollPercent > lastScrollDepth + 10) {
+          lastScrollDepth = scrollPercent;
+          trackBehavioralSignal("scroll_depth", { path: window.location.pathname, depth: scrollPercent });
+        }
+        scrollTimeout = null;
+      }, 500);
+    }, { passive: true });
+
+    if (getDevice() === "desktop") {
+      document.documentElement.addEventListener("mouseleave", (e) => {
+        if (e.clientY <= 0) {
+          trackBehavioralSignal("exit_intent", { path: window.location.pathname });
+          flushBehavioralSignals();
+        }
+      });
+    }
+
+    trackingFlushInterval = setInterval(flushBehavioralSignals, 5000);
+    window.addEventListener("pagehide", flushBehavioralSignals);
+    window.addEventListener("beforeunload", flushBehavioralSignals);
+    
+    const chatInput = document.getElementById(`are-chat-input-${blockId}`);
+    const chatSend = document.getElementById(`are-chat-send-${blockId}`);
+    
+    if (chatInput && chatSend) {
+      const sendHandler = async () => {
+        const text = chatInput.value.trim();
+        if (!text) return;
+        
+        chatInput.value = "";
+        chatInput.disabled = true;
+        chatSend.disabled = true;
+        
+        addChatMessage("user", text);
+        
+        try {
+          const res = await fetch("/apps/upsell/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              visitorId,
+              message: text,
+              storeId: window.Shopify?.shop || "{{ shop.domain }}",
+              context: { cartTotal: activeCart ? normalizeCartTotal(activeCart) : 0 }
+            })
+          });
+          
+          if (res.ok) {
+            const data = await res.json();
+            if (data.reply) {
+              addChatMessage("assistant", data.reply);
+            }
+            if (data.products && Array.isArray(data.products)) {
+              data.products.forEach(p => addProductCard(p));
+            }
+          } else {
+            addChatMessage("assistant", "Sorry, I had trouble connecting.");
+          }
+        } catch (e) {
           addChatMessage("assistant", "Sorry, I had a network error.");
         } finally {
           chatInput.disabled = false;
