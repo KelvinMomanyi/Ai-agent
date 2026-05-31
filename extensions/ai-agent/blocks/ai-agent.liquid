@@ -951,9 +951,178 @@
       justify-self: start;
     }
 
+    white-space: nowrap;
+    border-right: 2px solid var(--are-muted);
+    animation: are-typing 1.5s steps(40, end) forwards, are-blink-caret 0.75s step-end 3 forwards;
+  }
+  .are-item-price-original {
+    text-decoration: line-through;
+    color: #94a3b8;
+    font-size: 12px;
+    margin-right: 6px;
+    font-weight: normal;
+  }
+  .are-item-price-discounted {
+    color: #10b981;
+  }
+
+  @keyframes are-typing {
+    from { max-width: 0; white-space: nowrap; }
+    to { max-width: 100%; white-space: normal; border-right-color: transparent; }
+  }
+  @keyframes are-blink-caret {
+    from, to { border-color: transparent; }
+    50% { border-color: var(--are-muted); }
+  }
+
+  @keyframes are-rise {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes are-drawer-in {
+    from {
+      opacity: 0;
+      transform: translateX(28px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes are-pulse {
+    from {
+      opacity: 0.7;
+      transform: scale(0.75);
+    }
+    to {
+      opacity: 0;
+      transform: scale(1.65);
+    }
+  }
+
+  @media (max-width: 720px) {
+    #ai-revenue-engine-{{ block.id }} .are-companion-layout,
+    #ai-revenue-engine-{{ block.id }} .are-banner {
+      grid-template-columns: 1fr;
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-surface-head,
+    #ai-revenue-engine-{{ block.id }} .are-actions {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-score,
+    #ai-revenue-engine-{{ block.id }} .are-savings {
+      white-space: normal;
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-banner-side {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-drawer {
+      width: 100vw;
+      padding: 8px;
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-drawer-shell {
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-item {
+      grid-template-columns: 44px minmax(0, 1fr);
+    }
+
+    #ai-revenue-engine-{{ block.id }} .are-item-price {
+      grid-column: 2;
+      justify-self: start;
+    }
+
     #ai-revenue-engine-{{ block.id }} .are-submit {
       width: 100%;
     }
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-chat-product-card {
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    gap: 10px;
+    align-items: center;
+    border: 1px solid rgba(15, 23, 42, 0.10);
+    border-radius: 8px;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(245, 247, 251, 0.72)),
+      var(--are-surface);
+    padding: 10px;
+    margin-top: 6px;
+    animation: are-rise 300ms ease-out;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-chat-product-card img {
+    width: 56px;
+    height: 56px;
+    object-fit: contain;
+    border-radius: 6px;
+    border: 1px solid rgba(15, 23, 42, 0.06);
+    background: rgba(255, 255, 255, 0.78);
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-chat-product-info {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-chat-product-title {
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--are-ink);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-chat-product-price {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--are-price);
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-chat-product-add {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 6px;
+    background: var(--are-action);
+    color: var(--are-action-text);
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 6px 10px;
+    width: fit-content;
+    transition: opacity 150ms;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-chat-product-add:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+
+  #ai-revenue-engine-{{ block.id }} .are-chat-product-add:hover:not(:disabled) {
+    opacity: 0.85;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -1041,35 +1210,72 @@
     window.setTimeout(() => requestRevenueOffer("page_load"), settings.smartDelay);
   }
 
+  // Always-on orb: show the floating chat button independently of upsell offers
+  if (settings.assistantEnabled && orbEl) {
+    window.setTimeout(() => {
+      orbEl.hidden = false;
+    }, settings.smartDelay);
+  }
+
   async function handleAssistantToggle() {
     if (isOrbOpen) {
       hideSurfaces({ keepOrb: true });
       return;
     }
 
-    if (!activeOffer) {
-      await requestRevenueOffer("assistant_open");
-    }
+    if (!assistantEl) return;
 
-    if (!activeOffer || !assistantEl) return;
+    // Try to fetch an offer in the background if we don't have one yet
+    if (!activeOffer) {
+      requestRevenueOffer("assistant_open").catch(() => {});
+    }
 
     hideSurfaces({ keepOrb: true });
     activeSurface = "assistant";
-    hydrateSurface(assistantEl, activeOffer, activeBehavior, activeCart, "assistant");
+
+    // If we have an active offer, hydrate the assistant with it
+    if (activeOffer) {
+      hydrateSurface(assistantEl, activeOffer, activeBehavior, activeCart, "assistant");
+    } else {
+      // No offer yet — show a clean concierge panel
+      setAll(assistantEl, "surfaceLabel", "Storefront Concierge");
+      setAll(assistantEl, "title", "How can I help you?");
+      setAll(assistantEl, "message", "");
+      assistantEl.querySelectorAll("[data-are-media]").forEach(m => { m.innerHTML = ""; });
+      assistantEl.querySelectorAll("[data-are-reasoning-wrap]").forEach(r => { r.hidden = true; });
+      assistantEl.querySelectorAll("[data-are-add]").forEach(b => { b.hidden = true; });
+    }
+
     assistantEl.hidden = false;
     setOrbOpen(true);
 
     if (!window[`__are_greeted_${blockId}`]) {
       window[`__are_greeted_${blockId}`] = true;
-      addChatMessage("assistant", "Hi there! Looking for anything specific today?");
+      addChatMessage("assistant", getGreetingMessage());
     }
 
     trackEvent("assistant_open", {
-      ...buildTrackingPayload(activeOffer, activeBehavior),
+      ...buildTrackingPayload(activeOffer || {}, activeBehavior || {}),
       surface: "assistant"
     });
 
     document.getElementById(`are-chat-input-${blockId}`)?.focus();
+  }
+
+  function getGreetingMessage() {
+    const pageType = getPageType();
+    const viewed = getViewedProducts();
+
+    if (pageType === "product" && viewed.length > 0) {
+      return `Hi! I see you\'re checking out ${viewed[0].title || "this product"}. Want help finding the right match or a bundle deal?`;
+    }
+    if (viewed.length > 2) {
+      return "Welcome back! You\'ve been browsing a few items — want me to find the best deal across what you\'ve seen?";
+    }
+    if (pageType === "collection") {
+      return "Hi there! Looking for anything specific in this collection? I can help you find it.";
+    }
+    return "Hi! I\'m your shopping assistant. Ask me anything — product recommendations, order tracking, or questions about the store.";
   }
 
   async function requestRevenueOffer(trigger) {
@@ -1748,146 +1954,6 @@
   function isCartRemoveReq(args) {
     try {
       if (args.length > 1 && args[1] && args[1].body) {
-        const bodyStr = String(args[1].body);
-        if (bodyStr.includes("quantity=0") || bodyStr.includes('"quantity":0') || bodyStr.includes('"quantity": 0')) {
-           return true;
-        }
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  }
-
-  function getOrCreateVisitorId() {
-    let vid = localStorage.getItem("are_visitor_id");
-    if (!vid) {
-      vid = 'vid_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-      localStorage.setItem("are_visitor_id", vid);
-    }
-    return vid;
-  }
-
-  function trackBehavioralSignal(type, data) {
-    behaviorSignals.push({
-      type,
-      data,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  async function flushBehavioralSignals() {
-    if (behaviorSignals.length === 0) return;
-    
-    const signalsToSend = [...behaviorSignals];
-    behaviorSignals = [];
-
-    try {
-      await fetch("/apps/upsell/behavior", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        keepalive: true,
-        body: JSON.stringify({
-          visitorId,
-          signals: signalsToSend,
-          storeId: window.Shopify?.shop || "{{ shop.domain }}"
-        })
-      });
-    } catch (e) {
-      behaviorSignals = [...signalsToSend, ...behaviorSignals];
-    }
-  }
-
-  function initBehaviorTracking() {
-    trackBehavioralSignal("page_view", {
-      path: window.location.pathname,
-      device: getDevice(),
-      trafficSource: getTrafficSource(),
-      referrer: document.referrer || ""
-    });
-
-    const product = window.ShopifyAnalytics?.meta?.product;
-    if (product) {
-      trackBehavioralSignal("product_view", { id: product.id, title: product.title });
-      
-      let dwellStart = Date.now();
-      const reportDwell = () => {
-         const durationMs = Date.now() - dwellStart;
-         if (durationMs > 2000) {
-            trackBehavioralSignal("dwell", { productId: product.id, durationMs });
-         }
-         dwellStart = Date.now();
-      };
-
-      setInterval(reportDwell, 15000);
-
-      document.addEventListener("visibilitychange", () => {
-        if (document.hidden) reportDwell();
-        else dwellStart = Date.now();
-      });
-    }
-
-    let scrollTimeout;
-    window.addEventListener("scroll", () => {
-      if (scrollTimeout) return;
-      scrollTimeout = setTimeout(() => {
-        const scrollPercent = Math.round((window.scrollY / (document.documentElement.scrollHeight - window.innerHeight)) * 100);
-        if (scrollPercent > lastScrollDepth + 10) {
-          lastScrollDepth = scrollPercent;
-          trackBehavioralSignal("scroll_depth", { path: window.location.pathname, depth: scrollPercent });
-        }
-        scrollTimeout = null;
-      }, 500);
-    }, { passive: true });
-
-    if (getDevice() === "desktop") {
-      document.documentElement.addEventListener("mouseleave", (e) => {
-        if (e.clientY <= 0) {
-          trackBehavioralSignal("exit_intent", { path: window.location.pathname });
-          flushBehavioralSignals();
-        }
-      });
-    }
-
-    trackingFlushInterval = setInterval(flushBehavioralSignals, 5000);
-    window.addEventListener("pagehide", flushBehavioralSignals);
-    window.addEventListener("beforeunload", flushBehavioralSignals);
-    
-    const chatInput = document.getElementById(`are-chat-input-${blockId}`);
-    const chatSend = document.getElementById(`are-chat-send-${blockId}`);
-    
-    if (chatInput && chatSend) {
-      const sendHandler = async () => {
-        const text = chatInput.value.trim();
-        if (!text) return;
-        
-        chatInput.value = "";
-        chatInput.disabled = true;
-        chatSend.disabled = true;
-        
-        addChatMessage("user", text);
-        
-        try {
-          const res = await fetch("/apps/upsell/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              visitorId,
-              message: text,
-              storeId: window.Shopify?.shop || "{{ shop.domain }}",
-              context: { cartTotal: activeCart ? normalizeCartTotal(activeCart) : 0 }
-            })
-          });
-          
-          if (res.ok) {
-            const data = await res.json();
-            if (data.reply) {
-              addChatMessage("assistant", data.reply);
-            }
-          } else {
-            addChatMessage("assistant", "Sorry, I had trouble connecting.");
-          }
-        } catch (e) {
           addChatMessage("assistant", "Sorry, I had a network error.");
         } finally {
           chatInput.disabled = false;
@@ -1912,6 +1978,66 @@
     
     msgEl.textContent = text;
     messagesEl.appendChild(msgEl);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function addProductCard(product) {
+    const messagesEl = document.getElementById(`are-chat-messages-${blockId}`);
+    if (!messagesEl || !product) return;
+
+    const cardEl = document.createElement("div");
+    cardEl.className = "are-chat-product-card";
+
+    const imgSrc = escapeHtml(product.image || "");
+    const title = escapeHtml(product.title || "Recommended product");
+    const price = escapeHtml(product.price ? `$${product.price}` : "");
+    const variantId = product.variantId || product.id || "";
+    const numericId = String(variantId).includes("/") ? String(variantId).split("/").pop() : String(variantId);
+    const handle = escapeHtml(product.handle || "");
+
+    cardEl.innerHTML = `
+      <img src="${imgSrc}" alt="${title}" loading="lazy">
+      <div class="are-chat-product-info">
+        <span class="are-chat-product-title">${title}</span>
+        <span class="are-chat-product-price">${price}</span>
+        <button type="button" class="are-chat-product-add" data-variant-id="${escapeHtml(numericId)}" data-handle="${handle}">
+          Add to Cart
+        </button>
+      </div>
+    `;
+
+    const addBtn = cardEl.querySelector(".are-chat-product-add");
+    if (addBtn) {
+      addBtn.addEventListener("click", async function() {
+        const btn = this;
+        const vid = btn.getAttribute("data-variant-id");
+        if (!vid) return;
+
+        btn.disabled = true;
+        btn.textContent = "Adding...";
+
+        try {
+          const resp = await fetch("/cart/add.js", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Accept": "application/json" },
+            body: JSON.stringify({ id: vid, quantity: 1 })
+          });
+
+          if (resp.ok) {
+            btn.textContent = "Added ✓";
+            trackEvent("chat_product_add", { variantId: vid, title, source: "chat_card" });
+          } else {
+            btn.textContent = "Failed";
+            window.setTimeout(() => { btn.textContent = "Add to Cart"; btn.disabled = false; }, 1500);
+          }
+        } catch (err) {
+          btn.textContent = "Failed";
+          window.setTimeout(() => { btn.textContent = "Add to Cart"; btn.disabled = false; }, 1500);
+        }
+      });
+    }
+
+    messagesEl.appendChild(cardEl);
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
