@@ -1,3 +1,5 @@
+import { intentAwareScoreAdjustment } from "./intent-scoring.server";
+
 export type RevenueMode =
   | "aov"
   | "profit"
@@ -5,8 +7,6 @@ export type RevenueMode =
   | "subscription"
   | "ltv"
   | "seasonal";
-
-import { intentAwareScoreAdjustment } from "./intent-scoring.server";
 
 export type EngineConfig = {
   discountPercentage: number;
@@ -683,10 +683,28 @@ function describeSegment(
 }
 
 function getCartTotal(cartItems: CartItem[], behavior: BehaviorContext) {
+  const cartItemsTotal = getCartItemsTotal(cartItems);
+
   if (typeof behavior.cartTotal === "number" && behavior.cartTotal > 0) {
-    return behavior.cartTotal / (behavior.cartTotal > 10000 ? 100 : 1);
+    return normalizeReportedCartTotal(behavior.cartTotal, cartItemsTotal);
   }
 
+  return cartItemsTotal;
+}
+
+function normalizeReportedCartTotal(total: number, cartItemsTotal: number) {
+  if (cartItemsTotal > 0) {
+    const centsTotal = total / 100;
+    const centsDelta = Math.abs(centsTotal - cartItemsTotal);
+    const reportedDelta = Math.abs(total - cartItemsTotal);
+
+    if (centsDelta < reportedDelta) return centsTotal;
+  }
+
+  return total;
+}
+
+function getCartItemsTotal(cartItems: CartItem[]) {
   return cartItems.reduce((sum, item) => {
     const price =
       typeof item.final_price === "number"

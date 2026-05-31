@@ -1,4 +1,4 @@
-import { RevenueMode, EngineConfig, ProductCandidate, CartItem, BehaviorContext, defaultEngineConfig } from "./revenue-engine.server";
+import type { ProductCandidate } from "./revenue-engine.server";
 
 // We'll update scoreProduct signature eventually, but for now we intercept building the offer.
 // In revenue-engine.server.ts, you would import this and call it to adjust the score:
