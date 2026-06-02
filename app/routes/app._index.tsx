@@ -1,116 +1,113 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import {
-  Page,
-  Layout,
-  Text,
-  Card,
-  BlockStack,
-  Box,
-  List,
-  InlineStack,
-  Badge,
-  Button,
-} from "@shopify/polaris";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
+import { Badge, BlockStack, Card, InlineStack, Layout, Page, Text } from "@shopify/polaris";
+import { AovMetricCard } from "../components/dashboard/AovMetricCard";
+import { RevenueChart } from "../components/dashboard/RevenueChart";
+import { WidgetPerformanceTable } from "../components/dashboard/WidgetPerformanceTable";
+import { getDashboardMetrics } from "../models/analytics.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
-  return null;
+  const { session } = await authenticate.admin(request);
+  const metrics = await getDashboardMetrics(session.shop);
+
+  return json({
+    metrics,
+    providers: {
+      gemini: Boolean(process.env.GOOGLE_API_KEY),
+      groq: Boolean(process.env.GROQ_API_KEY),
+    },
+  });
 };
 
-export default function Index() {
+export default function AovBoostDashboard() {
+  const { metrics, providers } = useLoaderData<typeof loader>();
+
   return (
     <Page
-      title="AI Revenue Engine"
-      subtitle="Autonomous Shopify revenue optimization for offers, bundles, experiments, and insights."
-      primaryAction={{ content: "Configure engine", url: "/app/settings" }}
-      secondaryActions={[{ content: "View dashboard", url: "/app/analytics" }]}
+      title="AOVBoost Dashboard"
+      subtitle="Last 30 days"
+      primaryAction={{ content: "Sync products", url: "/api/sync" }}
+      secondaryActions={[
+        { content: "Bundles", url: "/app/bundles" },
+        { content: "Experiments", url: "/app/experiments" },
+      ]}
     >
       <Layout>
         <Layout.Section>
-          <Card>
-            <BlockStack gap="500">
-              <Box>
-                <Text as="h1" variant="headingXl">
-                  Sell revenue outcomes, not recommendations
-                </Text>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  The app now acts like an AI merchandiser: it chooses a revenue
-                  goal, builds contextual offers, tests variants, and reports the
-                  money left in the funnel.
-                </Text>
-              </Box>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: "12px",
+            }}
+          >
+            <AovMetricCard label="Avg AOV" value={formatCurrency(metrics.avgAov)} />
+            <AovMetricCard label="AOV Lift" value={formatPercent(metrics.aovLift)} />
+            <AovMetricCard label="Widget CTR" value={formatPercent(metrics.widgetCtr)} />
+            <AovMetricCard
+              label="Chat Engaged"
+              value={metrics.chatEngaged.toLocaleString()}
+            />
+          </div>
+        </Layout.Section>
 
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">
+                Revenue attributed to AOVBoost
+              </Text>
+              <RevenueChart data={metrics.revenueSeries} />
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">
+                Widget performance
+              </Text>
+              <WidgetPerformanceTable rows={metrics.widgetRows} />
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section variant="oneThird">
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">
+                AI Provider Status
+              </Text>
               <InlineStack gap="200">
-                <Badge>AOV Mode</Badge>
-                <Badge>Profit Mode</Badge>
-                <Badge>Dynamic Bundles</Badge>
-                <Badge>AI Experiments</Badge>
-                <Badge>Autopilot</Badge>
+                <Badge tone={providers.gemini ? "success" : "critical"}>
+                  Gemini {providers.gemini ? "active" : "missing"}
+                </Badge>
+                <Badge tone={providers.groq ? "success" : "critical"}>
+                  Groq {providers.groq ? "active" : "missing"}
+                </Badge>
               </InlineStack>
-
-              <InlineStack gap="300">
-                <Button url="/app/settings" variant="primary">
-                  Configure strategy
-                </Button>
-                <Button url="/app/analytics">Open revenue dashboard</Button>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">
-                What Changed
-              </Text>
-              <List>
-                <List.Item>
-                  Behavioral context is sent with each offer request, including
-                  device, traffic source, page type, cart value, and viewed products.
-                </List.Item>
-                <List.Item>
-                  The engine can optimize for AOV, profit, inventory clearance,
-                  subscription adoption, lifetime value, or seasonal strategy.
-                </List.Item>
-                <List.Item>
-                  Offers can become dynamic bundles with generated titles,
-                  discounts, native placement metadata, and bundle-aware tracking.
-                </List.Item>
-                <List.Item>
-                  Experiment data is attached to impressions and add-to-cart events
-                  so the dashboard can surface winning variants.
-                </List.Item>
-              </List>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">
-                Recommended Rollout
-              </Text>
-              <List type="number">
-                <List.Item>
-                  Start with Autopilot placement and AOV Mode to validate lift
-                  without heavy merchant setup.
-                </List.Item>
-                <List.Item>
-                  Turn on dynamic bundles once product catalog coverage looks good
-                  in the dashboard.
-                </List.Item>
-                <List.Item>
-                  Move high-volume stores into Profit, Inventory Clear, or LTV
-                  modes when they have enough event data to compare outcomes.
-                </List.Item>
-              </List>
+              {!providers.gemini && !providers.groq ? (
+                <Text as="p" tone="subdued">
+                  Heuristic fallback is active until an AI key is configured.
+                </Text>
+              ) : null}
             </BlockStack>
           </Card>
         </Layout.Section>
       </Layout>
     </Page>
   );
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(value);
+}
+
+function formatPercent(value: number) {
+  return `${(value * 100).toFixed(1)}%`;
 }

@@ -1,29 +1,10 @@
-// This is your Prisma schema file
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  url       = env("DATABASE_URL")
-}
-
-model ShopConfig {
-  shopDomain                  String   @id
-  discountPercentage          Int      @default(10)
-  offerStrategy               String   @default("Focus on high-value complementary items with a gentle discount sweetener.")
-  brandVoice                  String?  @default("")
-  minProductPrice             Float    @default(20.0)
-  revenueMode                 String   @default("aov")
-  enableAutopilot             Boolean  @default(true)
-  enableDynamicBundles        Boolean  @default(true)
-  enableExperimentation       Boolean  @default(true)
-  enableBehavioralTargeting   Boolean  @default(true)
-  primaryPlacement            String   @default("inline")
-  maxBundleItems              Int      @default(3)
-  urgencyLevel                String   @default("balanced")
-  updatedAt                   DateTime @updatedAt
+  url      = env("DATABASE_URL")
 }
 
 model Session {
@@ -38,14 +19,209 @@ model Session {
   firstName     String?
   lastName      String?
   email         String?
-  accountOwner  Boolean?
+  accountOwner  Boolean   @default(false)
   locale        String?
-  collaborator  Boolean?
-
-
-  emailVerified Boolean?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
 
   @@map("session")
+}
+
+model Product {
+  id              String            @id
+  shop            String
+  title           String
+  handle          String
+  vendor          String?
+  productType     String?
+  tags            String[]          @default([])
+  price           Decimal           @db.Decimal(18, 2)
+  compareAtPrice  Decimal?          @db.Decimal(18, 2)
+  imageUrl        String?
+  collectionIds   String[]          @default([])
+  metafields      Json              @default("{}")
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  bundleItems     BundleItem[]
+  affinities      ProductAffinity[] @relation("SourceProduct")
+  affinityTargets ProductAffinity[] @relation("TargetProduct")
+  orderStats      ProductOrderStat?
+
+  @@unique([shop, id])
+  @@index([shop])
+}
+
+model ProductAffinity {
+  id         String  @id @default(cuid())
+  shop       String
+  sourceId   String
+  targetId   String
+  score      Float
+  reason     String?
+  orderCount Int     @default(0)
+  source     Product @relation("SourceProduct", fields: [sourceId], references: [id], onDelete: Cascade)
+  target     Product @relation("TargetProduct", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([shop, sourceId, targetId])
+  @@index([shop, sourceId, score(sort: Desc)])
+}
+
+model ProductOrderStat {
+  id         String  @id @default(cuid())
+  shop       String
+  productId  String  @unique
+  orderCount Int     @default(0)
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([shop, productId])
+  @@index([shop])
+}
+
+model Bundle {
+  id                String       @id @default(cuid())
+  shop              String
+  name              String
+  description       String?
+  discountType      String
+  discountValue     Decimal      @default(0) @db.Decimal(18, 2)
+  triggerProductIds String[]     @default([])
+  isActive          Boolean      @default(true)
+  priority          Int          @default(0)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  items             BundleItem[]
+
+  @@index([shop, isActive])
+}
+
+model BundleItem {
+  id        String  @id @default(cuid())
+  bundleId  String
+  productId String
+  quantity  Int     @default(1)
+  bundle    Bundle  @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model ShopperSession {
+  id                String         @id @default(cuid())
+  shop              String
+  anonymousId       String
+  journeyStage      String         @default("discovering")
+  intentScore       Float          @default(0)
+  hesitationScore   Float          @default(0)
+  viewedProductIds  String[]       @default([])
+  cartProductIds    String[]       @default([])
+  chatEngaged       Boolean        @default(false)
+  totalPageViews    Int            @default(0)
+  sessionDuration   Int            @default(0)
+  context           Json           @default("{}")
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  events            ShopperEvent[]
+  offers            Offer[]
+  chatMessages      ChatMessage[]
+
+  @@unique([shop, anonymousId])
+  @@index([shop, updatedAt])
+}
+
+model ShopperEvent {
+  id        String         @id @default(cuid())
+  sessionId String
+  shop      String
+  type      String
+  payload   Json
+  createdAt DateTime       @default(now())
+  session   ShopperSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@index([shop, type, createdAt])
+}
+
+model Offer {
+  id             String         @id @default(cuid())
+  sessionId      String
+  shop           String
+  widgetType     String
+  payload        Json
+  triggerContext Json
+  aiProvider     String?
+  shown          Boolean        @default(false)
+  clicked        Boolean        @default(false)
+  converted      Boolean        @default(false)
+  revenueImpact  Decimal?       @db.Decimal(18, 2)
+  abVariant      String?
+  createdAt      DateTime       @default(now())
+  session        ShopperSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([shop, widgetType, createdAt])
+  @@index([sessionId])
+}
+
+model ChatMessage {
+  id        String         @id @default(cuid())
+  sessionId String
+  shop      String
+  role      String
+  content   String
+  provider  String?
+  createdAt DateTime       @default(now())
+  storeId   String?
+  metadata  Json?
+  timestamp DateTime       @default(now())
+  session   ShopperSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+model Experiment {
+  id              String    @id @default(cuid())
+  shop            String
+  name            String
+  widgetType      String
+  trafficSplit    Float     @default(0.5)
+  isActive        Boolean   @default(true)
+  controlConfig   Json      @default("{}")
+  treatmentConfig Json      @default("{}")
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
+
+  @@index([shop, isActive])
+}
+
+model AppSettings {
+  id                   String   @id @default(cuid())
+  shop                 String   @unique
+  chatEnabled          Boolean  @default(true)
+  chatGreeting         String   @default("Hi! Can I help you find the perfect product?")
+  bundlesEnabled       Boolean  @default(true)
+  upsellEnabled        Boolean  @default(true)
+  discountNudgeEnabled Boolean  @default(true)
+  discountThreshold    Decimal  @default(50) @db.Decimal(18, 2)
+  exitIntentEnabled    Boolean  @default(true)
+  postPurchaseEnabled  Boolean  @default(true)
+  aiTone               String   @default("friendly")
+  brandVoice           String?
+  blockedProductIds    String[] @default([])
+  updatedAt            DateTime @updatedAt
+}
+
+model ShopConfig {
+  shopDomain                String   @id
+  discountPercentage        Int      @default(10)
+  offerStrategy             String   @default("Focus on high-value complementary items with a gentle discount sweetener.")
+  brandVoice                String?  @default("")
+  minProductPrice           Float    @default(20.0)
+  revenueMode               String   @default("aov")
+  enableAutopilot           Boolean  @default(true)
+  enableDynamicBundles      Boolean  @default(true)
+  enableExperimentation     Boolean  @default(true)
+  enableBehavioralTargeting Boolean  @default(true)
+  primaryPlacement          String   @default("inline")
+  maxBundleItems            Int      @default(3)
+  urgencyLevel              String   @default("balanced")
+  updatedAt                 DateTime @updatedAt
 }
 
 model Shop {
@@ -56,66 +232,48 @@ model Shop {
   productCatalog Json?
 }
 
-// In Prisma schema
 model Event {
   id        String   @id @default(cuid())
   event     String
-  orderId   String?  // Add this field
+  orderId   String?
   storeId   String
   timestamp DateTime
   data      Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Add this unique constraint
   @@unique([event, orderId, storeId], name: "event_orderId_storeId")
 }
 
 model VisitorSession {
-  id              String   @id @default(cuid())
-  visitorId       String   // fingerprint or cookie-based anonymous ID
-  storeId         String
-  sessionStart    DateTime @default(now())
-  lastActivity    DateTime @default(now())
-  device          String?
-  trafficSource   String?
-  referrer        String?
-
-  // Intent signals (updated incrementally)
-  viewedProducts  Json     @default("[]")    // [{id, title, viewCount, dwellMs}]
-  cartAdds        Json     @default("[]")    // [{variantId, timestamp}]
-  cartRemoves     Json     @default("[]")    // [{variantId, timestamp}]
-  scrollDepths    Json     @default("{}")    // {"/products/x": 82}
-  pageViews       Int      @default(0)
-  totalDwellMs    Int      @default(0)
-
-  // Computed intent classification
-  intentProfile   String   @default("browsing") // browsing | considering | high_intent | price_sensitive | abandoning
-  intentScore     Float    @default(0)
+  id             String   @id @default(cuid())
+  visitorId      String
+  storeId        String
+  sessionStart   DateTime @default(now())
+  lastActivity   DateTime @default(now())
+  device         String?
+  trafficSource  String?
+  referrer       String?
+  viewedProducts Json     @default("[]")
+  cartAdds       Json     @default("[]")
+  cartRemoves    Json     @default("[]")
+  scrollDepths   Json     @default("{}")
+  pageViews      Int      @default(0)
+  totalDwellMs   Int      @default(0)
+  intentProfile  String   @default("browsing")
+  intentScore    Float    @default(0)
 
   @@index([storeId, visitorId])
   @@index([storeId, lastActivity])
 }
 
-model ChatMessage {
-  id          String   @id @default(cuid())
-  sessionId   String   // links to VisitorSession.id
-  storeId     String
-  role        String   // "assistant" | "user" | "system"
-  content     String
-  metadata    Json?    // {action: "offer_surfaced", offerId: "...", discountApplied: true}
-  timestamp   DateTime @default(now())
-
-  @@index([sessionId, timestamp])
-}
-
 model CrossStoreInsight {
-  id          String   @id @default(cuid())
-  category    String   // e.g. "Athletic Shoes"
-  metricName  String   // e.g. "price_elasticity", "add_to_cart_rate"
-  value       Float
-  confidence  Float
-  updatedAt   DateTime @updatedAt
-  
+  id         String   @id @default(cuid())
+  category   String
+  metricName String
+  value      Float
+  confidence Float
+  updatedAt  DateTime @updatedAt
+
   @@unique([category, metricName])
 }

@@ -7,8 +7,11 @@ import {
 } from "@remix-run/node";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
+import { registerAovboostWorkers } from "./jobs/aovboost.server";
 
 export const streamTimeout = 5000;
+
+registerAovboostWorkers();
 
 export default async function handleRequest(
   request: Request,

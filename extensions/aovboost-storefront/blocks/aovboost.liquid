@@ -1,0 +1,50 @@
+{% comment %} AOVBoost theme app extension block {% endcomment %}
+<script>
+  window.AOVBoost = {
+    shop: {{ shop.permanent_domain | json }},
+    currency: {{ cart.currency.iso_code | json }},
+    cartToken: {{ cart.token | json }},
+    apiBase: {{ block.settings.api_base | json }},
+    settings: {
+      chatEnabled: {{ block.settings.chat_enabled | json }},
+      tone: {{ block.settings.ai_tone | json }}
+    }
+  };
+</script>
+<script
+  src="{{ 'aovboost-sdk.js' | asset_url }}"
+  defer
+  crossorigin="anonymous"
+></script>
+
+{% schema %}
+{
+  "name": "AOVBoost",
+  "target": "body",
+  "settings": [
+    {
+      "type": "text",
+      "id": "api_base",
+      "label": "API base path",
+      "default": "/api"
+    },
+    {
+      "type": "checkbox",
+      "id": "chat_enabled",
+      "label": "Enable chat widget",
+      "default": true
+    },
+    {
+      "type": "select",
+      "id": "ai_tone",
+      "label": "AI tone",
+      "options": [
+        { "value": "friendly", "label": "Friendly" },
+        { "value": "professional", "label": "Professional" },
+        { "value": "playful", "label": "Playful" }
+      ],
+      "default": "friendly"
+    }
+  ]
+}
+{% endschema %}
