@@ -30,15 +30,15 @@ api_version = "2025-04"
 
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
-  uri = "/webhooks/app/scopes_update"
+  uri = "/api/webhooks"
 
   [[webhooks.subscriptions]]
   topics = [ "app/uninstalled" ]
-  uri = "/webhooks/app/uninstalled"
+  uri = "/api/webhooks"
 
   [[webhooks.subscriptions]]
   topics = [ "orders/create" ]
-  uri = "/webhooks/orders/create"
+  uri = "/api/webhooks"
 
 [app_proxy]
 url = "https://ai-agent-plum-eight.vercel.app/api/upsell"
