@@ -2,7 +2,7 @@
   "name": "ai-agent",
   "private": true,
   "scripts": {
-    "build": "prisma generate && node -e \"if(process.env.VERCEL===\\\"1\\\") { require(\\\"child_process\\\").execSync(\\\"npx prisma db push --accept-data-loss\\\", {stdio: \\\"inherit\\\"}); }\" && remix vite:build",
+    "build": "prisma generate && remix vite:build",
     "build:sdk": "vite build --config storefront-sdk/vite.config.ts",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",
