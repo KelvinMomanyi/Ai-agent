@@ -23,6 +23,7 @@ import {
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { redis } from "../redis.server";
 
 const aiToneOptions = [
   { label: "Friendly", value: "friendly" },
@@ -120,6 +121,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         blockedProductIds,
       },
     });
+
+    // Invalidate cached settings
+    await redis.del(`settings:${session.shop}`);
 
     return json({
       success: true,

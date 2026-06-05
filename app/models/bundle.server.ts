@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { getJsonCache, setJsonCache, redis } from "../redis.server";
 
 export type BundleInput = {
   name: string;
@@ -29,7 +30,11 @@ export async function getBundle(shop: string, id: string) {
 export async function getActiveBundlesForProduct(shop: string, productId?: string) {
   if (!productId) return [];
 
-  return prisma.bundle.findMany({
+  const key = `bundles:${shop}:${productId}`;
+  const cached = await getJsonCache(key);
+  if (cached) return cached;
+
+  const bundles = await prisma.bundle.findMany({
     where: {
       shop,
       isActive: true,
@@ -39,6 +44,9 @@ export async function getActiveBundlesForProduct(shop: string, productId?: strin
     orderBy: [{ priority: "desc" }, { updatedAt: "desc" }],
     take: 5,
   });
+
+  await setJsonCache(key, bundles, 3600); // Cache 1 hour
+  return bundles;
 }
 
 export async function saveBundle(shop: string, id: string | null, input: BundleInput) {
@@ -56,7 +64,7 @@ export async function saveBundle(shop: string, id: string | null, input: BundleI
       },
     });
 
-    return prisma.bundle.update({
+    const result = await prisma.bundle.update({
       where: { id },
       data: {
         ...data,
@@ -64,9 +72,16 @@ export async function saveBundle(shop: string, id: string | null, input: BundleI
       },
       include: { items: true },
     });
+
+    // Invalidate cache for all affected products
+    for (const productId of data.triggerProductIds) {
+      await redis.del(`bundles:${shop}:${productId}`);
+    }
+
+    return result;
   }
 
-  return prisma.bundle.create({
+  const result = await prisma.bundle.create({
     data: {
       shop,
       ...data,
@@ -74,19 +89,44 @@ export async function saveBundle(shop: string, id: string | null, input: BundleI
     },
     include: { items: true },
   });
+
+  // Invalidate cache for all products in trigger
+  for (const productId of data.triggerProductIds) {
+    await redis.del(`bundles:${shop}:${productId}`);
+  }
+
+  return result;
 }
 
 export async function toggleBundle(shop: string, id: string, isActive: boolean) {
-  return prisma.bundle.updateMany({
+  const bundle = await getBundle(shop, id);
+  const result = await prisma.bundle.updateMany({
     where: { shop, id },
     data: { isActive },
   });
+
+  if (bundle) {
+    for (const productId of bundle.triggerProductIds) {
+      await redis.del(`bundles:${shop}:${productId}`);
+    }
+  }
+
+  return result;
 }
 
 export async function deleteBundle(shop: string, id: string) {
-  return prisma.bundle.deleteMany({
+  const bundle = await getBundle(shop, id);
+  const result = await prisma.bundle.deleteMany({
     where: { shop, id },
   });
+
+  if (bundle) {
+    for (const productId of bundle.triggerProductIds) {
+      await redis.del(`bundles:${shop}:${productId}`);
+    }
+  }
+
+  return result;
 }
 
 function toBundleData(input: BundleInput) {

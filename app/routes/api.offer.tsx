@@ -57,20 +57,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const cached = await getJsonCache<OfferDecision>(cacheKey);
     if (cached) return json(cached, { headers: withCors() });
 
-    let session = await getShopperSession(shop, body.sessionId);
-    if (!session) {
-      session = await upsertShopperSessionFromEvents({
-        shop,
-        sessionId: body.sessionId,
-        events: [{ type: "session_sync", cartProductIds: body.cartProductIds || [] }],
-      });
-    }
+    // Batch: fetch session + settings in parallel
+    const [session, settings] = await Promise.all([
+      getShopperSession(shop, body.sessionId).then(async (s) => {
+        if (s) return s;
+        return upsertShopperSessionFromEvents({
+          shop,
+          sessionId: body.sessionId,
+          events: [{ type: "session_sync", cartProductIds: body.cartProductIds || [] }],
+        });
+      }),
+      getCachedAppSettings(shop),
+    ]);
 
-    const settings = await prisma.appSettings.upsert({
-      where: { shop },
-      update: {},
-      create: { shop },
-    });
     const snapshot = toShopperSessionSnapshot(session);
     const candidates = await buildOfferCandidates({
       shop,
@@ -88,7 +87,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       candidates,
     });
     const abVariant = decision.widgetType
-      ? await chooseExperimentVariant(shop, decision.widgetType, body.sessionId)
+      ? await getCachedExperimentVariant(shop, decision.widgetType, body.sessionId)
       : null;
 
     const offer = await createOfferRecord({
@@ -124,21 +123,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 };
 
-async function chooseExperimentVariant(
-  shop: string,
-  widgetType: string,
-  sessionId: string,
-) {
-  const experiment = await prisma.experiment.findFirst({
-    where: { shop, isActive: true, widgetType },
-    orderBy: { startedAt: "desc" },
-  });
-  if (!experiment) return null;
-
-  const bucket = hash(sessionId + experiment.id) / 100;
-  return bucket < experiment.trafficSplit ? "treatment" : "control";
-}
-
 function normalizePageType(value?: string): CurrentPageType {
   if (
     value === "home" ||
@@ -172,4 +156,41 @@ async function isInstalledShop(shop: string) {
   ]);
 
   return Boolean(session || legacyShop);
+}
+
+async function getCachedAppSettings(shop: string) {
+  const key = `settings:${shop}`;
+  const cached = await getJsonCache(key);
+  if (cached) return cached;
+
+  const settings = await prisma.appSettings.upsert({
+    where: { shop },
+    update: {},
+    create: { shop },
+  });
+  await setJsonCache(key, settings, 3600); // Cache 1 hour
+  return settings;
+}
+
+async function getCachedExperimentVariant(
+  shop: string,
+  widgetType: string,
+  sessionId: string,
+) {
+  const key = `experiment:${shop}:${widgetType}`;
+  const experiment = await getJsonCache(key);
+
+  const exp = experiment || (await prisma.experiment.findFirst({
+    where: { shop, isActive: true, widgetType },
+    orderBy: { startedAt: "desc" },
+  }));
+
+  if (!exp) return null;
+
+  if (!experiment) {
+    await setJsonCache(key, exp, 600); // Cache 10 minutes
+  }
+
+  const bucket = hash(sessionId + exp.id) / 100;
+  return bucket < exp.trafficSplit ? "treatment" : "control";
 }
