@@ -21,6 +21,14 @@ export const redis =
     enableReadyCheck: false,
   });
 
+if (!global.aovboostRedis) {
+  redis.on("error", (err: any) => {
+    if (err.code === "ECONNRESET") return; // Ignore harmless Upstash idle timeouts
+    if (err.code === "ECONNREFUSED") return; // Ignore missing local Redis logs
+    console.error("Redis Error:", err.message);
+  });
+}
+
 if (process.env.NODE_ENV !== "production") {
   global.aovboostRedis = redis;
 }
