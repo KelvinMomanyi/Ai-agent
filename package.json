@@ -39,6 +39,7 @@
     "@shopify/shopify-app-session-storage-prisma": "^6.0.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.4",
+    "@upstash/redis": "^1.38.0",
     "bullmq": "^5.56.9",
     "ioredis": "^5.6.1",
     "isbot": "^5.1.0",
