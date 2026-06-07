@@ -12,6 +12,17 @@ import { restResources } from "@shopify/shopify-api/rest/admin/2023-10";
 
 const redisClient = createClient({
   url: process.env.UPSTASH_REDIS_URL,
+  pingInterval: 60000, // Keep connection alive (Upstash drops idle connections after 5 mins)
+});
+
+// Prevent unhandled promise rejections / crashes on temporary disconnects
+redisClient.on("error", (error) => {
+  console.error("Redis connection error:", error.message);
+});
+
+// The client queues commands until connected
+redisClient.connect().catch((error) => {
+  console.error("Failed to connect to Redis:", error.message);
 });
 
 const shopify = shopifyApp({
