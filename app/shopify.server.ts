@@ -1,13 +1,18 @@
 import "@shopify/shopify-app-remix/adapters/node";
+import "@shopify/shopify-app-remix/adapters/node";
 import {
   ApiVersion,
   AppDistribution,
   DeliveryMethod,
   shopifyApp,
 } from "@shopify/shopify-app-remix/server";
-import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
+import { RedisSessionStorage } from "@shopify/shopify-app-session-storage-redis";
+import { createClient } from "redis";
 import { restResources } from "@shopify/shopify-api/rest/admin/2023-10";
-import prisma from "./db.server";
+
+const redisClient = createClient({
+  url: process.env.UPSTASH_REDIS_URL,
+});
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -16,7 +21,10 @@ const shopify = shopifyApp({
   scopes: process.env.SCOPES?.split(","),
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
-  sessionStorage: new PrismaSessionStorage(prisma),
+  sessionStorage: new RedisSessionStorage({
+    client: redisClient,
+    prefix: "shopify_session:",
+  }),
   distribution: AppDistribution.AppStore,
   restResources,
   webhooks: {
