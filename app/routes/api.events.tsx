@@ -20,10 +20,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     const body = (await request.json()) as EventsBody;
-    const headerShop = request.headers.get("X-AOVBoost-Shop") || body.shop || "";
+    const headerShop =
+      request.headers.get("X-AOVBoost-Shop") ||
+      request.headers.get("X-Shopify-Shop-Domain") ||
+      "";
     const shop = body.shop || headerShop || "";
 
-    if (!shop || headerShop !== shop || !(await isInstalledShop(shop))) {
+    if (!shop || !(await isInstalledShop(shop))) {
       return json({ ok: false, error: "Invalid shop" }, { status: 401, headers: withCors() });
     }
 

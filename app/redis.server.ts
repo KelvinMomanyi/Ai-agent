@@ -1,10 +1,10 @@
 import { Redis } from "@upstash/redis";
 
 /**
- * Upstash REST-based Redis client for caching, rate-limiting, and key/value ops.
+ * Upstash REST-based Redis client.
  *
- * Uses HTTP per request — no persistent TCP sockets — so it works perfectly
- * on Vercel serverless where ioredis/node-redis cause ECONNRESET errors.
+ * Uses HTTP per request — no persistent TCP sockets — so it works on
+ * Vercel serverless where ioredis/node-redis cause ECONNRESET / ETIMEDOUT.
  */
 const upstash = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL!,
@@ -12,82 +12,77 @@ const upstash = new Redis({
 });
 
 // ---------------------------------------------------------------------------
-// BullMQ (requires ioredis — TCP connections)
-// Only initialized when workers are explicitly enabled via env var.
-// On Vercel serverless, workers should NOT be enabled; use a separate
-// long-running worker process (Railway, Render, Fly.io, etc.).
+// Lightweight job queue over Upstash REST (replaces BullMQ)
+//
+// On Vercel serverless BullMQ cannot work because:
+//   1. ioredis TCP connections die across freeze/thaw cycles
+//   2. Workers need a long-running process (no workers on serverless)
+//
+// Instead we run jobs **inline** within the request that enqueues them.
+// The "queue" API is kept so call-sites don't need to change.
 // ---------------------------------------------------------------------------
-import { Queue, Worker, type JobsOptions, type Processor } from "bullmq";
-import IORedis from "ioredis";
 
-let _ioredis: IORedis | null = null;
+type JobProcessor<T = unknown> = (data: T) => Promise<void>;
 
-function getIORedis(): IORedis {
-  if (_ioredis) return _ioredis;
+const processors = new Map<string, JobProcessor<any>>();
 
-  const redisUrl = process.env.UPSTASH_REDIS_URL || "redis://localhost:6379";
-  _ioredis = new IORedis(redisUrl, {
-    maxRetriesPerRequest: null,
-    enableReadyCheck: false,
-    lazyConnect: true,
-    tls: redisUrl.startsWith("rediss://") ? {} : undefined,
-  });
+class SimpleQueue<T = unknown> {
+  constructor(public readonly name: string) {}
 
-  _ioredis.on("error", (err: any) => {
-    if (err.code === "ECONNRESET") return;
-    if (err.code === "ECONNREFUSED") return;
-    console.error("Redis (ioredis) Error:", err.message);
-  });
-
-  return _ioredis;
-}
-
-const defaultJobOptions: JobsOptions = {
-  attempts: 3,
-  backoff: { type: "exponential", delay: 1000 },
-  removeOnComplete: 1000,
-  removeOnFail: 1000,
-};
-
-function createQueue(name: string) {
-  return new Queue(name, {
-    connection: getIORedis(),
-    defaultJobOptions,
-  });
+  async add(_jobName: string, data: T): Promise<void> {
+    const processor = processors.get(this.name);
+    if (processor) {
+      try {
+        await processor(data);
+      } catch (error) {
+        console.error(
+          `[queue:${this.name}] Job failed:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    } else {
+      // No processor registered — log and skip.
+      // This is expected on Vercel serverless where workers are not started.
+      console.log(`[queue:${this.name}] No processor registered, skipping job`);
+    }
+  }
 }
 
 declare global {
   var aovboostQueues:
     | {
-        generateOfferQueue: Queue;
-        syncProductsQueue: Queue;
-        recomputeAffinityQueue: Queue;
+        generateOfferQueue: SimpleQueue;
+        syncProductsQueue: SimpleQueue;
+        recomputeAffinityQueue: SimpleQueue;
       }
     | undefined;
 }
 
-export const queues =
-  global.aovboostQueues ??
-  {
-    generateOfferQueue: createQueue("generate-offer"),
-    syncProductsQueue: createQueue("sync-products"),
-    recomputeAffinityQueue: createQueue("recompute-affinity"),
-  };
+export const queues = global.aovboostQueues ?? {
+  generateOfferQueue: new SimpleQueue("generate-offer"),
+  syncProductsQueue: new SimpleQueue("sync-products"),
+  recomputeAffinityQueue: new SimpleQueue("recompute-affinity"),
+};
 
 if (process.env.NODE_ENV !== "production") {
   global.aovboostQueues = queues;
 }
 
+/**
+ * Register a processor for a named queue.
+ * On Vercel serverless, jobs are executed inline when `.add()` is called.
+ */
 export function createWorker<Data>(
   queueName: string,
-  processor: Processor<Data>,
+  processor: (job: { data: Data }) => Promise<void>,
 ) {
-  return new Worker<Data>(queueName, processor, { connection: getIORedis() });
+  processors.set(queueName, async (data: Data) => {
+    await processor({ data });
+  });
 }
 
 // ---------------------------------------------------------------------------
-// REST-based cache / rate-limit helpers (used from route handlers)
-// These replaced the old ioredis-based versions to eliminate ECONNRESET.
+// REST-based cache / rate-limit helpers
 // ---------------------------------------------------------------------------
 
 /**
@@ -116,10 +111,12 @@ export const redis = {
     await upstash.expire(key, seconds);
   },
   async sadd(key: string, ...members: string[]) {
-    await upstash.sadd(key, ...members);
+    if (members.length === 0) return;
+    await (upstash.sadd as any)(key, ...members);
   },
   async srem(key: string, ...members: string[]) {
-    await upstash.srem(key, ...members);
+    if (members.length === 0) return;
+    await (upstash.srem as any)(key, ...members);
   },
   async smembers(key: string) {
     return upstash.smembers(key);

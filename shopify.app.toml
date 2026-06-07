@@ -41,8 +41,8 @@ api_version = "2025-04"
   uri = "/api/webhooks"
 
 [app_proxy]
-url = "https://ai-agent-plum-eight.vercel.app/api/upsell"
-subpath = "upsell"
+url = "https://ai-agent-plum-eight.vercel.app/api"
+subpath = "aovboost"
 prefix = "apps"
 
 [pos]

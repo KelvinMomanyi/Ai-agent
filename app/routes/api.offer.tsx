@@ -35,10 +35,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     const body = (await request.json()) as OfferBody;
-    const headerShop = request.headers.get("X-AOVBoost-Shop");
+    const headerShop =
+      request.headers.get("X-AOVBoost-Shop") ||
+      request.headers.get("X-Shopify-Shop-Domain") ||
+      "";
     const shop = body.shop || headerShop || "";
 
-    if (!shop || headerShop !== shop || !body.sessionId || !(await isInstalledShop(shop))) {
+    if (!shop || !body.sessionId || !(await isInstalledShop(shop))) {
       return json({ widgetType: null, payload: {} }, { status: 400, headers: withCors() });
     }
 
