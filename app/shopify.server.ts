@@ -1,29 +1,12 @@
 import "@shopify/shopify-app-remix/adapters/node";
-import "@shopify/shopify-app-remix/adapters/node";
 import {
   ApiVersion,
   AppDistribution,
   DeliveryMethod,
   shopifyApp,
 } from "@shopify/shopify-app-remix/server";
-import { RedisSessionStorage } from "@shopify/shopify-app-session-storage-redis";
-import { createClient } from "redis";
 import { restResources } from "@shopify/shopify-api/rest/admin/2023-10";
-
-const redisClient = createClient({
-  url: process.env.UPSTASH_REDIS_URL,
-  pingInterval: 60000, // Keep connection alive (Upstash drops idle connections after 5 mins)
-});
-
-// Prevent unhandled promise rejections / crashes on temporary disconnects
-redisClient.on("error", (error) => {
-  console.error("Redis connection error:", error.message);
-});
-
-// The client queues commands until connected
-redisClient.connect().catch((error) => {
-  console.error("Failed to connect to Redis:", error.message);
-});
+import { UpstashSessionStorage } from "./upstash-session-storage.server";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -32,10 +15,7 @@ const shopify = shopifyApp({
   scopes: process.env.SCOPES?.split(","),
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
-  sessionStorage: new RedisSessionStorage({
-    client: redisClient,
-    prefix: "shopify_session:",
-  }),
+  sessionStorage: new UpstashSessionStorage(),
   distribution: AppDistribution.AppStore,
   restResources,
   webhooks: {
