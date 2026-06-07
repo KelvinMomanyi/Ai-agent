@@ -6,7 +6,7 @@ import { NavMenu } from "@shopify/app-bridge-react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-
+import { getJsonCache, setJsonCache } from "../redis.server";
 
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
@@ -49,6 +49,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }));
 
 
+  // await prisma.shop.upsert({
+  //   where: { shopDomain: session.shop },
+  //   update: {
+  //     accessToken: session.accessToken || "",
+  //     productCatalog,
+  //   },
+  //   create: {
+  //     shopDomain: session.shop,
+  //     accessToken: session.accessToken || "",
+  //     scope: session.scope,
+  //     productCatalog,
+  //   }
+  // });
+  // Only upsert on first auth, not every page load
+  const key = `shop:init:${session.shop}`;
+  const alreadyInit = await getJsonCache(key);
+  if (!alreadyInit) {
   await prisma.shop.upsert({
     where: { shopDomain: session.shop },
     update: {
@@ -62,7 +79,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       productCatalog,
     }
   });
-
+  await setJsonCache(key, true, 86400); // Cache 24 hours
+  }
 
 
 
