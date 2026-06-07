@@ -4,7 +4,7 @@ import { boundary } from "@shopify/shopify-app-remix/server";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
 import { NavMenu } from "@shopify/app-bridge-react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
-import prisma from "../db.server";
+import prisma, { withRetry } from "../db.server";
 import { authenticate } from "../shopify.server";
 import { getJsonCache, setJsonCache } from "../redis.server";
 
@@ -66,20 +66,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const key = `shop:init:${session.shop}`;
   const alreadyInit = await getJsonCache(key);
   if (!alreadyInit) {
-  await prisma.shop.upsert({
-    where: { shopDomain: session.shop },
-    update: {
-      accessToken: session.accessToken || "",
-      productCatalog,
-    },
-    create: {
-      shopDomain: session.shop,
-      accessToken: session.accessToken || "",
-      scope: session.scope,
-      productCatalog,
-    }
-  });
-  await setJsonCache(key, true, 86400); // Cache 24 hours
+    await withRetry(() =>
+      prisma.shop.upsert({
+        where: { shopDomain: session.shop },
+        update: {
+          accessToken: session.accessToken || "",
+          productCatalog,
+        },
+        create: {
+          shopDomain: session.shop,
+          accessToken: session.accessToken || "",
+          scope: session.scope,
+          productCatalog,
+        }
+      })
+    );
+    await setJsonCache(key, true, 86400); // Cache 24 hours
   }
 
 
