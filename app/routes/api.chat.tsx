@@ -1,5 +1,5 @@
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
-import { callAi, getLastAiProvider, streamGroqChat } from "../ai/client.server";
+import { callAi, getLastAiProvider, streamOpenAIChat, STREAM_PROVIDERS } from "../ai/client.server";
 import { CHAT_AGENT_SYSTEM } from "../ai/prompts";
 import prisma from "../db.server";
 import { getProductsByIds } from "../models/product.server";
@@ -76,7 +76,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const encoder = new TextEncoder();
   let finalReply = "";
-  let provider: "gemini" | "groq" | "heuristic" = "heuristic";
+  let provider: "gemini" | "groq" | "mistral" | "deepseek" | "heuristic" = "heuristic";
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -89,21 +89,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       };
 
       try {
-        let sentGroqToken = false;
+        let sentToken = false;
 
-        try {
-          for await (const delta of streamGroqChat(messages)) {
-            sentGroqToken = true;
-            provider = "groq";
-            finalReply += delta;
-            send({ delta });
-          }
-        } catch (error) {
-          console.log("groq chat stream skipped:", getErrorMessage(error));
-          if (sentGroqToken) {
-            await persistAssistantMessage(shop, session.id, finalReply, provider);
-            done();
-            return;
+        for (const cfg of STREAM_PROVIDERS) {
+          if (!process.env[cfg.envKey]) continue;
+          try {
+            for await (const delta of streamOpenAIChat(messages, {
+              apiKey: process.env[cfg.envKey]!,
+              url: cfg.url,
+              model: cfg.model,
+            })) {
+              sentToken = true;
+              provider = cfg.name;
+              finalReply += delta;
+              send({ delta });
+            }
+            break;
+          } catch (error) {
+            console.log(`${cfg.name} chat stream skipped:`, getErrorMessage(error));
+            if (sentToken) {
+              await persistAssistantMessage(shop, session.id, finalReply, provider);
+              done();
+              return;
+            }
           }
         }
 
@@ -114,7 +122,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           provider =
             getLastAiProvider() === "none"
               ? "heuristic"
-              : (getLastAiProvider() as "gemini" | "groq");
+              : (getLastAiProvider() as "gemini" | "groq" | "mistral" | "deepseek");
           finalReply = geminiReply;
           send({ delta: geminiReply });
         }
@@ -141,7 +149,7 @@ async function persistAssistantMessage(
   shop: string,
   sessionId: string,
   content: string,
-  provider: "gemini" | "groq" | "heuristic",
+  provider: "gemini" | "groq" | "mistral" | "deepseek" | "heuristic",
 ) {
   await prisma.$transaction([
     prisma.chatMessage.create({

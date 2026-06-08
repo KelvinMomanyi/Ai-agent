@@ -1,4 +1,4 @@
-export type AiProvider = "gemini" | "groq" | "none";
+export type AiProvider = "gemini" | "groq" | "mistral" | "deepseek" | "none";
 
 type AiService = {
   name: Exclude<AiProvider, "none">;
@@ -9,6 +9,33 @@ type AiService = {
 };
 
 let lastAiProvider: AiProvider = "none";
+
+function makeOpenAiService(
+  name: "groq" | "mistral" | "deepseek",
+  apiKey: string,
+  url: string,
+  model: string,
+): AiService {
+  return {
+    name,
+    url,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    buildBody: (systemPrompt: string, userPrompt: string) => ({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      max_tokens: 1000,
+      temperature: 0,
+    }),
+    extractContent: (data: any) =>
+      data.choices?.[0]?.message?.content ?? null,
+  };
+}
 
 function getAiServices(): AiService[] {
   return [
@@ -29,26 +56,29 @@ function getAiServices(): AiService[] {
             data.candidates?.[0]?.content?.parts?.[0]?.text ?? null,
         }
       : null,
+    process.env.MISTRAL_API_KEY
+      ? makeOpenAiService(
+          "mistral",
+          process.env.MISTRAL_API_KEY,
+          "https://api.mistral.ai/v1/chat/completions",
+          "mistral-small-latest",
+        )
+      : null,
+    process.env.DEEPSEEK_API_KEY
+      ? makeOpenAiService(
+          "deepseek",
+          process.env.DEEPSEEK_API_KEY,
+          "https://api.deepseek.com/chat/completions",
+          "deepseek-chat",
+        )
+      : null,
     process.env.GROQ_API_KEY
-      ? {
-          name: "groq" as const,
-          url: "https://api.groq.com/openai/v1/chat/completions",
-          headers: {
-            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          buildBody: (systemPrompt: string, userPrompt: string) => ({
-            model: "llama-3.3-70b-versatile",
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPrompt },
-            ],
-            max_tokens: 1000,
-            temperature: 0,
-          }),
-          extractContent: (data: any) =>
-            data.choices?.[0]?.message?.content ?? null,
-        }
+      ? makeOpenAiService(
+          "groq",
+          process.env.GROQ_API_KEY,
+          "https://api.groq.com/openai/v1/chat/completions",
+          "llama-3.3-70b-versatile",
+        )
       : null,
   ].filter(Boolean) as AiService[];
 }
@@ -91,21 +121,18 @@ export async function callAi(
   return null;
 }
 
-export async function* streamGroqChat(
+export async function* streamOpenAIChat(
   messages: { role: string; content: string }[],
+  config: { apiKey: string; url: string; model: string },
 ): AsyncGenerator<string> {
-  if (!process.env.GROQ_API_KEY) {
-    throw new Error("Groq API key is not configured");
-  }
-
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+  const response = await fetch(config.url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      Authorization: `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
+      model: config.model,
       messages,
       max_tokens: 1000,
       temperature: 0.35,
@@ -115,7 +142,7 @@ export async function* streamGroqChat(
   });
 
   if (!response.ok || !response.body) {
-    throw new Error(`Groq stream failed: ${response.status}`);
+    throw new Error(`Chat stream failed: ${response.status}`);
   }
 
   const reader = response.body.getReader();
@@ -143,6 +170,27 @@ export async function* streamGroqChat(
   }
 }
 
+export const STREAM_PROVIDERS = [
+  {
+    envKey: "MISTRAL_API_KEY",
+    url: "https://api.mistral.ai/v1/chat/completions",
+    model: "mistral-small-latest",
+    name: "mistral" as const,
+  },
+  {
+    envKey: "DEEPSEEK_API_KEY",
+    url: "https://api.deepseek.com/chat/completions",
+    model: "deepseek-chat",
+    name: "deepseek" as const,
+  },
+  {
+    envKey: "GROQ_API_KEY",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    model: "llama-3.3-70b-versatile",
+    name: "groq" as const,
+  },
+];
+
 export function parseAiJson<T>(raw: string | null): T | null {
   if (!raw) return null;
 
@@ -162,6 +210,8 @@ export function parseAiJson<T>(raw: string | null): T | null {
 
 export function getActiveProvider(): AiProvider {
   if (process.env.GOOGLE_API_KEY) return "gemini";
+  if (process.env.MISTRAL_API_KEY) return "mistral";
+  if (process.env.DEEPSEEK_API_KEY) return "deepseek";
   if (process.env.GROQ_API_KEY) return "groq";
   return "none";
 }

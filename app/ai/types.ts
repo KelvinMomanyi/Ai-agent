@@ -50,7 +50,7 @@ export interface OfferDecision {
   payload: Record<string, unknown>;
   reasoning: string;
   confidence: number;
-  aiProvider: "gemini" | "groq" | "heuristic";
+  aiProvider: "gemini" | "groq" | "mistral" | "deepseek" | "heuristic";
 }
 
 export type WidgetCopy =

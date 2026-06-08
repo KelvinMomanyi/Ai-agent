@@ -1,4 +1,4 @@
-import { callAi, getLastAiProvider, parseAiJson } from "./client.server";
+import { callAi, getLastAiProvider, parseAiJson, type AiProvider } from "./client.server";
 import { generateWidgetCopy } from "./copyWriter.server";
 import { DECISION_ENGINE_SYSTEM } from "./prompts";
 import type { DecisionInput, OfferDecision } from "./types";
@@ -61,7 +61,7 @@ export async function getOfferDecision(
   const raw = await callAi(DECISION_ENGINE_SYSTEM, JSON.stringify(context));
   const parsed = normalizeDecision(
     parseAiJson<Partial<OfferDecision>>(raw),
-    getLastAiProvider() === "none" ? "heuristic" : getLastAiProvider(),
+    getLastAiProvider() === "none" ? "heuristic" : (getLastAiProvider() as Exclude<AiProvider, "none">),
   );
   const decision = parsed ?? heuristicFallback(input, bundles.length);
 
@@ -99,7 +99,7 @@ export async function getOfferDecision(
 
 function normalizeDecision(
   parsed: Partial<OfferDecision> | null,
-  provider: "gemini" | "groq" | "heuristic",
+  provider: "gemini" | "groq" | "mistral" | "deepseek" | "heuristic",
 ): OfferDecision | null {
   if (!parsed) return null;
 
@@ -234,7 +234,7 @@ function enrichPayload(
 
 function noOffer(
   reasoning: string,
-  aiProvider: "gemini" | "groq" | "heuristic",
+  aiProvider: "gemini" | "groq" | "mistral" | "deepseek" | "heuristic",
 ): OfferDecision {
   return {
     widgetType: null,
