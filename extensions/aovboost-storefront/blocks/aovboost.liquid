@@ -4,7 +4,7 @@
     shop: {{ shop.permanent_domain | json }},
     currency: {{ cart.currency.iso_code | json }},
     cartToken: {{ cart.token | json }},
-    apiBase: {{ block.settings.api_base | json }},
+    apiBase: "/apps/aovboost",
     settings: {
       chatEnabled: {{ block.settings.chat_enabled | json }},
       tone: {{ block.settings.ai_tone | json }}
@@ -22,12 +22,6 @@
   "name": "AOVBoost",
   "target": "body",
   "settings": [
-    {
-      "type": "text",
-      "id": "api_base",
-      "label": "API base path",
-      "default": "/apps/aovboost"
-    },
     {
       "type": "checkbox",
       "id": "chat_enabled",
@@ -48,3 +42,4 @@
   ]
 }
 {% endschema %}
+
