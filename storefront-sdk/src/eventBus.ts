@@ -107,7 +107,7 @@ export class EventBus {
   }
 
   private endpoint(path: string): string {
-    const base = this.options.apiBase || "/api";
+    const base = this.options.apiBase || "/apps/aovboost";
     return `${base.replace(/\/$/, "")}${path}`;
   }
 

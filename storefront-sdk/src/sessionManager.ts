@@ -41,7 +41,7 @@ export class SessionManager {
 
   constructor(
     private shop: string,
-    private apiBase = "/api",
+    private apiBase = "/apps/aovboost",
   ) {
     this.anonymousId = this.getOrCreateAnonymousId();
   }

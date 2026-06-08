@@ -39,7 +39,7 @@ export function init(): void {
     const shop = config.shop;
     if (!shop) return;
 
-    const apiBase = config.apiBase || "/api";
+    const apiBase = config.apiBase || "/apps/aovboost";
     const sessionManager = new SessionManager(shop, apiBase);
     const eventBus = new EventBus({ shop, sessionManager, apiBase });
     const widgetManager = new WidgetManager();
