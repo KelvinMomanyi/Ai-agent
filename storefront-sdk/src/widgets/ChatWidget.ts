@@ -123,16 +123,18 @@ export class ChatWidget extends BaseWidget {
     this.trackClick("send_message");
 
     try {
+      const config = (window as any).AOVBoost || {};
       const sdk = (window as any).AOVBoostSDK;
-      const response = await fetch("/api/chat", {
+      const apiBase = (config.apiBase || "/apps/aovboost").replace(/\/$/, "");
+      const response = await fetch(`${apiBase}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-AOVBoost-Shop": sdk?.shop || (window as any).AOVBoost?.shop || "",
+          "X-AOVBoost-Shop": sdk?.shop || config.shop || "",
         },
         body: JSON.stringify({
           sessionId: sdk?.sessionId,
-          shop: sdk?.shop || (window as any).AOVBoost?.shop,
+          shop: sdk?.shop || config.shop,
           message: value,
           messageHistory: this.messages.slice(0, -1),
         }),

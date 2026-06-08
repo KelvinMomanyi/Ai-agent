@@ -1,8 +1,8 @@
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
 import { callAi, getLastAiProvider, streamOpenAIChat, STREAM_PROVIDERS } from "../ai/client.server";
-import { CHAT_AGENT_SYSTEM } from "../ai/prompts";
 import prisma from "../db.server";
 import { getProductsByIds } from "../models/product.server";
+import { getActiveBundlesForProduct } from "../models/bundle.server";
 import { getShopperSession } from "../models/session.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
 
@@ -49,25 +49,80 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     update: {},
     create: { shop },
   });
-  const cartProducts = await getProductsByIds(shop, session.cartProductIds);
+
+  const storeName = shop.replace(/\.[^.]+\.myshopify\.com$/, "").replace(/[-_]/g, " ");
+  const [cartProducts, rawBundles, catalogProducts] = await Promise.all([
+    getProductsByIds(shop, session.cartProductIds),
+    getActiveBundlesForProduct(shop, session.viewedProductIds[0]),
+    prisma.product.findMany({
+      where: { shop },
+      select: {
+        id: true,
+        title: true,
+        handle: true,
+        price: true,
+        tags: true,
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+    }),
+  ]);
+
+  const cartInfo = cartProducts.length > 0
+    ? cartProducts.map((p) => `- ${p.title} ($${p.price})`).join("\n")
+    : "Cart is empty";
+
+  type BundleSummary = { name: string; discountType: string; discountValue: string; items: Array<{ productId: string; product?: { title: string } | null }> };
+  const bundles = (rawBundles as unknown as BundleSummary[]);
+  const bundlesInfo = bundles.length > 0
+    ? bundles.map((b) => {
+        const items = b.items.map((i) => `  - ${i.product?.title || i.productId}`).join("\n");
+        const discount = b.discountType === "none" ? "" : ` (${b.discountValue}% off)`;
+        return `- "${b.name}"${discount}\n${items}`;
+      }).join("\n")
+    : "No active bundles right now.";
+
+  const catalogInfo = catalogProducts.map((p) =>
+    `- ${p.title} | $${p.price} | /products/${p.handle} | tags: ${p.tags.join(", ")}`
+  ).join("\n");
+
   const brandVoiceSection = settings.brandVoice
     ? `Brand Voice:\n${settings.brandVoice}`
     : "";
-  const systemPrompt = CHAT_AGENT_SYSTEM.replace("{storeName}", shop)
-    .replace("{tone}", settings.aiTone)
-    .replace("{brandVoiceSection}", brandVoiceSection)
-    .replace(
-      "{storeContext}",
-      JSON.stringify({
-        blockedProductIds: settings.blockedProductIds,
-        discountThreshold: settings.discountThreshold.toString(),
-      }),
-    )
-    .replace(
-      "{cartContents}",
-      JSON.stringify(cartProducts.map((product) => product.title)),
-    )
-    .replace("{journeyStage}", session.journeyStage);
+
+  const systemPrompt = `You are a friendly AI shopping assistant for ${storeName}.
+Your goal is to help the shopper find exactly what they need and discover
+products they did not know they needed, thereby increasing their order value naturally.
+
+You have access to the store's product catalog below. When recommending products,
+ALWAYS include the product URL (e.g., /products/example-handle) so the system can
+render a clickable product card. Only recommend products that actually exist in the catalog.
+
+Available products:
+${catalogInfo}
+
+Active bundles:
+${bundlesInfo}
+
+Current cart:
+${cartInfo}
+
+Store settings:
+- Discount threshold: $${settings.discountThreshold}
+- Blocked product GIDs: ${settings.blockedProductIds.join(", ") || "none"}
+- Shopper journey stage: ${session.journeyStage}
+
+Guidelines:
+- Greet warmly, ask one focused question at a time
+- Use the shopper's browsing context to make hyper-relevant suggestions
+- When recommending products, explain WHY they go together and include the /products/ link
+- Reference active bundles when they match what the shopper is looking at
+- If the cart qualifies for a discount (above threshold), mention it
+- Tone: ${settings.aiTone}
+- Keep responses under 3 sentences unless the shopper asks for detail
+- Never be pushy; if the shopper declines, respect it immediately
+${brandVoiceSection}`;
+
   const messages = [
     { role: "system", content: systemPrompt },
     ...(body.messageHistory || []).slice(-12),
