@@ -13,6 +13,20 @@ type ChatBody = {
   messageHistory?: Array<{ role: "user" | "assistant"; content: string }>;
 };
 
+type BundleSummary = {
+  name: string;
+  discountType: string;
+  discountValue: string;
+  items: Array<{ productId: string; product?: { title: string } | null }>;
+};
+
+type CatalogProduct = {
+  title: string;
+  handle: string;
+  price: unknown;
+  tags: string[];
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (request.method === "OPTIONS") return optionsResponse();
   return json({ ok: true }, { headers: withCors() });
@@ -92,7 +106,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     ? cartProducts.map((p) => `- ${p.title} ($${p.price})`).join("\n")
     : "Cart is empty";
 
-  type BundleSummary = { name: string; discountType: string; discountValue: string; items: Array<{ productId: string; product?: { title: string } | null }> };
   const bundles = (rawBundles as unknown as BundleSummary[]);
   const bundlesInfo = bundles.length > 0
     ? bundles.map((b) => {
@@ -193,7 +206,7 @@ ${brandVoiceSection}`;
         if (!finalReply) {
           const geminiReply =
             (await callAi(systemPrompt, userMessage)) ||
-            "I can help you compare products and find the right add-ons.";
+            buildCatalogFallbackReply(userMessage, catalogProducts, bundles);
           provider =
             getLastAiProvider() === "none"
               ? "heuristic"
@@ -267,4 +280,83 @@ async function isInstalledShop(shop: string) {
   ]);
 
   return Boolean(session || legacyShop);
+}
+
+function buildCatalogFallbackReply(
+  userMessage: string,
+  catalogProducts: CatalogProduct[],
+  bundles: BundleSummary[],
+) {
+  if (catalogProducts.length === 0) {
+    return "I do not see synced products in this store yet. Sync the product catalog first, then I can recommend exact items.";
+  }
+
+  const queryTokens = tokenize(userMessage);
+  const scoredProducts = catalogProducts
+    .map((product) => ({
+      product,
+      score: scoreProduct(product, queryTokens),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 3);
+
+  const matches = scoredProducts.length > 0
+    ? scoredProducts.map((item) => item.product)
+    : catalogProducts.slice(0, 3);
+
+  const intro = scoredProducts.length > 0
+    ? "These look like the best matches:"
+    : "I did not find an exact match, but these are good places to start:";
+  const recommendations = matches
+    .map((product) => `${product.title} (${formatPrice(product.price)}) /products/${product.handle}`)
+    .join("; ");
+  const bundle = bundles[0]
+    ? ` There is also an active bundle: ${bundles[0].name}.`
+    : "";
+
+  return `${intro} ${recommendations}.${bundle}`;
+}
+
+function scoreProduct(product: CatalogProduct, queryTokens: string[]) {
+  if (queryTokens.length === 0) return 0;
+
+  const searchable = [
+    product.title,
+    product.handle,
+    ...(Array.isArray(product.tags) ? product.tags : []),
+  ].join(" ").toLowerCase();
+
+  return queryTokens.reduce((score, token) => {
+    if (searchable.includes(token)) return score + 2;
+    if (token.length > 4 && searchable.includes(token.slice(0, -1))) return score + 1;
+    return score;
+  }, 0);
+}
+
+function tokenize(value: string) {
+  const stopWords = new Set([
+    "about",
+    "anything",
+    "best",
+    "find",
+    "help",
+    "need",
+    "product",
+    "recommend",
+    "show",
+    "with",
+  ]);
+
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 2 && !stopWords.has(token));
+}
+
+function formatPrice(value: unknown) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return "price unavailable";
+  return `$${amount.toFixed(2)}`;
 }
