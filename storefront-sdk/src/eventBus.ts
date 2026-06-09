@@ -71,8 +71,7 @@ export class EventBus {
 
     const events = this.queue.splice(0);
     const body = JSON.stringify({
-      sessionId: this.options.sessionManager.anonymousId,
-      shop: this.options.shop,
+      ...this.options.sessionManager.getAuthPayload(),
       events,
     });
 

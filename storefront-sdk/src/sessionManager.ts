@@ -24,9 +24,18 @@ type StorefrontEvent = {
 };
 
 const STORAGE_KEY = "aovboost_anonymous_id";
+const SIGNED_SESSION_STORAGE_KEY = "aovboost_storefront_session";
+
+type StoredStorefrontSession = {
+  shop: string;
+  sessionId: string;
+  sessionToken: string;
+  expiresAt: number;
+};
 
 export class SessionManager {
-  readonly anonymousId: string;
+  anonymousId = "";
+  private sessionToken = "";
   private journeyStage: JourneyStage = "discovering";
   private viewedProductIds = new Set<string>();
   private productViewCounts = new Map<string, number>();
@@ -42,11 +51,10 @@ export class SessionManager {
   constructor(
     private shop: string,
     private apiBase = "/apps/aovboost",
-  ) {
-    this.anonymousId = this.getOrCreateAnonymousId();
-  }
+  ) {}
 
-  init(): void {
+  async init(): Promise<void> {
+    await this.ensureStorefrontSession();
     this.syncTimer = window.setInterval(() => this.sync(), 30000);
     window.addEventListener("pagehide", () => this.sync());
   }
@@ -150,11 +158,20 @@ export class SessionManager {
     };
   }
 
+  getAuthPayload() {
+    return {
+      sessionId: this.anonymousId,
+      sessionToken: this.sessionToken,
+      shop: this.shop,
+    };
+  }
+
   private sync(): void {
+    if (!this.anonymousId || !this.sessionToken) return;
+
     const snapshot = this.getSnapshot();
     const body = JSON.stringify({
-      sessionId: this.anonymousId,
-      shop: this.shop,
+      ...this.getAuthPayload(),
       events: [
         {
           type: "session_sync",
@@ -206,36 +223,68 @@ export class SessionManager {
     return `${this.apiBase.replace(/\/$/, "")}${path}`;
   }
 
+  private async ensureStorefrontSession(): Promise<void> {
+    const stored = this.getStoredStorefrontSession();
+    if (stored) {
+      this.anonymousId = stored.sessionId;
+      this.sessionToken = stored.sessionToken;
+      return;
+    }
+
+    const response = await fetch(this.endpoint("/session"), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error(`Session bootstrap failed: ${response.status}`);
+
+    const next = (await response.json()) as StoredStorefrontSession;
+    if (!next.sessionId || !next.sessionToken || next.shop !== this.shop) {
+      throw new Error("Invalid storefront session bootstrap response");
+    }
+
+    this.anonymousId = next.sessionId;
+    this.sessionToken = next.sessionToken;
+    this.storeStorefrontSession(next);
+  }
+
+  private getStoredStorefrontSession(): StoredStorefrontSession | null {
+    try {
+      const parsed = JSON.parse(
+        window.localStorage.getItem(SIGNED_SESSION_STORAGE_KEY) || "null",
+      ) as StoredStorefrontSession | null;
+      if (
+        !parsed ||
+        parsed.shop !== this.shop ||
+        !parsed.sessionId ||
+        !parsed.sessionToken ||
+        Number(parsed.expiresAt || 0) <= Math.floor(Date.now() / 1000) + 60
+      ) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  private storeStorefrontSession(session: StoredStorefrontSession) {
+    try {
+      window.localStorage.setItem(SIGNED_SESSION_STORAGE_KEY, JSON.stringify(session));
+      window.localStorage.setItem(STORAGE_KEY, session.sessionId);
+    } catch {
+      // Storage failures leave the current in-memory session usable for this page.
+    }
+  }
+
   private getSnapshotDuration(): number {
     return Math.round((Date.now() - this.startedAt) / 1000);
   }
 
-  private getOrCreateAnonymousId(): string {
-    try {
-      const existing = window.localStorage.getItem(STORAGE_KEY);
-      if (existing) return existing;
-      const next = createUuid();
-      window.localStorage.setItem(STORAGE_KEY, next);
-      return next;
-    } catch {
-      return createUuid();
-    }
-  }
 }
 
 function getProductId(event: StorefrontEvent) {
   const product = event.product as Record<string, unknown> | undefined;
   return String(event.productId || event.product_id || product?.id || "");
-}
-
-function createUuid() {
-  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
-
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
-    const value = (Math.random() * 16) | 0;
-    const next = char === "x" ? value : (value & 0x3) | 0x8;
-    return next.toString(16);
-  });
 }
 
 function clamp(value: number, min: number, max: number) {

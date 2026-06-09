@@ -3,7 +3,7 @@ import { generateWidgetCopy } from "./copyWriter.server";
 import { DECISION_ENGINE_SYSTEM } from "./prompts";
 import type { DecisionInput, OfferDecision } from "./types";
 import { getActiveBundlesForProduct } from "../models/bundle.server";
-import { getTopAffinities } from "../models/product.server";
+import { getTopAffinitiesOrFallback } from "../models/product.server";
 
 const WIDGET_TYPES = new Set([
   "chat",
@@ -19,10 +19,17 @@ const WIDGET_TYPES = new Set([
 export async function getOfferDecision(
   input: DecisionInput,
 ): Promise<OfferDecision> {
+  const recommendationSourceProductId =
+    input.currentProductId ||
+    input.cartProductIds[0] ||
+    input.session.viewedProductIds.at(-1);
   const [affinities, bundles] = await Promise.all([
-    input.currentProductId
-      ? getTopAffinities(input.shop, input.currentProductId, 5)
-      : Promise.resolve([]),
+    getTopAffinitiesOrFallback({
+      shop: input.shop,
+      productId: recommendationSourceProductId,
+      limit: 5,
+      excludeProductIds: input.cartProductIds,
+    }),
     getActiveBundlesForProduct(input.shop, input.currentProductId),
   ]);
 

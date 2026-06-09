@@ -157,6 +157,7 @@ export class ChatWidget extends BaseWidget {
         },
         body: JSON.stringify({
           sessionId: sdk?.sessionId,
+          sessionToken: sdk?.sessionToken,
           shop: sdk?.shop || config.shop,
           message: value,
           messageHistory: this.messages.slice(0, -2),

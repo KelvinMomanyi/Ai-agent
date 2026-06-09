@@ -15,9 +15,14 @@ import {
   setJsonCache,
 } from "../redis.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
+import {
+  authenticateStorefrontRequest,
+  isStorefrontAuthError,
+} from "../utils/storefrontAuth.server";
 
 type OfferBody = {
   sessionId?: string;
+  sessionToken?: string;
   shop?: string;
   currentProductId?: string;
   currentPageType?: string;
@@ -35,18 +40,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     const body = (await request.json()) as OfferBody;
-    const headerShop =
-      request.headers.get("X-AOVBoost-Shop") ||
-      request.headers.get("X-Shopify-Shop-Domain") ||
-      "";
-    const shop = body.shop || headerShop || "";
+    const auth = authenticateStorefrontRequest(request, body);
+    const { shop, sessionId } = auth;
 
-    if (!shop || !body.sessionId || !(await isInstalledShop(shop))) {
+    if (!shop || !(await isInstalledShop(shop))) {
       return json({ widgetType: null, payload: {} }, { status: 400, headers: withCors() });
     }
 
     const requestCount = await incrementRateLimit(
-      cacheKeys.offerRateLimit(body.sessionId),
+      cacheKeys.offerRateLimit(sessionId),
       60,
     );
     if (requestCount > 10) {
@@ -56,17 +58,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
-    const cacheKey = cacheKeys.offer(body.sessionId, body.currentProductId || "none");
+    const cacheKey = cacheKeys.offer(sessionId, body.currentProductId || "none");
     const cached = await getJsonCache<OfferDecision>(cacheKey);
     if (cached) return json(cached, { headers: withCors() });
 
     // Batch: fetch session + settings in parallel
     const [session, settings] = await Promise.all([
-      getShopperSession(shop, body.sessionId).then(async (s) => {
+      getShopperSession(shop, sessionId).then(async (s) => {
         if (s) return s;
         return upsertShopperSessionFromEvents({
           shop,
-          sessionId: body.sessionId,
+          sessionId,
           events: [{ type: "session_sync", cartProductIds: body.cartProductIds || [] }],
         });
       }),
@@ -90,7 +92,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       candidates,
     });
     const abVariant = decision.widgetType
-      ? await getCachedExperimentVariant(shop, decision.widgetType, body.sessionId)
+      ? await getCachedExperimentVariant(shop, decision.widgetType, sessionId)
       : null;
 
     const offer = await createOfferRecord({
@@ -118,6 +120,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await setJsonCache(cacheKey, response, 30);
     return json(response, { headers: withCors() });
   } catch (error) {
+    if (isStorefrontAuthError(error)) {
+      return json(
+        { widgetType: null, payload: {}, reasoning: "unauthorized", confidence: 0 },
+        { status: error.status, headers: withCors() },
+      );
+    }
+
     console.error("AOVBoost offer route failed:", getErrorMessage(error));
     return json(
       { widgetType: null, payload: {}, reasoning: "failed_closed", confidence: 0 },

@@ -6,10 +6,15 @@ import { Redis } from "@upstash/redis";
  * Uses HTTP per request — no persistent TCP sockets — so it works on
  * Vercel serverless where ioredis/node-redis cause ECONNRESET / ETIMEDOUT.
  */
-const upstash = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
+const upstash =
+  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+    ? new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN,
+      })
+    : null;
+
+const memoryStore = new Map<string, { value: unknown; expiresAt?: number }>();
 
 // ---------------------------------------------------------------------------
 // Lightweight job queue over Upstash REST (replaces BullMQ)
@@ -91,40 +96,96 @@ export function createWorker<Data>(
  */
 export const redis = {
   async del(key: string) {
-    await upstash.del(key);
+    await withRedis(
+      async (client) => {
+        await client.del(key);
+      },
+      () => {
+        memoryStore.delete(key);
+      },
+    );
   },
   async get(key: string) {
-    return upstash.get<string>(key);
+    return withRedis(
+      (client) => client.get<string>(key),
+      () => getMemoryValue<string>(key),
+    );
   },
   async set(key: string, value: string, ...args: any[]) {
     // Support: redis.set(key, value, "EX", ttl)
-    if (args[0] === "EX" && typeof args[1] === "number") {
-      await upstash.set(key, value, { ex: args[1] });
-    } else {
-      await upstash.set(key, value);
-    }
+    await withRedis(
+      async (client) => {
+        if (args[0] === "EX" && typeof args[1] === "number") {
+          await client.set(key, value, { ex: args[1] });
+        } else {
+          await client.set(key, value);
+        }
+      },
+      () => {
+        setMemoryValue(key, value, args[0] === "EX" ? args[1] : undefined);
+      },
+    );
   },
   async incr(key: string) {
-    return upstash.incr(key);
+    return withRedis(
+      (client) => client.incr(key),
+      () => {
+        const next = Number(getMemoryValue(key) || 0) + 1;
+        setMemoryValue(key, String(next));
+        return next;
+      },
+    );
   },
   async expire(key: string, seconds: number) {
-    await upstash.expire(key, seconds);
+    await withRedis(
+      async (client) => {
+        await client.expire(key, seconds);
+      },
+      () => {
+        const entry = memoryStore.get(key);
+        if (entry) entry.expiresAt = Date.now() + seconds * 1000;
+      },
+    );
   },
   async sadd(key: string, ...members: string[]) {
     if (members.length === 0) return;
-    await (upstash.sadd as any)(key, ...members);
+    await withRedis(
+      async (client) => {
+        await (client.sadd as any)(key, ...members);
+      },
+      () => {
+        const current = getMemorySet(key);
+        members.forEach((member) => current.add(member));
+        memoryStore.set(key, { value: current });
+      },
+    );
   },
   async srem(key: string, ...members: string[]) {
     if (members.length === 0) return;
-    await (upstash.srem as any)(key, ...members);
+    await withRedis(
+      async (client) => {
+        await (client.srem as any)(key, ...members);
+      },
+      () => {
+        const current = getMemorySet(key);
+        members.forEach((member) => current.delete(member));
+        memoryStore.set(key, { value: current });
+      },
+    );
   },
   async smembers(key: string) {
-    return upstash.smembers(key);
+    return withRedis(
+      (client) => client.smembers(key),
+      () => Array.from(getMemorySet(key)),
+    );
   },
 };
 
 export async function getJsonCache<T>(key: string): Promise<T | null> {
-  const value = await upstash.get<string>(key);
+  const value = await withRedis(
+    (client) => client.get<string>(key),
+    () => getMemoryValue<string>(key),
+  );
   if (!value) return null;
 
   try {
@@ -139,16 +200,21 @@ export async function setJsonCache(
   value: unknown,
   ttlSeconds: number,
 ) {
-  await upstash.set(key, JSON.stringify(value), { ex: ttlSeconds });
+  await withRedis(
+    async (client) => {
+      await client.set(key, JSON.stringify(value), { ex: ttlSeconds });
+    },
+    () => setMemoryValue(key, JSON.stringify(value), ttlSeconds),
+  );
 }
 
 export async function incrementRateLimit(
   key: string,
   ttlSeconds: number,
 ): Promise<number> {
-  const count = await upstash.incr(key);
+  const count = await redis.incr(key);
   if (count === 1) {
-    await upstash.expire(key, ttlSeconds);
+    await redis.expire(key, ttlSeconds);
   }
   return count;
 }
@@ -162,4 +228,43 @@ export const cacheKeys = {
   affinity: (shop: string, productId: string) =>
     `affinity:${shop}:${productId}`,
   offerRateLimit: (sessionId: string) => `rate:offer:${sessionId}`,
+  chatRateLimit: (sessionId: string) => `rate:chat:${sessionId}`,
 };
+
+async function withRedis<T>(
+  operation: (client: Redis) => Promise<T>,
+  fallback: () => T | Promise<T>,
+): Promise<T> {
+  if (!upstash) return fallback();
+  try {
+    return await operation(upstash);
+  } catch (error) {
+    console.warn(
+      "AOVBoost Redis fallback active:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return fallback();
+  }
+}
+
+function getMemoryValue<T = unknown>(key: string): T | null {
+  const entry = memoryStore.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt && entry.expiresAt <= Date.now()) {
+    memoryStore.delete(key);
+    return null;
+  }
+  return entry.value as T;
+}
+
+function setMemoryValue(key: string, value: unknown, ttlSeconds?: number) {
+  memoryStore.set(key, {
+    value,
+    expiresAt: ttlSeconds ? Date.now() + ttlSeconds * 1000 : undefined,
+  });
+}
+
+function getMemorySet(key: string) {
+  const value = getMemoryValue<Set<string>>(key);
+  return value instanceof Set ? value : new Set<string>();
+}

@@ -1,17 +1,24 @@
 import type { OfferDecision, OfferCandidate, ShopperSessionSnapshot } from "../ai/types";
 import prisma from "../db.server";
 import { getActiveBundlesForProduct } from "./bundle.server";
-import { getTopAffinities } from "./product.server";
+import { getTopAffinitiesOrFallback } from "./product.server";
 
 export async function buildOfferCandidates(input: {
   shop: string;
   session: ShopperSessionSnapshot;
   currentProductId?: string;
 }): Promise<OfferCandidate[]> {
+  const recommendationSourceProductId =
+    input.currentProductId ||
+    input.session.cartProductIds[0] ||
+    input.session.viewedProductIds.at(-1);
   const [affinities, bundles] = await Promise.all([
-    input.currentProductId
-      ? getTopAffinities(input.shop, input.currentProductId, 5)
-      : Promise.resolve([]),
+    getTopAffinitiesOrFallback({
+      shop: input.shop,
+      productId: recommendationSourceProductId,
+      limit: 5,
+      excludeProductIds: input.session.cartProductIds,
+    }),
     getActiveBundlesForProduct(input.shop, input.currentProductId),
   ]);
 

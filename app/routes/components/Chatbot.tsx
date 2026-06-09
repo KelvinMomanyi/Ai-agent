@@ -44,6 +44,7 @@ const Chatbot = () => {
         },
         body: JSON.stringify({
           sessionId: sdk?.sessionId,
+          sessionToken: sdk?.sessionToken,
           shop: sdk?.shop || config.shop,
           message: text,
           messageHistory: currentMessages,

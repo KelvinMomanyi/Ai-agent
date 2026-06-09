@@ -4,10 +4,16 @@ import prisma from "../db.server";
 import { getProductsByIds } from "../models/product.server";
 import { getActiveBundlesForProduct } from "../models/bundle.server";
 import { getShopperSession, upsertShopperSessionFromEvents } from "../models/session.server";
+import { cacheKeys, incrementRateLimit } from "../redis.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
+import {
+  authenticateStorefrontRequest,
+  isStorefrontAuthError,
+} from "../utils/storefrontAuth.server";
 
 type ChatBody = {
   sessionId?: string;
+  sessionToken?: string;
   shop?: string;
   message?: string;
   messageHistory?: Array<{ role: "user" | "assistant"; content: string }>;
@@ -42,22 +48,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ error: "Invalid JSON" }, { status: 400, headers: withCors() });
   }
 
-  const shopCandidates = getShopCandidates(request, body);
-  const shop = shopCandidates[0] || "";
-  const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+  let auth;
+  try {
+    auth = authenticateStorefrontRequest(request, body);
+  } catch (error) {
+    if (isStorefrontAuthError(error)) {
+      return json({ error: "Unauthorized" }, { status: error.status, headers: withCors() });
+    }
+    throw error;
+  }
+
+  const { shop, sessionId } = auth;
   const userMessage = typeof body.message === "string" ? body.message.trim() : "";
 
-  if (
-    !shop ||
-    shopCandidates.some((candidate) => candidate !== shop) ||
-    !sessionId ||
-    !userMessage
-  ) {
+  if (!shop || !sessionId || !userMessage) {
     return json({ error: "Invalid request" }, { status: 400, headers: withCors() });
   }
 
   if (!(await isInstalledShop(shop))) {
     return json({ error: "Invalid shop" }, { status: 401, headers: withCors() });
+  }
+
+  const chatRequestCount = await incrementRateLimit(cacheKeys.chatRateLimit(sessionId), 60);
+  if (chatRequestCount > 12) {
+    return json(
+      { error: "Rate limited" },
+      { status: 429, headers: withCors({ "Retry-After": "60" }) },
+    );
   }
 
   const session =
@@ -259,18 +276,6 @@ async function persistAssistantMessage(
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function getShopCandidates(request: Request, body: ChatBody) {
-  const searchParams = new URL(request.url).searchParams;
-  return [
-    body.shop,
-    request.headers.get("X-AOVBoost-Shop"),
-    request.headers.get("X-Shopify-Shop-Domain"),
-    searchParams.get("shop"),
-  ]
-    .map((value) => (typeof value === "string" ? value.trim() : ""))
-    .filter(Boolean);
 }
 
 async function isInstalledShop(shop: string) {

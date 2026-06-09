@@ -79,6 +79,122 @@ export async function getTopAffinities(
   return validAffinities;
 }
 
+export async function getTopAffinitiesOrFallback(input: {
+  shop: string;
+  productId?: string;
+  limit?: number;
+  excludeProductIds?: string[];
+}): Promise<ProductAffinityWithTarget[]> {
+  const limit = input.limit || 5;
+  const excludedIds = new Set(input.excludeProductIds || []);
+  if (input.productId) excludedIds.add(input.productId);
+
+  const affinities = input.productId
+    ? (await getTopAffinities(input.shop, input.productId, limit)).filter(
+        (affinity) => !excludedIds.has(affinity.targetId),
+      )
+    : [];
+  if (affinities.length >= limit) return affinities.slice(0, limit);
+
+  const fallback = await getCatalogFallbackRecommendations({
+    shop: input.shop,
+    sourceProductId: input.productId,
+    limit: limit - affinities.length,
+    excludeProductIds: [
+      ...Array.from(excludedIds),
+      ...affinities.map((affinity) => affinity.targetId),
+    ],
+  });
+
+  return [...affinities, ...fallback].slice(0, limit);
+}
+
+async function getCatalogFallbackRecommendations(input: {
+  shop: string;
+  sourceProductId?: string;
+  limit: number;
+  excludeProductIds: string[];
+}): Promise<ProductAffinityWithTarget[]> {
+  if (input.limit <= 0) return [];
+
+  const [source, products] = await Promise.all([
+    input.sourceProductId
+      ? prisma.product.findFirst({
+          where: { shop: input.shop, id: input.sourceProductId },
+        })
+      : Promise.resolve(null),
+    prisma.product.findMany({
+      where: {
+        shop: input.shop,
+        id: { notIn: input.excludeProductIds },
+      },
+      include: { orderStats: true },
+      orderBy: [{ updatedAt: "desc" }],
+      take: 100,
+    }),
+  ]);
+
+  return products
+    .map((target) => {
+      const score = source
+        ? computeCatalogFallbackScore(source, target)
+        : 0.2 + Math.min((target.orderStats?.orderCount || 0) / 100, 0.3);
+
+      return {
+        id: `fallback:${source?.id || "store"}:${target.id}`,
+        shop: input.shop,
+        sourceId: source?.id || target.id,
+        targetId: target.id,
+        score,
+        reason: getCatalogFallbackReason(source, target),
+        orderCount: target.orderStats?.orderCount || 0,
+        target,
+      };
+    })
+    .sort((left, right) => right.score - left.score)
+    .slice(0, input.limit);
+}
+
+function computeCatalogFallbackScore(source: Product, target: Product) {
+  const sharedTags = intersection(source.tags, target.tags).length;
+  const sharedCollections = intersection(source.collectionIds, target.collectionIds).length;
+  const sameProductType =
+    source.productType && target.productType && source.productType === target.productType
+      ? 1
+      : 0;
+  const sameVendor = source.vendor && target.vendor && source.vendor === target.vendor ? 1 : 0;
+
+  return clamp(
+    0.2 +
+      Math.min(sharedTags * 0.12, 0.36) +
+      Math.min(sharedCollections * 0.18, 0.36) +
+      sameProductType * 0.12 +
+      sameVendor * 0.08,
+    0,
+    1,
+  );
+}
+
+function getCatalogFallbackReason(
+  source: Product | null,
+  target: Product & { orderStats?: { orderCount: number } | null },
+) {
+  if (!source) {
+    return target.orderStats?.orderCount
+      ? "popular item"
+      : "new arrival";
+  }
+  if (intersection(source.collectionIds, target.collectionIds).length > 0) {
+    return "same collection";
+  }
+  if (intersection(source.tags, target.tags).length > 0) return "shared tags";
+  if (source.productType && source.productType === target.productType) {
+    return "same product type";
+  }
+  if (source.vendor && source.vendor === target.vendor) return "same brand";
+  return "recommended from the catalog";
+}
+
 async function filterAffinitiesToExistingProducts(
   shop: string,
   affinities: ProductAffinityWithTarget[],

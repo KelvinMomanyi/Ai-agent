@@ -20,10 +20,12 @@ export class OfferPoller {
 
   init(): void {
     window.setTimeout(() => this.requestOffer("initial"), 1200);
-    this.timer = window.setInterval(
-      () => this.requestOffer("poll"),
-      this.options.pollMs || 12000,
-    );
+    if (this.options.pollMs) {
+      this.timer = window.setInterval(
+        () => this.requestOffer("poll"),
+        this.options.pollMs,
+      );
+    }
 
     document.addEventListener("add-to-cart", () => {
       window.setTimeout(() => this.requestOffer("add_to_cart"), 250);
@@ -48,8 +50,7 @@ export class OfferPoller {
     try {
       const snapshot = this.options.sessionManager.getSnapshot();
       const body = {
-        sessionId: snapshot.anonymousId,
-        shop: this.options.shop,
+        ...this.options.sessionManager.getAuthPayload(),
         currentProductId: getCurrentProductId(),
         currentPageType: getCurrentPageType(),
         cartProductIds: snapshot.cartProductIds,

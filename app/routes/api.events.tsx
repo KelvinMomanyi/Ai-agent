@@ -3,9 +3,14 @@ import prisma from "../db.server";
 import { ingestStorefrontEvents } from "../models/event.server";
 import type { StorefrontEvent } from "../models/session.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
+import {
+  authenticateStorefrontRequest,
+  isStorefrontAuthError,
+} from "../utils/storefrontAuth.server";
 
 type EventsBody = {
   sessionId?: string;
+  sessionToken?: string;
   shop?: string;
   events?: StorefrontEvent[];
 };
@@ -20,17 +25,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     const body = (await request.json()) as EventsBody;
-    const headerShop =
-      request.headers.get("X-AOVBoost-Shop") ||
-      request.headers.get("X-Shopify-Shop-Domain") ||
-      "";
-    const shop = body.shop || headerShop || "";
+    const auth = authenticateStorefrontRequest(request, body);
+    const { shop, sessionId } = auth;
 
     if (!shop || !(await isInstalledShop(shop))) {
       return json({ ok: false, error: "Invalid shop" }, { status: 401, headers: withCors() });
     }
 
-    if (!body.sessionId || !Array.isArray(body.events)) {
+    if (!Array.isArray(body.events)) {
       return json(
         { ok: false, error: "Missing sessionId or events" },
         { status: 400, headers: withCors() },
@@ -39,12 +41,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     await ingestStorefrontEvents({
       shop,
-      sessionId: body.sessionId,
-      events: body.events.map((event) => ({ ...event, shop, sessionId: body.sessionId })),
+      sessionId,
+      events: body.events.map((event) => ({ ...event, shop, sessionId })),
     });
 
     return json({ ok: true }, { headers: withCors() });
   } catch (error) {
+    if (isStorefrontAuthError(error)) {
+      return json(
+        { ok: false, error: "Unauthorized" },
+        { status: error.status, headers: withCors() },
+      );
+    }
+
     console.error("AOVBoost event ingestion failed:", getErrorMessage(error));
     return json({ ok: false }, { status: 500, headers: withCors() });
   }

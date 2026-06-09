@@ -7,7 +7,8 @@
     apiBase: "/apps/aovboost",
     settings: {
       chatEnabled: {{ block.settings.chat_enabled | json }},
-      tone: {{ block.settings.ai_tone | json }}
+      tone: {{ block.settings.ai_tone | json }},
+      trackingConsentRequired: {{ block.settings.require_consent | json }}
     }
   };
 </script>
@@ -44,6 +45,12 @@
         { "value": "playful", "label": "Playful" }
       ],
       "default": "friendly"
+    },
+    {
+      "type": "checkbox",
+      "id": "require_consent",
+      "label": "Require cookie consent before tracking",
+      "default": true
     }
   ]
 }

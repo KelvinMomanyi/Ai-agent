@@ -12,6 +12,7 @@ type AovBoostConfig = {
   settings?: {
     chatEnabled?: boolean;
     tone?: string;
+    trackingConsentRequired?: boolean;
   };
 };
 
@@ -21,6 +22,7 @@ declare global {
     AOVBoostSDK?: {
       shop: string;
       sessionId: string;
+      sessionToken: string;
       track: (type: string, payload?: Record<string, unknown>) => void;
       requestOffer: () => Promise<unknown>;
       destroy: () => void;
@@ -34,10 +36,22 @@ export function init(): void {
   if (started) return;
   started = true;
 
+  start().catch((error) => {
+    console.log(
+      "AOVBoost SDK skipped:",
+      error instanceof Error ? error.message : String(error),
+    );
+  });
+}
+
+async function start(): Promise<void> {
   try {
     const config = window.AOVBoost || {};
     const shop = config.shop;
     if (!shop) return;
+    if (!hasTrackingConsent(config)) {
+      await waitForTrackingConsent(config);
+    }
 
     const apiBase = config.apiBase || "/apps/aovboost";
     const sessionManager = new SessionManager(shop, apiBase);
@@ -51,13 +65,14 @@ export function init(): void {
       widgetManager,
     });
 
-    sessionManager.init();
+    await sessionManager.init();
     eventBus.init();
     offerPoller.init();
 
     window.AOVBoostSDK = {
       shop,
       sessionId: sessionManager.anonymousId,
+      sessionToken: sessionManager.getAuthPayload().sessionToken,
       track: (type, payload = {}) => eventBus.track(type, payload),
       requestOffer: () => offerPoller.requestOffer("global"),
       destroy: () => {
@@ -72,6 +87,40 @@ export function init(): void {
       error instanceof Error ? error.message : String(error),
     );
   }
+}
+
+function hasTrackingConsent(config: AovBoostConfig) {
+  const privacy = (window as any).Shopify?.customerPrivacy;
+  if (privacy?.analyticsProcessingAllowed instanceof Function) {
+    return Boolean(privacy.analyticsProcessingAllowed());
+  }
+  if (privacy?.userCanBeTracked instanceof Function) {
+    return Boolean(privacy.userCanBeTracked());
+  }
+  return config.settings?.trackingConsentRequired !== true;
+}
+
+function waitForTrackingConsent(config: AovBoostConfig) {
+  return new Promise<void>((resolve) => {
+    const complete = () => {
+      if (!hasTrackingConsent({ ...config, settings: { ...config.settings, trackingConsentRequired: false } })) return;
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      [
+        "visitorConsentCollected",
+        "shopify:customer_privacy:consent_collected",
+        "aovboost:consent-granted",
+      ].forEach((eventName) => window.removeEventListener(eventName, complete));
+    };
+
+    [
+      "visitorConsentCollected",
+      "shopify:customer_privacy:consent_collected",
+      "aovboost:consent-granted",
+    ].forEach((eventName) => window.addEventListener(eventName, complete));
+  });
 }
 
 if (document.readyState === "loading") {
