@@ -71,7 +71,21 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return json({ errors }, { status: 400 });
   }
 
-  await saveBundle(session.shop, params.id || "new", input);
+  try {
+    await saveBundle(session.shop, params.id || "new", input);
+  } catch (error) {
+    return json(
+      {
+        errors: {
+          items: error instanceof Error
+            ? error.message
+            : "Bundle products must exist in this store.",
+        },
+      },
+      { status: 400 },
+    );
+  }
+
   return redirect("/app/bundles");
 };
 

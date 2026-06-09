@@ -2,6 +2,10 @@ import type { Prisma, Product, ProductAffinity } from "@prisma/client";
 import prisma from "../db.server";
 import { cacheKeys, getJsonCache, redis, setJsonCache } from "../redis.server";
 
+export type ProductAffinityWithTarget = ProductAffinity & {
+  target?: Product | null;
+};
+
 export type ShopifyProductInput = {
   id: string;
   title: string;
@@ -49,10 +53,14 @@ export async function getTopAffinities(
   shop: string,
   productId: string,
   limit = 5,
-): Promise<ProductAffinity[]> {
+): Promise<ProductAffinityWithTarget[]> {
   const key = cacheKeys.affinity(shop, productId);
-  const cached = await getJsonCache<ProductAffinity[]>(key);
-  if (cached) return cached;
+  const cached = await getJsonCache<ProductAffinityWithTarget[]>(key);
+  if (cached) {
+    const validCached = await filterAffinitiesToExistingProducts(shop, cached);
+    if (validCached.length === cached.length) return validCached.slice(0, limit);
+    await redis.del(key);
+  }
 
   const affinities = await prisma.productAffinity.findMany({
     where: {
@@ -66,8 +74,36 @@ export async function getTopAffinities(
     take: limit,
   });
 
-  await setJsonCache(key, affinities, 3600);
-  return affinities;
+  const validAffinities = await filterAffinitiesToExistingProducts(shop, affinities);
+  await setJsonCache(key, validAffinities, 3600);
+  return validAffinities;
+}
+
+async function filterAffinitiesToExistingProducts(
+  shop: string,
+  affinities: ProductAffinityWithTarget[],
+) {
+  if (affinities.length === 0) return [];
+
+  const productIds = Array.from(
+    new Set(
+      affinities
+        .flatMap((affinity) => [affinity.sourceId, affinity.targetId])
+        .filter(Boolean),
+    ),
+  );
+  const existingProducts = await prisma.product.findMany({
+    where: { shop, id: { in: productIds } },
+    select: { id: true },
+  });
+  const existingIds = new Set(existingProducts.map((product) => product.id));
+
+  return affinities.filter(
+    (affinity) =>
+      existingIds.has(affinity.sourceId) &&
+      existingIds.has(affinity.targetId) &&
+      (!affinity.target || affinity.target.shop === shop),
+  );
 }
 
 export async function recomputeAffinities(

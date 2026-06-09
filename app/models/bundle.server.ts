@@ -27,14 +27,8 @@ export async function getBundle(shop: string, id: string) {
   });
 }
 
-export async function getActiveBundlesForProduct(shop: string, productId?: string) {
-  if (!productId) return [];
-
-  const key = `bundles:${shop}:${productId}`;
-  const cached = await getJsonCache(key);
-  if (cached) return cached;
-
-  const bundles = await prisma.bundle.findMany({
+function findActiveBundlesForProduct(shop: string, productId: string) {
+  return prisma.bundle.findMany({
     where: {
       shop,
       isActive: true,
@@ -44,13 +38,32 @@ export async function getActiveBundlesForProduct(shop: string, productId?: strin
     orderBy: [{ priority: "desc" }, { updatedAt: "desc" }],
     take: 5,
   });
+}
 
-  await setJsonCache(key, bundles, 3600); // Cache 1 hour
-  return bundles;
+type ActiveBundle = Awaited<ReturnType<typeof findActiveBundlesForProduct>>[number];
+
+export async function getActiveBundlesForProduct(shop: string, productId?: string) {
+  if (!productId) return [];
+
+  const key = `bundles:${shop}:${productId}`;
+  const cached = await getJsonCache<ActiveBundle[]>(key);
+  if (cached) {
+    const validCached = await filterBundlesToExistingProducts(shop, productId, cached);
+    if (validCached.length === cached.length) return validCached;
+    await redis.del(key);
+  }
+
+  const bundles = await findActiveBundlesForProduct(shop, productId);
+  const validBundles = await filterBundlesToExistingProducts(shop, productId, bundles);
+
+  await setJsonCache(key, validBundles, 3600); // Cache 1 hour
+  return validBundles;
 }
 
 export async function saveBundle(shop: string, id: string | null, input: BundleInput) {
-  const data = toBundleData(input);
+  const sanitizedInput = sanitizeBundleInput(input);
+  await assertBundleProductsExist(shop, sanitizedInput);
+  const data = toBundleData(sanitizedInput);
 
   if (id && id !== "new") {
     const existing = await getBundle(shop, id);
@@ -68,13 +81,13 @@ export async function saveBundle(shop: string, id: string | null, input: BundleI
       where: { id },
       data: {
         ...data,
-        items: { create: input.items },
+        items: { create: sanitizedInput.items },
       },
       include: { items: true },
     });
 
     // Invalidate cache for all affected products
-    for (const productId of data.triggerProductIds) {
+    for (const productId of unique([...existing.triggerProductIds, ...data.triggerProductIds])) {
       await redis.del(`bundles:${shop}:${productId}`);
     }
 
@@ -85,7 +98,7 @@ export async function saveBundle(shop: string, id: string | null, input: BundleI
     data: {
       shop,
       ...data,
-      items: { create: input.items },
+      items: { create: sanitizedInput.items },
     },
     include: { items: true },
   });
@@ -139,4 +152,83 @@ function toBundleData(input: BundleInput) {
     isActive: input.isActive ?? true,
     priority: input.priority ?? 0,
   };
+}
+
+async function filterBundlesToExistingProducts(
+  shop: string,
+  currentProductId: string,
+  bundles: ActiveBundle[],
+) {
+  if (bundles.length === 0) return [];
+
+  const productIds = unique(
+    bundles.flatMap((bundle) => [
+      ...bundle.triggerProductIds,
+      ...bundle.items.map((item) => item.productId),
+      ...bundle.items.map((item) => item.product?.id || ""),
+    ]),
+  );
+  const products = await prisma.product.findMany({
+    where: { shop, id: { in: productIds } },
+    select: { id: true },
+  });
+  const existingIds = new Set(products.map((product) => product.id));
+
+  return bundles
+    .map((bundle) => ({
+      ...bundle,
+      triggerProductIds: bundle.triggerProductIds.filter((id) => existingIds.has(id)),
+      items: bundle.items.filter(
+        (item) =>
+          existingIds.has(item.productId) &&
+          Boolean(item.product) &&
+          item.product.shop === shop,
+      ),
+    }))
+    .filter(
+      (bundle) =>
+        bundle.triggerProductIds.includes(currentProductId) &&
+        bundle.items.length > 0,
+    );
+}
+
+async function assertBundleProductsExist(shop: string, input: BundleInput) {
+  if (input.triggerProductIds.length === 0 || input.items.length === 0) {
+    throw new Error("Bundle must include trigger products and bundle items from this store.");
+  }
+
+  const requestedProductIds = unique([
+    ...input.triggerProductIds,
+    ...input.items.map((item) => item.productId),
+  ]);
+
+  const products = await prisma.product.findMany({
+    where: { shop, id: { in: requestedProductIds } },
+    select: { id: true },
+  });
+  const existingIds = new Set(products.map((product) => product.id));
+  const missingIds = requestedProductIds.filter((productId) => !existingIds.has(productId));
+
+  if (missingIds.length > 0) {
+    throw new Error(
+      `Bundle contains products that are not present in this store: ${missingIds.join(", ")}`,
+    );
+  }
+}
+
+function sanitizeBundleInput(input: BundleInput): BundleInput {
+  return {
+    ...input,
+    triggerProductIds: unique(input.triggerProductIds),
+    items: input.items
+      .filter((item) => item.productId)
+      .map((item) => ({
+        productId: item.productId,
+        quantity: Math.max(1, Number(item.quantity || 1)),
+      })),
+  };
+}
+
+function unique(values: string[]) {
+  return Array.from(new Set(values.map(String).filter(Boolean)));
 }

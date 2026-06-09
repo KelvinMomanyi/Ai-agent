@@ -77,6 +77,13 @@ export async function getOfferDecision(
     cartProductIds: input.cartProductIds,
     discountThreshold: input.settings.discountThreshold.toString(),
   });
+  if (!enrichedPayload) {
+    return noOffer(
+      "No existing store products were available for the selected widget.",
+      decision.aiProvider,
+    );
+  }
+
   const copy = await generateWidgetCopy(
     decision.widgetType,
     {
@@ -212,17 +219,35 @@ function enrichPayload(
     discountThreshold: string;
   },
 ) {
-  if (widgetType === "bundle" && !payload.bundle && context.bundles.length > 0) {
-    return { ...payload, bundle: context.bundles[0], bundles: context.bundles };
+  if (widgetType === "bundle") {
+    const bundle = context.bundles[0] as Record<string, unknown> | undefined;
+    if (!bundle) return null;
+
+    const products = getProductsFromBundle(bundle);
+    if (products.length === 0) return null;
+
+    return {
+      ...omitUnsafeProductPayload(payload),
+      bundle,
+      bundles: context.bundles,
+      products,
+      currentProductId: context.currentProductId,
+    };
   }
 
   if (
     (widgetType === "upsell_drawer" ||
       widgetType === "rec_strip" ||
-      widgetType === "social_proof") &&
-    !payload.products
+      widgetType === "social_proof")
   ) {
-    return { ...payload, products: context.affinities, cartProductIds: context.cartProductIds };
+    const products = getProductsFromAffinities(context.affinities);
+    if (products.length === 0) return null;
+
+    return {
+      ...omitUnsafeProductPayload(payload),
+      products,
+      cartProductIds: context.cartProductIds,
+    };
   }
 
   if (widgetType === "discount_nudge" && !payload.threshold) {
@@ -230,6 +255,53 @@ function enrichPayload(
   }
 
   return payload;
+}
+
+function getProductsFromBundle(bundle: Record<string, unknown>) {
+  const items = Array.isArray(bundle.items) ? bundle.items : [];
+
+  return items
+    .map((item) => {
+      const record = item as Record<string, unknown>;
+      const product = asRecord(record.product);
+      if (!product.id || !product.title) return null;
+
+      return {
+        product,
+        productId: String(record.productId || product.id),
+        quantity: Number(record.quantity || 1),
+      };
+    })
+    .filter(Boolean);
+}
+
+function getProductsFromAffinities(affinities: unknown[]) {
+  return affinities
+    .filter((affinity) => {
+      const record = asRecord(affinity);
+      const target = asRecord(record.target);
+      return Boolean(record.targetId && target.id && target.title);
+    })
+    .map((affinity) => affinity as Record<string, unknown>);
+}
+
+function omitUnsafeProductPayload(payload: Record<string, unknown>) {
+  const {
+    bundle: _bundle,
+    bundles: _bundles,
+    items: _items,
+    product: _product,
+    products: _products,
+    ...rest
+  } = payload;
+
+  return rest;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function noOffer(
