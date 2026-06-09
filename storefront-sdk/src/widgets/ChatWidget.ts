@@ -75,6 +75,7 @@ export class ChatWidget extends BaseWidget {
     this.root.querySelector("input")?.addEventListener("keydown", (event) => {
       if ((event as KeyboardEvent).key === "Enter") this.sendMessage();
     });
+    this.scrollToBottom();
   }
 
   private renderChatUi() {
@@ -110,6 +111,17 @@ export class ChatWidget extends BaseWidget {
     `;
   }
 
+  private appendMessage(message: Message): HTMLDivElement {
+    const container = this.root.querySelector("[data-messages]");
+    if (!container) throw new Error("Messages container not found");
+    const el = document.createElement("div");
+    el.className = `bubble ${message.role}`;
+    el.textContent = message.content;
+    container.appendChild(el);
+    this.scrollToBottom();
+    return el;
+  }
+
   private async sendMessage() {
     const input = this.root.querySelector("[data-input]") as HTMLInputElement | null;
     const value = input?.value.trim();
@@ -117,10 +129,12 @@ export class ChatWidget extends BaseWidget {
 
     input!.value = "";
     this.messages.push({ role: "user", content: value });
-    const assistantIndex = this.messages.push({ role: "assistant", content: "" }) - 1;
-    this.render();
-    this.showTyping();
+    this.appendMessage({ role: "user", content: value });
     this.trackClick("send_message");
+
+    const assistantIndex = this.messages.push({ role: "assistant", content: "" }) - 1;
+    const assistantEl = this.appendMessage({ role: "assistant", content: "" });
+    this.showTyping();
 
     try {
       const config = (window as any).AOVBoost || {};
@@ -136,15 +150,17 @@ export class ChatWidget extends BaseWidget {
           sessionId: sdk?.sessionId,
           shop: sdk?.shop || config.shop,
           message: value,
-          messageHistory: this.messages.slice(0, -1),
+          messageHistory: this.messages.slice(0, -2),
         }),
       });
 
+      if (!response.ok) throw new Error(`Server returned ${response.status}`);
       if (!response.body) throw new Error("Missing stream body");
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let started = false;
 
       while (true) {
         const { done, value: chunk } = await reader.read();
@@ -159,29 +175,71 @@ export class ChatWidget extends BaseWidget {
           try {
             const parsed = JSON.parse(data);
             if (parsed.delta) {
+              if (!started) {
+                this.removeTyping();
+                started = true;
+              }
               this.messages[assistantIndex].content += parsed.delta;
-              this.render();
+              assistantEl.textContent = this.messages[assistantIndex].content;
+              this.updateProductLink(this.messages[assistantIndex].content, assistantEl);
+              this.scrollToBottom();
             }
           } catch {
             // Skip malformed SSE chunks.
           }
         }
       }
+
+      if (!started) {
+        this.removeTyping();
+        if (!this.messages[assistantIndex].content) {
+          this.messages[assistantIndex].content = "I can help you compare products and find the right add-ons.";
+          assistantEl.textContent = this.messages[assistantIndex].content;
+        }
+      }
     } catch {
+      this.removeTyping();
       this.messages[assistantIndex].content =
         this.messages[assistantIndex].content ||
         "I had trouble connecting. Please try again in a moment.";
-      this.render();
+      assistantEl.textContent = this.messages[assistantIndex].content;
     }
   }
 
   private showTyping() {
-    const messages = this.root.querySelector("[data-messages]");
-    if (!messages) return;
-    const typing = document.createElement("div");
-    typing.className = "bubble assistant dots";
-    typing.innerHTML = "<span>.</span><span>.</span><span>.</span>";
-    messages.appendChild(typing);
+    const container = this.root.querySelector("[data-messages]");
+    if (!container) return;
+    const el = document.createElement("div");
+    el.className = "bubble assistant dots";
+    el.dataset.typing = "true";
+    el.innerHTML = "<span>.</span><span>.</span><span>.</span>";
+    container.appendChild(el);
+    this.scrollToBottom();
+  }
+
+  private removeTyping() {
+    const el = this.root.querySelector("[data-typing]");
+    if (el) el.remove();
+  }
+
+  private updateProductLink(content: string, container: HTMLElement) {
+    const match = content.match(/\/products\/([a-z0-9-]+)/i);
+    const existing = container.querySelector(".inline-product");
+    if (existing) existing.remove();
+    if (!match) return;
+    const handle = match[1];
+    const div = document.createElement("div");
+    div.className = "inline-product";
+    div.innerHTML = `
+      <p class="product-name">${text(handle.replace(/-/g, " "))}</p>
+      <a href="/products/${text(handle)}">View product</a>
+    `;
+    container.appendChild(div);
+  }
+
+  private scrollToBottom() {
+    const container = this.root.querySelector("[data-messages]");
+    if (container) container.scrollTop = container.scrollHeight;
   }
 
   private dismiss() {
