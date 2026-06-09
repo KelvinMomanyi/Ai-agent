@@ -6,7 +6,7 @@ import { PostPurchase } from "./PostPurchase";
 import { RecStrip } from "./RecStrip";
 import { SocialProof } from "./SocialProof";
 import { UpsellDrawer } from "./UpsellDrawer";
-import { BaseWidget, type WidgetPayload } from "./BaseWidget";
+import type { BaseWidget, WidgetPayload } from "./BaseWidget";
 
 export type OfferDecision = {
   widgetType: string | null;
@@ -21,6 +21,7 @@ const DISMISSED_KEY = "aovboost_dismissed_widgets";
 export class WidgetManager {
   private activeWidget: BaseWidget | null = null;
   private activeKey = "";
+  private activeWidgetType = "";
 
   mountDecision(decision: OfferDecision): void {
     if (!decision.widgetType) return;
@@ -29,6 +30,9 @@ export class WidgetManager {
     const payload = decision.payload || {};
     const offerId = String(payload.offerId || "");
     const nextKey = `${decision.widgetType}:${offerId}`;
+    if (decision.widgetType === "chat" && this.activeWidgetType === "chat") {
+      return;
+    }
     if (nextKey === this.activeKey) return;
 
     this.destroyActive();
@@ -40,12 +44,14 @@ export class WidgetManager {
     widget.mount(target);
     this.activeWidget = widget;
     this.activeKey = nextKey;
+    this.activeWidgetType = decision.widgetType;
   }
 
   destroyActive(): void {
     this.activeWidget?.destroy();
     this.activeWidget = null;
     this.activeKey = "";
+    this.activeWidgetType = "";
   }
 
   getDismissedWidgets(): string[] {

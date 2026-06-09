@@ -3,7 +3,7 @@ import { callAi, getLastAiProvider, streamOpenAIChat, STREAM_PROVIDERS } from ".
 import prisma from "../db.server";
 import { getProductsByIds } from "../models/product.server";
 import { getActiveBundlesForProduct } from "../models/bundle.server";
-import { getShopperSession } from "../models/session.server";
+import { getShopperSession, upsertShopperSessionFromEvents } from "../models/session.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
 
 type ChatBody = {
@@ -21,25 +21,45 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method === "OPTIONS") return optionsResponse();
 
-  const body = (await request.json()) as ChatBody;
-  const headerShop = request.headers.get("X-AOVBoost-Shop");
-  const shop = body.shop || headerShop || "";
+  let body: ChatBody;
+  try {
+    body = (await request.json()) as ChatBody;
+  } catch {
+    return json({ error: "Invalid JSON" }, { status: 400, headers: withCors() });
+  }
 
-  if (!shop || headerShop !== shop || !body.sessionId || !body.message) {
+  const shopCandidates = getShopCandidates(request, body);
+  const shop = shopCandidates[0] || "";
+  const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+  const userMessage = typeof body.message === "string" ? body.message.trim() : "";
+
+  if (
+    !shop ||
+    shopCandidates.some((candidate) => candidate !== shop) ||
+    !sessionId ||
+    !userMessage
+  ) {
     return json({ error: "Invalid request" }, { status: 400, headers: withCors() });
   }
 
-  const session = await getShopperSession(shop, body.sessionId);
-  if (!session) {
-    return json({ error: "Invalid session" }, { status: 404, headers: withCors() });
+  if (!(await isInstalledShop(shop))) {
+    return json({ error: "Invalid shop" }, { status: 401, headers: withCors() });
   }
+
+  const session =
+    (await getShopperSession(shop, sessionId)) ||
+    (await upsertShopperSessionFromEvents({
+      shop,
+      sessionId,
+      events: [{ type: "session_sync", ts: Date.now() }],
+    }));
 
   await prisma.chatMessage.create({
     data: {
       shop,
       sessionId: session.id,
       role: "user",
-      content: body.message,
+      content: userMessage,
       storeId: shop,
     },
   });
@@ -126,7 +146,7 @@ ${brandVoiceSection}`;
   const messages = [
     { role: "system", content: systemPrompt },
     ...(body.messageHistory || []).slice(-12),
-    { role: "user", content: body.message },
+    { role: "user", content: userMessage },
   ];
 
   const encoder = new TextEncoder();
@@ -172,7 +192,7 @@ ${brandVoiceSection}`;
 
         if (!finalReply) {
           const geminiReply =
-            (await callAi(systemPrompt, body.message || "")) ||
+            (await callAi(systemPrompt, userMessage)) ||
             "I can help you compare products and find the right add-ons.";
           provider =
             getLastAiProvider() === "none"
@@ -226,4 +246,25 @@ async function persistAssistantMessage(
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function getShopCandidates(request: Request, body: ChatBody) {
+  const searchParams = new URL(request.url).searchParams;
+  return [
+    body.shop,
+    request.headers.get("X-AOVBoost-Shop"),
+    request.headers.get("X-Shopify-Shop-Domain"),
+    searchParams.get("shop"),
+  ]
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean);
+}
+
+async function isInstalledShop(shop: string) {
+  const [session, legacyShop] = await Promise.all([
+    prisma.session.findFirst({ where: { shop }, select: { id: true } }),
+    prisma.shop.findUnique({ where: { shopDomain: shop }, select: { shopDomain: true } }),
+  ]);
+
+  return Boolean(session || legacyShop);
 }

@@ -5,6 +5,7 @@ type Message = { role: "user" | "assistant"; content: string };
 export class ChatWidget extends BaseWidget {
   private messages: Message[] = [];
   private expanded = false;
+  private sending = false;
 
   constructor(payload: WidgetPayload) {
     super(payload);
@@ -73,7 +74,10 @@ export class ChatWidget extends BaseWidget {
     });
     this.root.querySelector("[data-send]")?.addEventListener("click", () => this.sendMessage());
     this.root.querySelector("input")?.addEventListener("keydown", (event) => {
-      if ((event as KeyboardEvent).key === "Enter") this.sendMessage();
+      if ((event as KeyboardEvent).key === "Enter") {
+        event.preventDefault();
+        this.sendMessage();
+      }
     });
     this.scrollToBottom();
   }
@@ -123,10 +127,15 @@ export class ChatWidget extends BaseWidget {
   }
 
   private async sendMessage() {
+    if (this.sending) return;
+
     const input = this.root.querySelector("[data-input]") as HTMLInputElement | null;
+    const button = this.root.querySelector("[data-send]") as HTMLButtonElement | null;
     const value = input?.value.trim();
     if (!value) return;
 
+    this.sending = true;
+    if (button) button.disabled = true;
     input!.value = "";
     this.messages.push({ role: "user", content: value });
     this.appendMessage({ role: "user", content: value });
@@ -203,6 +212,9 @@ export class ChatWidget extends BaseWidget {
         this.messages[assistantIndex].content ||
         "I had trouble connecting. Please try again in a moment.";
       assistantEl.textContent = this.messages[assistantIndex].content;
+    } finally {
+      this.sending = false;
+      if (button) button.disabled = false;
     }
   }
 

@@ -2,7 +2,7 @@ export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type, X-AOVBoost-Shop, X-Shopify-Topic, X-Shopify-Hmac-Sha256",
+    "Content-Type, X-AOVBoost-Shop, X-Shopify-Shop-Domain, X-Shopify-Topic, X-Shopify-Hmac-Sha256",
 };
 
 export function optionsResponse() {
