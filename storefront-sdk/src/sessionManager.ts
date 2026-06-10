@@ -48,6 +48,7 @@ export class SessionManager {
   private lastCartActionAt = 0;
   private lastEventType = "";
   private syncTimer: number | undefined;
+  private authRefreshPromise: Promise<void> | undefined;
 
   constructor(
     private shop: string,
@@ -55,9 +56,8 @@ export class SessionManager {
   ) {}
 
   async init(): Promise<void> {
-    try {
-      await this.ensureStorefrontSession();
-    } catch {
+    const authenticated = await this.ensureAuthenticated();
+    if (!authenticated) {
       this.bootstrapLocalSession();
     }
     this.syncTimer = window.setInterval(() => this.sync(), 30000);
@@ -184,18 +184,44 @@ export class SessionManager {
     };
   }
 
+  async ensureAuthenticated(): Promise<boolean> {
+    if (this.sessionToken) return true;
+    try {
+      await this.ensureStorefrontSession();
+    } catch {
+      await this.refreshAuth();
+    }
+    return Boolean(this.sessionToken);
+  }
+
   async refreshAuth(): Promise<void> {
+    if (this.authRefreshPromise) return this.authRefreshPromise;
+
+    this.authRefreshPromise = this.refreshAuthInternal().finally(() => {
+      this.authRefreshPromise = undefined;
+    });
+    return this.authRefreshPromise;
+  }
+
+  private async refreshAuthInternal(): Promise<void> {
+    const previousAnonymousId = this.anonymousId;
+    const previousSessionToken = this.sessionToken;
+
     try {
       window.localStorage.removeItem(SIGNED_SESSION_STORAGE_KEY);
     } catch {
       // Ignore storage failures; fetching a new in-memory token is enough.
     }
-    this.anonymousId = "";
-    this.sessionToken = "";
+
     try {
-      await this.ensureStorefrontSession();
+      await this.ensureStorefrontSession({ forceRefresh: true });
     } catch {
-      this.bootstrapLocalSession();
+      if (previousSessionToken) {
+        this.anonymousId = previousAnonymousId;
+        this.sessionToken = previousSessionToken;
+      } else {
+        this.bootstrapLocalSession();
+      }
     }
     this.syncGlobalSdkAuth();
   }
@@ -299,8 +325,10 @@ export class SessionManager {
     return `${this.apiBase.replace(/\/$/, "")}${path}`;
   }
 
-  private async ensureStorefrontSession(): Promise<void> {
-    const stored = this.getStoredStorefrontSession();
+  private async ensureStorefrontSession(
+    options: { forceRefresh?: boolean } = {},
+  ): Promise<void> {
+    const stored = options.forceRefresh ? null : this.getStoredStorefrontSession();
     if (stored) {
       this.anonymousId = stored.sessionId;
       this.sessionToken = stored.sessionToken;

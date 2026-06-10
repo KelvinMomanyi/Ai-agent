@@ -23,6 +23,7 @@ export class EventBus {
   private flushTimer: number | undefined;
   private scrollDepths = new Set<number>();
   private originalFetch: typeof window.fetch | null = null;
+  private authFlushInFlight = false;
 
   constructor(private options: EventBusOptions) {}
 
@@ -72,10 +73,25 @@ export class EventBus {
     }
 
     if (this.queue.length === 0) return;
-    if (!this.options.sessionManager.getAuthPayload().sessionToken) return;
+    if (!this.options.sessionManager.getAuthPayload().sessionToken) {
+      void this.flushAfterAuth();
+      return;
+    }
 
     const events = this.queue.splice(0);
     void this.postEvents(events);
+  }
+
+  private async flushAfterAuth(): Promise<void> {
+    if (this.authFlushInFlight) return;
+    this.authFlushInFlight = true;
+    try {
+      if (await this.options.sessionManager.ensureAuthenticated()) {
+        this.flush();
+      }
+    } finally {
+      this.authFlushInFlight = false;
+    }
   }
 
   private scheduleFlush(): void {
@@ -92,8 +108,15 @@ export class EventBus {
     events: AovboostEvent[],
     retriedAuth = false,
   ): Promise<void> {
+    if (!(await this.options.sessionManager.ensureAuthenticated())) {
+      this.queue.unshift(...events);
+      return;
+    }
     const auth = this.options.sessionManager.getAuthPayload();
-    if (!auth.sessionToken) return;
+    if (!auth.sessionToken) {
+      this.queue.unshift(...events);
+      return;
+    }
 
     try {
       const response = await fetch(this.endpoint("/events"), {

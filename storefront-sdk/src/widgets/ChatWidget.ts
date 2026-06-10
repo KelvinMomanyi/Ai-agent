@@ -219,21 +219,25 @@ export class ChatWidget extends BaseWidget {
     }
   }
 
-  private requestChat(value: string) {
+  private async requestChat(value: string) {
     const config = (window as any).AOVBoost || {};
     const sdk = (window as any).AOVBoostSDK;
     const apiBase = normalizeProxyApiBase(config.apiBase).replace(/\/$/, "");
+    if (!sdk?.sessionToken && typeof sdk?.refreshSession === "function") {
+      await sdk.refreshSession();
+    }
+    const refreshedSdk = (window as any).AOVBoostSDK;
 
     return fetch(`${apiBase}/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-AOVBoost-Shop": sdk?.shop || config.shop || "",
+        "X-AOVBoost-Shop": refreshedSdk?.shop || config.shop || "",
       },
       body: JSON.stringify({
-        sessionId: sdk?.sessionId,
-        sessionToken: sdk?.sessionToken,
-        shop: sdk?.shop || config.shop,
+        sessionId: refreshedSdk?.sessionId,
+        sessionToken: refreshedSdk?.sessionToken,
+        shop: refreshedSdk?.shop || config.shop,
         message: value,
         messageHistory: this.messages.slice(0, -2),
       }),

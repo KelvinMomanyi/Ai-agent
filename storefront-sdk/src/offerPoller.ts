@@ -51,6 +51,10 @@ export class OfferPoller {
     this.inFlight = true;
 
     try {
+      if (!(await this.options.sessionManager.ensureAuthenticated())) {
+        return this.mountLocalFallback(trigger, triggerPayload);
+      }
+
       const snapshot = this.options.sessionManager.getSnapshot();
       const cartProductIds = Array.isArray(triggerPayload.cartProductIds)
         ? triggerPayload.cartProductIds.map(String)
@@ -59,8 +63,13 @@ export class OfferPoller {
         typeof triggerPayload.cartValue === "number"
           ? triggerPayload.cartValue
           : snapshot.cartValue;
+      const auth = this.options.sessionManager.getAuthPayload();
+      if (!auth.sessionToken) {
+        return this.mountLocalFallback(trigger, triggerPayload);
+      }
+
       const body = {
-        ...this.options.sessionManager.getAuthPayload(),
+        ...auth,
         currentProductId: getCurrentProductId(),
         currentPageType: getCurrentPageType(),
         cartProductIds,
@@ -71,13 +80,6 @@ export class OfferPoller {
         triggerPayload,
       };
 
-      if (!this.options.sessionManager.getAuthPayload().sessionToken) {
-        await this.options.sessionManager.refreshAuth();
-        if (!this.options.sessionManager.getAuthPayload().sessionToken) {
-          return this.mountLocalFallback(trigger, triggerPayload);
-        }
-      }
-
       let response = await fetch(this.endpoint("/offer"), {
         method: "POST",
         headers: {
@@ -86,7 +88,7 @@ export class OfferPoller {
         },
         body: JSON.stringify({
           ...body,
-          ...this.options.sessionManager.getAuthPayload(),
+          ...auth,
         }),
         keepalive: true,
       });
