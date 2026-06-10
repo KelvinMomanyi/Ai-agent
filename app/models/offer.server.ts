@@ -4,7 +4,7 @@ import { catalogProductToWidgetProduct } from "./catalogGuard.server";
 import prisma from "../db.server";
 import { getActiveBundlesForProduct } from "./bundle.server";
 import {
-  getCatalogSnapshot,
+  getRecommendationCatalog,
   pickCatalogProducts,
   type CatalogCacheProduct,
 } from "./catalogCache.server";
@@ -20,7 +20,10 @@ export async function buildOfferCandidates(input: {
     input.session.cartProductIds[0] ||
     input.session.viewedProductIds.at(-1);
   const [catalog, bundles] = await Promise.all([
-    getCatalogSnapshot(input.shop),
+    getRecommendationCatalog({
+      shop: input.shop,
+      sourceProductId: recommendationSourceProductId,
+    }),
     getActiveBundlesForProduct(input.shop, input.currentProductId, {
       excludeProductIds: input.excludeProductIds,
     }),

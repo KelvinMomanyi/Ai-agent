@@ -223,21 +223,20 @@ export class ChatWidget extends BaseWidget {
     const config = (window as any).AOVBoost || {};
     const sdk = (window as any).AOVBoostSDK;
     const apiBase = normalizeProxyApiBase(config.apiBase).replace(/\/$/, "");
-    if (!sdk?.sessionToken && typeof sdk?.refreshSession === "function") {
-      await sdk.refreshSession();
-    }
-    const refreshedSdk = (window as any).AOVBoostSDK;
+    const auth =
+      typeof sdk?.getSignedAuthPayload === "function"
+        ? await sdk.getSignedAuthPayload()
+        : null;
+    if (!auth) throw new Error("Missing signed storefront auth");
 
     return fetch(`${apiBase}/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-AOVBoost-Shop": refreshedSdk?.shop || config.shop || "",
+        "X-AOVBoost-Shop": auth.shop || config.shop || "",
       },
       body: JSON.stringify({
-        sessionId: refreshedSdk?.sessionId,
-        sessionToken: refreshedSdk?.sessionToken,
-        shop: refreshedSdk?.shop || config.shop,
+        ...auth,
         message: value,
         messageHistory: this.messages.slice(0, -2),
       }),

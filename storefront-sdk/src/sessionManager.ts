@@ -184,6 +184,16 @@ export class SessionManager {
     };
   }
 
+  async getSignedAuthPayload(): Promise<{
+    sessionId: string;
+    sessionToken: string;
+    shop: string;
+  } | null> {
+    if (!(await this.ensureAuthenticated())) return null;
+    if (!this.anonymousId || !this.sessionToken) return null;
+    return this.getAuthPayload();
+  }
+
   async ensureAuthenticated(): Promise<boolean> {
     if (this.sessionToken) return true;
     try {
@@ -265,7 +275,10 @@ export class SessionManager {
   }
 
   private sync(): void {
-    if (!this.anonymousId || !this.sessionToken) return;
+    if (!this.anonymousId || !this.sessionToken) {
+      void this.ensureAuthenticated();
+      return;
+    }
 
     const snapshot = this.getSnapshot();
     const body = JSON.stringify({

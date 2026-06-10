@@ -5,7 +5,7 @@ import type { DecisionInput, OfferDecision } from "./types";
 import { getActiveBundlesForProduct } from "../models/bundle.server";
 import { catalogProductToWidgetProduct } from "../models/catalogGuard.server";
 import {
-  getCatalogSnapshot,
+  getRecommendationCatalog,
   pickCatalogProducts,
   type CatalogCacheProduct,
 } from "../models/catalogCache.server";
@@ -32,7 +32,10 @@ export async function getOfferDecision(
     input.cartProductIds[0] ||
     input.session.viewedProductIds.at(-1);
   const [catalog, bundles] = await Promise.all([
-    getCatalogSnapshot(input.shop),
+    getRecommendationCatalog({
+      shop: input.shop,
+      sourceProductId: recommendationSourceProductId,
+    }),
     getActiveBundlesForProduct(input.shop, input.currentProductId, {
       excludeProductIds: input.settings.blockedProductIds,
     }),

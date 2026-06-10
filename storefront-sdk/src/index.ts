@@ -25,6 +25,11 @@ declare global {
       sessionId: string;
       sessionToken: string;
       refreshSession: () => Promise<void>;
+      getSignedAuthPayload: () => Promise<{
+        sessionId: string;
+        sessionToken: string;
+        shop: string;
+      } | null>;
       applySession: (session: unknown) => boolean;
       track: (type: string, payload?: Record<string, unknown>) => void;
       trigger: (type: string, payload?: Record<string, unknown>) => void;
@@ -86,6 +91,7 @@ async function start(): Promise<void> {
         await sessionManager.refreshAuth();
         sessionManager.syncGlobalSdkAuth();
       },
+      getSignedAuthPayload: () => sessionManager.getSignedAuthPayload(),
       applySession: (session) => sessionManager.applyStorefrontSession(session),
       track: (type, payload = {}) => eventBus.track(type, payload),
       trigger: (type, payload = {}) => triggerRouter.trigger(type, payload),

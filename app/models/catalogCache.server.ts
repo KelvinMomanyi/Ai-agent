@@ -44,6 +44,10 @@ export type CatalogSnapshot = {
 
 const CATALOG_TTL_SECONDS = 60 * 60;
 const STALE_TTL_SECONDS = 7 * 24 * 60 * 60;
+const HOT_CATALOG_TTL_SECONDS = 4 * 60 * 60;
+const CATEGORY_CATALOG_TTL_SECONDS = 60 * 60;
+const HOT_PRODUCT_LIMIT = 500;
+const CATEGORY_PRODUCT_LIMIT = 250;
 
 export async function getCatalogSnapshot(shop: string) {
   const cached = await getJsonCache<CatalogSnapshot>(catalogKey(shop));
@@ -69,13 +73,20 @@ export async function getCatalogSnapshot(shop: string) {
 export async function refreshCatalogCache(shop: string) {
   const products = await prisma.product.findMany({
     where: { shop },
+    include: { orderStats: true },
     orderBy: [{ updatedAt: "desc" }],
   });
   const snapshot = buildCatalogSnapshot(shop, products);
+  const hotSnapshot = buildCatalogSnapshot(
+    shop,
+    rankProducts(products).slice(0, HOT_PRODUCT_LIMIT),
+    products.length,
+  );
 
   await Promise.all([
     setJsonCache(catalogKey(shop), snapshot, CATALOG_TTL_SECONDS),
     setJsonCache(staleCatalogKey(shop), snapshot, STALE_TTL_SECONDS),
+    setJsonCache(hotCatalogKey(shop), hotSnapshot, HOT_CATALOG_TTL_SECONDS),
   ]);
   console.log("AOVBoost catalog cache refreshed:", {
     shop,
@@ -83,6 +94,32 @@ export async function refreshCatalogCache(shop: string) {
     refreshedAt: snapshot.refreshedAt,
   });
   return snapshot;
+}
+
+export async function getRecommendationCatalog(input: {
+  shop: string;
+  sourceProductId?: string;
+  category?: string;
+}) {
+  const sourceProduct = input.sourceProductId
+    ? await getCatalogProductById(input.shop, input.sourceProductId)
+    : null;
+  const category = input.category || sourceProduct?.category || "";
+
+  const [hotCatalog, categoryCatalog] = await Promise.all([
+    getHotCatalogSnapshot(input.shop),
+    category ? getCategoryCatalogSnapshot(input.shop, category) : Promise.resolve(null),
+  ]);
+
+  return buildCatalogSnapshotFromCatalogProducts(
+    input.shop,
+    mergeCatalogProducts([
+      sourceProduct ? [sourceProduct] : [],
+      categoryCatalog?.products || [],
+      hotCatalog.products,
+    ]),
+    Math.max(hotCatalog.productCount, categoryCatalog?.productCount || 0),
+  );
 }
 
 export function pickCatalogProducts(input: {
@@ -115,8 +152,91 @@ export function pickCatalogProducts(input: {
     .map((entry) => entry.product);
 }
 
-function buildCatalogSnapshot(shop: string, products: Product[]): CatalogSnapshot {
-  const catalogProducts = products.map(toCatalogProduct);
+async function getHotCatalogSnapshot(shop: string) {
+  const cached = await getJsonCache<CatalogSnapshot>(hotCatalogKey(shop));
+  if (cached) return cached;
+
+  const [stats, recentProducts, productCount] = await Promise.all([
+    prisma.productOrderStat.findMany({
+      where: { shop },
+      include: { product: true },
+      orderBy: [{ orderCount: "desc" }],
+      take: HOT_PRODUCT_LIMIT,
+    }),
+    prisma.product.findMany({
+      where: { shop },
+      include: { orderStats: true },
+      orderBy: [{ updatedAt: "desc" }],
+      take: HOT_PRODUCT_LIMIT,
+    }),
+    prisma.product.count({ where: { shop } }),
+  ]);
+
+  const products = mergeProducts([
+    stats.map((stat) => stat.product).filter(Boolean),
+    recentProducts,
+  ]).slice(0, HOT_PRODUCT_LIMIT);
+  const snapshot = buildCatalogSnapshot(shop, products, productCount);
+  await setJsonCache(hotCatalogKey(shop), snapshot, HOT_CATALOG_TTL_SECONDS);
+  return snapshot;
+}
+
+async function getCategoryCatalogSnapshot(shop: string, category: string) {
+  const key = categoryCatalogKey(shop, category);
+  const cached = await getJsonCache<CatalogSnapshot>(key);
+  if (cached) return cached;
+
+  const categoryWhere =
+    category === "uncategorized"
+      ? { shop, OR: [{ productType: null }, { productType: "" }] }
+      : { shop, productType: category };
+  const [products, productCount] = await Promise.all([
+    prisma.product.findMany({
+      where: categoryWhere,
+      include: { orderStats: true },
+      orderBy: [{ updatedAt: "desc" }],
+      take: CATEGORY_PRODUCT_LIMIT,
+    }),
+    prisma.product.count({ where: { shop } }),
+  ]);
+  const snapshot = buildCatalogSnapshot(
+    shop,
+    rankProducts(products).slice(0, CATEGORY_PRODUCT_LIMIT),
+    productCount,
+  );
+  await setJsonCache(key, snapshot, CATEGORY_CATALOG_TTL_SECONDS);
+  return snapshot;
+}
+
+async function getCatalogProductById(shop: string, productId: string) {
+  const hotCatalog = await getJsonCache<CatalogSnapshot>(hotCatalogKey(shop));
+  const hotProduct = hotCatalog?.byId[productId];
+  if (hotProduct) return hotProduct;
+
+  const product = await prisma.product.findFirst({
+    where: { shop, id: productId },
+    include: { orderStats: true },
+  });
+  return product ? toCatalogProduct(product) : null;
+}
+
+function buildCatalogSnapshot(
+  shop: string,
+  products: ProductWithStats[],
+  productCount = products.length,
+): CatalogSnapshot {
+  return buildCatalogSnapshotFromCatalogProducts(
+    shop,
+    products.map(toCatalogProduct),
+    productCount,
+  );
+}
+
+function buildCatalogSnapshotFromCatalogProducts(
+  shop: string,
+  catalogProducts: CatalogCacheProduct[],
+  productCount = catalogProducts.length,
+): CatalogSnapshot {
   const byId: Record<string, CatalogCacheProduct> = {};
   const byCategory: Record<string, string[]> = {};
   const byTag: Record<string, string[]> = {};
@@ -137,7 +257,7 @@ function buildCatalogSnapshot(shop: string, products: Product[]): CatalogSnapsho
   return {
     shop,
     refreshedAt: new Date().toISOString(),
-    productCount: catalogProducts.length,
+    productCount,
     products: catalogProducts,
     byId,
     byCategory,
@@ -145,7 +265,11 @@ function buildCatalogSnapshot(shop: string, products: Product[]): CatalogSnapsho
   };
 }
 
-function toCatalogProduct(product: Product): CatalogCacheProduct {
+type ProductWithStats = Product & {
+  orderStats?: { orderCount: number } | null;
+};
+
+function toCatalogProduct(product: ProductWithStats): CatalogCacheProduct {
   const metafields = asRecord(product.metafields);
   const description = getMetafieldValue(metafields, [
     "description",
@@ -216,6 +340,36 @@ function toCatalogProduct(product: Product): CatalogCacheProduct {
   };
 }
 
+function mergeProducts(groups: ProductWithStats[][]) {
+  const byId = new Map<string, ProductWithStats>();
+  for (const products of groups) {
+    for (const product of products) {
+      if (!byId.has(product.id)) byId.set(product.id, product);
+    }
+  }
+  return rankProducts(Array.from(byId.values()));
+}
+
+function mergeCatalogProducts(groups: CatalogCacheProduct[][]) {
+  const byId = new Map<string, CatalogCacheProduct>();
+  for (const products of groups) {
+    for (const product of products) {
+      if (!byId.has(product.id)) byId.set(product.id, product);
+    }
+  }
+  return Array.from(byId.values());
+}
+
+function rankProducts(products: ProductWithStats[]) {
+  return products.slice().sort((left, right) => {
+    const orderDelta =
+      Number(right.orderStats?.orderCount || 0) -
+      Number(left.orderStats?.orderCount || 0);
+    if (orderDelta !== 0) return orderDelta;
+    return right.updatedAt.getTime() - left.updatedAt.getTime();
+  });
+}
+
 function scoreCatalogProduct(
   product: CatalogCacheProduct,
   source: CatalogCacheProduct | undefined,
@@ -269,6 +423,18 @@ function catalogKey(shop: string) {
 
 function staleCatalogKey(shop: string) {
   return `catalog:${shop}:stale`;
+}
+
+function hotCatalogKey(shop: string) {
+  return `catalog:${shop}:hot`;
+}
+
+function categoryCatalogKey(shop: string, category: string) {
+  return `catalog:${shop}:category:${safeCacheKey(category)}`;
+}
+
+function safeCacheKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9:_-]+/g, "-").slice(0, 80);
 }
 
 function getErrorMessage(error: unknown) {

@@ -108,12 +108,8 @@ export class EventBus {
     events: AovboostEvent[],
     retriedAuth = false,
   ): Promise<void> {
-    if (!(await this.options.sessionManager.ensureAuthenticated())) {
-      this.queue.unshift(...events);
-      return;
-    }
-    const auth = this.options.sessionManager.getAuthPayload();
-    if (!auth.sessionToken) {
+    const auth = await this.options.sessionManager.getSignedAuthPayload();
+    if (!auth) {
       this.queue.unshift(...events);
       return;
     }
@@ -136,7 +132,10 @@ export class EventBus {
         const recovered =
           await this.options.sessionManager.applySessionFromResponse(response);
         if (!recovered) await this.options.sessionManager.refreshAuth();
-        if (!this.options.sessionManager.getAuthPayload().sessionToken) return;
+        if (!this.options.sessionManager.getAuthPayload().sessionToken) {
+          this.queue.unshift(...events);
+          return;
+        }
         await this.postEvents(events, true);
         return;
       }

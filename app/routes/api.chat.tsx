@@ -5,10 +5,13 @@ import { getActiveBundlesForProduct } from "../models/bundle.server";
 import {
   filterBundlesToCatalog,
   filterCatalogProducts,
-  getFullProductCatalog,
   sanitizeAssistantReplyToCatalog,
   type CatalogProduct,
 } from "../models/catalogGuard.server";
+import {
+  getRecommendationCatalog,
+  pickCatalogProducts,
+} from "../models/catalogCache.server";
 import { getShopperSession, upsertShopperSessionFromEvents } from "../models/session.server";
 import { cacheKeys, incrementRateLimit } from "../redis.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
@@ -134,18 +137,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
 
   const storeName = shop.replace(/\.[^.]+\.myshopify\.com$/, "").replace(/[-_]/g, " ");
-  const [rawBundles, fullCatalog] = await Promise.all([
+  const recommendationSourceProductId =
+    session.cartProductIds[0] || session.viewedProductIds.at(-1);
+  const [rawBundles, recommendationCatalog] = await Promise.all([
     getActiveBundlesForProduct(shop, session.viewedProductIds[0], {
       excludeProductIds: settings.blockedProductIds,
     }),
-    getFullProductCatalog(shop),
+    getRecommendationCatalog({
+      shop,
+      sourceProductId: recommendationSourceProductId,
+    }),
   ]);
-  const catalogProducts = filterCatalogProducts(
-    fullCatalog,
+  const safeRecommendationProducts = filterCatalogProducts(
+    recommendationCatalog.products,
     settings.blockedProductIds,
   );
+  const catalogProducts = pickCatalogProducts({
+    catalog: {
+      ...recommendationCatalog,
+      products: safeRecommendationProducts,
+    },
+    sourceProductId: recommendationSourceProductId,
+    cartProductIds: session.cartProductIds,
+    excludeProductIds: settings.blockedProductIds,
+    query: userMessage,
+    limit: 35,
+  });
   const cartProductIds = new Set(session.cartProductIds);
-  const cartProducts = catalogProducts.filter((product) => cartProductIds.has(product.id));
+  const cartProducts = safeRecommendationProducts.filter((product) =>
+    cartProductIds.has(product.id),
+  );
 
   const cartInfo = cartProducts.length > 0
     ? cartProducts.map((p) => `- ${p.title} ($${p.price})`).join("\n")

@@ -6,6 +6,13 @@ export type ProductAffinityWithTarget = ProductAffinity & {
   target?: Product | null;
 };
 
+type ShopifyAdminGraphql = {
+  graphql: (
+    query: string,
+    options?: { variables?: Record<string, unknown> },
+  ) => Promise<{ json: () => Promise<any> }>;
+};
+
 export type ShopifyProductInput = {
   id: string;
   title: string;
@@ -19,6 +26,9 @@ export type ShopifyProductInput = {
   collectionIds?: string[];
   metafields?: Prisma.InputJsonValue;
 };
+
+const INITIAL_AFFINITY_PRODUCT_LIMIT = 500;
+const INITIAL_AFFINITY_TARGET_LIMIT = 20;
 
 export async function upsertProduct(shop: string, product: ShopifyProductInput) {
   return prisma.product.upsert({
@@ -324,7 +334,7 @@ export async function incrementOrderAffinities(
 
 export async function syncProductsFromAdmin(
   shop: string,
-  admin: { graphql: Function },
+  admin: ShopifyAdminGraphql,
   onProgress?: (progress: { total?: number; done: number; status: string }) => Promise<void>,
 ) {
   let cursor: string | null = null;
@@ -389,53 +399,78 @@ export async function syncProductsFromAdmin(
       })
     : await prisma.product.deleteMany({ where: { shop } });
 
-  const products = await prisma.product.findMany({ where: { shop } });
-  await onProgress?.({ total: products.length, done: synced, status: "building_affinities" });
+  const products = await prisma.product.findMany({
+    where: { shop },
+    include: { orderStats: true },
+    orderBy: [{ updatedAt: "desc" }],
+    take: INITIAL_AFFINITY_PRODUCT_LIMIT,
+  });
+  let affinityDone = 0;
+  await onProgress?.({
+    total: products.length,
+    done: affinityDone,
+    status: "building_affinities",
+  });
   for (const product of products) {
     await recomputeInitialAffinities(shop, product, products);
-    await onProgress?.({ total: products.length, done: synced, status: "building_affinities" });
+    affinityDone += 1;
+    await onProgress?.({
+      total: products.length,
+      done: affinityDone,
+      status: "building_affinities",
+    });
   }
 
   return { synced, deleted: deleted.count };
 }
 
+type ProductWithOptionalStats = Product & {
+  orderStats?: { orderCount: number } | null;
+};
+
 async function recomputeInitialAffinities(
   shop: string,
-  source: Product,
-  products: Product[],
+  source: ProductWithOptionalStats,
+  products: ProductWithOptionalStats[],
 ) {
-  await Promise.all(
-    products
-      .filter((target) => target.id !== source.id)
-      .map(async (target) => {
-        const sharedTags = intersection(source.tags, target.tags).length;
-        const sharedCollections = intersection(
-          source.collectionIds,
-          target.collectionIds,
-        ).length;
-        if (sharedCollections === 0 && sharedTags < 2) return;
+  const targets = products
+    .filter((target) => target.id !== source.id)
+    .map((target) => {
+      const sharedTags = intersection(source.tags, target.tags).length;
+      const sharedCollections = intersection(
+        source.collectionIds,
+        target.collectionIds,
+      ).length;
+      const score = computeAffinityScore(source, target, 0);
+      return { target, sharedCollections, sharedTags, score };
+    })
+    .filter((entry) => entry.sharedCollections > 0 || entry.sharedTags >= 2)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, INITIAL_AFFINITY_TARGET_LIMIT);
 
-        await prisma.productAffinity.upsert({
-          where: {
-            shop_sourceId_targetId: {
-              shop,
-              sourceId: source.id,
-              targetId: target.id,
-            },
-          },
-          update: {
-            score: computeAffinityScore(source, target, 0),
-            reason: sharedCollections ? "same collection" : "shared tags",
-          },
-          create: {
+  await Promise.all(
+    targets.map(({ target, sharedCollections, score }) =>
+      prisma.productAffinity.upsert({
+        where: {
+          shop_sourceId_targetId: {
             shop,
             sourceId: source.id,
             targetId: target.id,
-            score: computeAffinityScore(source, target, 0),
-            reason: sharedCollections ? "same collection" : "shared tags",
           },
-        });
+        },
+        update: {
+          score,
+          reason: sharedCollections ? "same collection" : "shared tags",
+        },
+        create: {
+          shop,
+          sourceId: source.id,
+          targetId: target.id,
+          score,
+          reason: sharedCollections ? "same collection" : "shared tags",
+        },
       }),
+    ),
   );
 }
 
