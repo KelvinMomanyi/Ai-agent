@@ -42,14 +42,22 @@ function findActiveBundlesForProduct(shop: string, productId: string) {
 
 type ActiveBundle = Awaited<ReturnType<typeof findActiveBundlesForProduct>>[number];
 
-export async function getActiveBundlesForProduct(shop: string, productId?: string) {
+export async function getActiveBundlesForProduct(
+  shop: string,
+  productId?: string,
+  options: { excludeProductIds?: string[] } = {},
+) {
   if (!productId) return [];
 
   const key = `bundles:${shop}:${productId}`;
   const cached = await getJsonCache<ActiveBundle[]>(key);
   if (cached) {
     const validCached = await filterBundlesToExistingProducts(shop, productId, cached);
-    if (validCached.length === cached.length) return validCached;
+    const allowedCached = filterBundlesToAllowedProducts(
+      validCached,
+      options.excludeProductIds || [],
+    );
+    if (validCached.length === cached.length) return allowedCached;
     await redis.del(key);
   }
 
@@ -57,7 +65,7 @@ export async function getActiveBundlesForProduct(shop: string, productId?: strin
   const validBundles = await filterBundlesToExistingProducts(shop, productId, bundles);
 
   await setJsonCache(key, validBundles, 3600); // Cache 1 hour
-  return validBundles;
+  return filterBundlesToAllowedProducts(validBundles, options.excludeProductIds || []);
 }
 
 export async function saveBundle(shop: string, id: string | null, input: BundleInput) {
@@ -174,22 +182,37 @@ async function filterBundlesToExistingProducts(
   });
   const existingIds = new Set(products.map((product) => product.id));
 
-  return bundles
-    .map((bundle) => ({
-      ...bundle,
-      triggerProductIds: bundle.triggerProductIds.filter((id) => existingIds.has(id)),
-      items: bundle.items.filter(
+  return bundles.filter((bundle) => {
+    const currentProductExists = existingIds.has(currentProductId);
+    const allItemsExist =
+      bundle.items.length > 0 &&
+      bundle.items.every(
         (item) =>
           existingIds.has(item.productId) &&
           Boolean(item.product) &&
           item.product.shop === shop,
-      ),
-    }))
-    .filter(
-      (bundle) =>
-        bundle.triggerProductIds.includes(currentProductId) &&
-        bundle.items.length > 0,
+      );
+
+    return (
+      currentProductExists &&
+      bundle.triggerProductIds.includes(currentProductId) &&
+      allItemsExist
     );
+  });
+}
+
+function filterBundlesToAllowedProducts<T extends ActiveBundle>(
+  bundles: T[],
+  excludedProductIds: string[],
+) {
+  if (excludedProductIds.length === 0) return bundles;
+
+  const excluded = new Set(excludedProductIds);
+  return bundles.filter(
+    (bundle) =>
+      !bundle.triggerProductIds.some((productId) => excluded.has(productId)) &&
+      bundle.items.every((item) => !excluded.has(item.productId)),
+  );
 }
 
 async function assertBundleProductsExist(shop: string, input: BundleInput) {

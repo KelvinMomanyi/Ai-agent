@@ -133,7 +133,12 @@ function mapProductWebhook(payload: unknown) {
     compareAtPrice: variant.compare_at_price || null,
     imageUrl: product.image?.src || product.image?.url || null,
     collectionIds: [],
-    metafields: {},
+    metafields: {
+      "aovboost.defaultVariantId": {
+        value: toVariantGid(variant.admin_graphql_api_id || variant.id),
+        type: "single_line_text_field",
+      },
+    },
   };
 }
 
@@ -195,6 +200,14 @@ function toProductGid(value: unknown) {
   return text.startsWith("gid://shopify/Product/")
     ? text
     : `gid://shopify/Product/${text}`;
+}
+
+function toVariantGid(value: unknown) {
+  const text = String(value || "");
+  if (!text) return "";
+  return text.startsWith("gid://shopify/ProductVariant/")
+    ? text
+    : `gid://shopify/ProductVariant/${text}`;
 }
 
 function getErrorMessage(error: unknown) {

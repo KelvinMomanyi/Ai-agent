@@ -3,6 +3,13 @@ import { callAi, getLastAiProvider, streamOpenAIChat, STREAM_PROVIDERS } from ".
 import prisma from "../db.server";
 import { getProductsByIds } from "../models/product.server";
 import { getActiveBundlesForProduct } from "../models/bundle.server";
+import {
+  filterBundlesToCatalog,
+  filterCatalogProducts,
+  getFullProductCatalog,
+  sanitizeAssistantReplyToCatalog,
+  type CatalogProduct,
+} from "../models/catalogGuard.server";
 import { getShopperSession, upsertShopperSessionFromEvents } from "../models/session.server";
 import { cacheKeys, incrementRateLimit } from "../redis.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
@@ -24,14 +31,10 @@ type BundleSummary = {
   name: string;
   discountType: string;
   discountValue: string;
-  items: Array<{ productId: string; product?: { title: string } | null }>;
-};
-
-type CatalogProduct = {
-  title: string;
-  handle: string;
-  price: unknown;
-  tags: string[];
+  items: Array<{
+    productId: string;
+    product?: { id: string; title: string } | null;
+  }>;
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -118,28 +121,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
 
   const storeName = shop.replace(/\.[^.]+\.myshopify\.com$/, "").replace(/[-_]/g, " ");
-  const [cartProducts, rawBundles, catalogProducts] = await Promise.all([
+  const [cartProducts, rawBundles, fullCatalog] = await Promise.all([
     getProductsByIds(shop, session.cartProductIds),
-    getActiveBundlesForProduct(shop, session.viewedProductIds[0]),
-    prisma.product.findMany({
-      where: { shop },
-      select: {
-        id: true,
-        title: true,
-        handle: true,
-        price: true,
-        tags: true,
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 50,
+    getActiveBundlesForProduct(shop, session.viewedProductIds[0], {
+      excludeProductIds: settings.blockedProductIds,
     }),
+    getFullProductCatalog(shop),
   ]);
+  const catalogProducts = filterCatalogProducts(
+    fullCatalog,
+    settings.blockedProductIds,
+  );
 
   const cartInfo = cartProducts.length > 0
     ? cartProducts.map((p) => `- ${p.title} ($${p.price})`).join("\n")
     : "Cart is empty";
 
-  const bundles = (rawBundles as unknown as BundleSummary[]);
+  const bundles = filterBundlesToCatalog(
+    rawBundles as unknown as BundleSummary[],
+    catalogProducts,
+  );
   const bundlesInfo = bundles.length > 0
     ? bundles.map((b) => {
         const items = b.items.map((i) => `  - ${i.product?.title || i.productId}`).join("\n");
@@ -148,9 +149,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }).join("\n")
     : "No active bundles right now.";
 
-  const catalogInfo = catalogProducts.map((p) =>
-    `- ${p.title} | $${p.price} | /products/${p.handle} | tags: ${p.tags.join(", ")}`
-  ).join("\n");
+  const catalogInfo =
+    catalogProducts.length > 0
+      ? catalogProducts
+          .map(
+            (p) =>
+              `- ${p.title} | $${p.price} | /products/${p.handle} | tags: ${p.tags.join(", ")}`,
+          )
+          .join("\n")
+      : "No synced catalog products are available.";
 
   const brandVoiceSection = settings.brandVoice
     ? `Brand Voice:\n${settings.brandVoice}`
@@ -214,43 +221,50 @@ ${brandVoiceSection}`;
       };
 
       try {
-        let sentToken = false;
-
         for (const cfg of STREAM_PROVIDERS) {
           if (!process.env[cfg.envKey]) continue;
           try {
+            let providerReply = "";
             for await (const delta of streamOpenAIChat(messages, {
               apiKey: process.env[cfg.envKey]!,
               url: cfg.url,
               model: cfg.model,
             })) {
-              sentToken = true;
               provider = cfg.name;
-              finalReply += delta;
-              send({ delta });
+              providerReply += delta;
             }
-            break;
+            if (providerReply) {
+              finalReply = providerReply;
+              break;
+            }
           } catch (error) {
             console.log(`${cfg.name} chat stream skipped:`, getErrorMessage(error));
-            if (sentToken) {
-              await persistAssistantMessage(shop, session.id, finalReply, provider);
-              done();
-              return;
-            }
           }
         }
 
+        const fallbackReply = buildCatalogFallbackReply(
+          userMessage,
+          catalogProducts,
+          bundles,
+          messageIntent,
+        );
         if (!finalReply) {
-          const geminiReply =
-            (await callAi(systemPrompt, userMessage)) ||
-            buildCatalogFallbackReply(userMessage, catalogProducts, bundles, messageIntent);
+          const geminiReply = (await callAi(systemPrompt, userMessage)) || fallbackReply;
           provider =
             getLastAiProvider() === "none"
               ? "heuristic"
               : (getLastAiProvider() as "gemini" | "groq" | "mistral" | "deepseek");
           finalReply = geminiReply;
-          send({ delta: geminiReply });
         }
+
+        finalReply = sanitizeAssistantReplyToCatalog({
+          reply: finalReply,
+          userMessage,
+          messageIntent,
+          catalog: catalogProducts,
+          fallback: fallbackReply,
+        });
+        send({ delta: finalReply });
 
         await persistAssistantMessage(shop, session.id, finalReply, provider);
         done();

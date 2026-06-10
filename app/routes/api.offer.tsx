@@ -2,6 +2,7 @@ import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-r
 import prisma from "../db.server";
 import { getOfferDecision } from "../ai/decisionEngine.server";
 import type { CurrentPageType, OfferDecision } from "../ai/types";
+import { enforceCatalogBackedDecision } from "../models/catalogGuard.server";
 import { buildOfferCandidates, createOfferRecord } from "../models/offer.server";
 import {
   getShopperSession,
@@ -71,21 +72,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         (body.cartProductIds || []).join(",") || "empty",
       ].join(":"),
     );
+    const settings = await getCachedAppSettings(shop);
     const cached = await getJsonCache<OfferDecision>(cacheKey);
-    if (cached) return json(cached, { headers: withCors() });
+    if (cached) {
+      const safeCached = await enforceCatalogBackedDecision({
+        shop,
+        decision: cached,
+        excludedProductIds: settings.blockedProductIds,
+      });
+      return json(safeCached, { headers: withCors() });
+    }
 
-    // Batch: fetch session + settings in parallel
-    const [session, settings] = await Promise.all([
-      getShopperSession(shop, sessionId).then(async (s) => {
-        if (s) return s;
-        return upsertShopperSessionFromEvents({
-          shop,
-          sessionId,
-          events: [{ type: "session_sync", cartProductIds: body.cartProductIds || [] }],
-        });
-      }),
-      getCachedAppSettings(shop),
-    ]);
+    const session = await getShopperSession(shop, sessionId).then(async (s) => {
+      if (s) return s;
+      return upsertShopperSessionFromEvents({
+        shop,
+        sessionId,
+        events: [{ type: "session_sync", cartProductIds: body.cartProductIds || [] }],
+      });
+    });
 
     const snapshot = toShopperSessionSnapshot(session);
     const requestCartProductIds = body.cartProductIds || session.cartProductIds;
@@ -104,8 +109,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       shop,
       session: decisionSession,
       currentProductId: body.currentProductId,
+      excludeProductIds: settings.blockedProductIds,
     });
-    const decision = await getOfferDecision({
+    const rawDecision = await getOfferDecision({
       shop,
       session: decisionSession,
       currentProductId: body.currentProductId,
@@ -126,6 +132,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           cartValue: body.cartValue,
         },
       },
+    });
+    const decision = await enforceCatalogBackedDecision({
+      shop,
+      decision: rawDecision,
+      excludedProductIds: settings.blockedProductIds,
     });
     const abVariant = decision.widgetType
       ? await getCachedExperimentVariant(shop, decision.widgetType, sessionId)

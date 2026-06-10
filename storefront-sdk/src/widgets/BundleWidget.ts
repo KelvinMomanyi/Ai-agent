@@ -4,7 +4,6 @@ import {
   getProducts,
   money,
   text,
-  type WidgetPayload,
 } from "./BaseWidget";
 
 export class BundleWidget extends BaseWidget {
@@ -17,6 +16,8 @@ export class BundleWidget extends BaseWidget {
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
     const products = getProducts(this.payload);
     const currency = String((window as any).AOVBoost?.currency || "USD");
+    const canAddBundle = products.length > 0 && products.every((product) => product.variantId);
+    const firstProductHandle = products.find((product) => product.handle)?.handle;
     const total = products.reduce((sum, product) => sum + Number(product.price || 0) * Number(product.quantity || 1), 0);
     const discountValue = Number(bundle.discountValue || 0);
     const discounted =
@@ -58,7 +59,13 @@ export class BundleWidget extends BaseWidget {
             <strong>${money(discounted, currency)}</strong>
           </div>
           <div class="actions">
-            <button type="button" class="primary" data-add>${text(copy.ctaText || "Add bundle to cart")}</button>
+            ${
+              canAddBundle
+                ? `<button type="button" class="primary" data-add>${text(copy.ctaText || "Add bundle to cart")}</button>`
+                : firstProductHandle
+                  ? `<a class="primary" href="/products/${text(firstProductHandle)}">${text(copy.ctaText || "View bundle products")}</a>`
+                  : ""
+            }
           </div>
         </div>
       </section>

@@ -1,4 +1,5 @@
 import type { OfferDecision, OfferCandidate, ShopperSessionSnapshot } from "../ai/types";
+import { catalogProductToWidgetProduct } from "./catalogGuard.server";
 import prisma from "../db.server";
 import { getActiveBundlesForProduct } from "./bundle.server";
 import { getTopAffinitiesOrFallback } from "./product.server";
@@ -7,6 +8,7 @@ export async function buildOfferCandidates(input: {
   shop: string;
   session: ShopperSessionSnapshot;
   currentProductId?: string;
+  excludeProductIds?: string[];
 }): Promise<OfferCandidate[]> {
   const recommendationSourceProductId =
     input.currentProductId ||
@@ -17,9 +19,14 @@ export async function buildOfferCandidates(input: {
       shop: input.shop,
       productId: recommendationSourceProductId,
       limit: 5,
-      excludeProductIds: input.session.cartProductIds,
+      excludeProductIds: [
+        ...input.session.cartProductIds,
+        ...(input.excludeProductIds || []),
+      ],
     }),
-    getActiveBundlesForProduct(input.shop, input.currentProductId),
+    getActiveBundlesForProduct(input.shop, input.currentProductId, {
+      excludeProductIds: input.excludeProductIds,
+    }),
   ]);
 
   const bundleCandidates: OfferCandidate[] = bundles.map((bundle) => ({
@@ -33,10 +40,7 @@ export async function buildOfferCandidates(input: {
     payload: {
       bundle,
       items: bundle.items.map((item) => ({
-        id: item.product.id,
-        title: item.product.title,
-        imageUrl: item.product.imageUrl,
-        price: item.product.price.toString(),
+        ...catalogProductToWidgetProduct(item.product),
         quantity: item.quantity,
       })),
     },
@@ -52,7 +56,9 @@ export async function buildOfferCandidates(input: {
     score: affinity.score,
     affinityScore: affinity.score,
     payload: {
-      product: (affinity as any).target,
+      product: (affinity as any).target
+        ? catalogProductToWidgetProduct((affinity as any).target)
+        : null,
       affinity: {
         score: affinity.score,
         reason: affinity.reason,

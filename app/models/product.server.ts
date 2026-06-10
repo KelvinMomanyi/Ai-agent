@@ -130,7 +130,6 @@ async function getCatalogFallbackRecommendations(input: {
       },
       include: { orderStats: true },
       orderBy: [{ updatedAt: "desc" }],
-      take: 100,
     }),
   ]);
 
@@ -238,7 +237,6 @@ export async function recomputeAffinities(
       id: { not: productId },
     },
     include: { orderStats: true },
-    take: 500,
   });
 
   await Promise.all(
@@ -332,6 +330,7 @@ export async function syncProductsFromAdmin(
   let cursor: string | null = null;
   let hasNextPage = true;
   let synced = 0;
+  const syncedProductIds = new Set<string>();
   await onProgress?.({ done: 0, status: "fetching" });
 
   while (hasNextPage) {
@@ -351,7 +350,7 @@ export async function syncProductsFromAdmin(
               featuredImage { url }
               collections(first: 50) { edges { node { id } } }
               variants(first: 1) {
-                edges { node { price compareAtPrice } }
+                edges { node { id price compareAtPrice } }
               }
               metafields(first: 20) {
                 edges { node { namespace key value type } }
@@ -368,6 +367,7 @@ export async function syncProductsFromAdmin(
 
     for (const edge of edges) {
       await upsertProduct(shop, mapGraphqlProduct(edge.node));
+      if (edge.node?.id) syncedProductIds.add(edge.node.id);
       synced += 1;
     }
     await onProgress?.({
@@ -379,14 +379,24 @@ export async function syncProductsFromAdmin(
     hasNextPage = Boolean(result.data?.products?.pageInfo?.hasNextPage);
   }
 
-  const products = await prisma.product.findMany({ where: { shop }, take: 1000 });
+  await onProgress?.({ done: synced, status: "pruning_deleted" });
+  const deleted = syncedProductIds.size
+    ? await prisma.product.deleteMany({
+        where: {
+          shop,
+          id: { notIn: Array.from(syncedProductIds) },
+        },
+      })
+    : await prisma.product.deleteMany({ where: { shop } });
+
+  const products = await prisma.product.findMany({ where: { shop } });
   await onProgress?.({ total: products.length, done: synced, status: "building_affinities" });
   for (const product of products) {
     await recomputeInitialAffinities(shop, product, products);
     await onProgress?.({ total: products.length, done: synced, status: "building_affinities" });
   }
 
-  return { synced };
+  return { synced, deleted: deleted.count };
 }
 
 async function recomputeInitialAffinities(
@@ -461,6 +471,18 @@ function getAffinityReason(source: Product, target: Product, orderCount: number)
 
 function mapGraphqlProduct(node: any): ShopifyProductInput {
   const variant = node.variants?.edges?.[0]?.node;
+  const metafields = Object.fromEntries(
+    (node.metafields?.edges || []).map((edge: any) => [
+      `${edge.node.namespace}.${edge.node.key}`,
+      { value: edge.node.value, type: edge.node.type },
+    ]),
+  );
+  if (variant?.id) {
+    metafields["aovboost.defaultVariantId"] = {
+      value: variant.id,
+      type: "single_line_text_field",
+    };
+  }
 
   return {
     id: node.id,
@@ -473,12 +495,7 @@ function mapGraphqlProduct(node: any): ShopifyProductInput {
     compareAtPrice: variant?.compareAtPrice || null,
     imageUrl: node.featuredImage?.url || null,
     collectionIds: (node.collections?.edges || []).map((edge: any) => edge.node.id),
-    metafields: Object.fromEntries(
-      (node.metafields?.edges || []).map((edge: any) => [
-        `${edge.node.namespace}.${edge.node.key}`,
-        { value: edge.node.value, type: edge.node.type },
-      ]),
-    ),
+    metafields,
   };
 }
 

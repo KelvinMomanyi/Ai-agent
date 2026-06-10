@@ -118,7 +118,7 @@ export function getProducts(payload: WidgetPayload): any[] {
     const product = item.product || item.target || item;
     return {
       id: product.id || item.productId || item.targetId,
-      variantId: product.variantId || item.variantId || item.id,
+      variantId: product.variantId || item.variantId || "",
       title: product.title || item.title || "Recommended product",
       handle: product.handle || item.handle || "",
       imageUrl: product.imageUrl || product.image || item.imageUrl || item.image,

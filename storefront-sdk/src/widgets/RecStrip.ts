@@ -41,7 +41,13 @@ export class RecStrip extends BaseWidget {
                   ${product.imageUrl ? `<img data-src="${text(product.imageUrl)}" alt="${text(product.title)}">` : ""}
                   <p class="product-name">${text(product.title)}</p>
                   <span class="price">${text(product.price ? money(product.price, currency) : "")}</span>
-                  <button type="button" class="primary" data-add="${text(product.variantId)}">Add to cart</button>
+                  ${
+                    product.variantId
+                      ? `<button type="button" class="primary" data-add="${text(product.variantId)}">Add to cart</button>`
+                      : product.handle
+                        ? `<a class="primary" href="/products/${text(product.handle)}">View product</a>`
+                        : ""
+                  }
                 </article>
               `,
             )

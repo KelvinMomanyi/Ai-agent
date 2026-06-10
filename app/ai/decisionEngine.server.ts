@@ -3,6 +3,7 @@ import { generateWidgetCopy } from "./copyWriter.server";
 import { DECISION_ENGINE_SYSTEM } from "./prompts";
 import type { DecisionInput, OfferDecision } from "./types";
 import { getActiveBundlesForProduct } from "../models/bundle.server";
+import { catalogProductToWidgetProduct } from "../models/catalogGuard.server";
 import { getTopAffinitiesOrFallback } from "../models/product.server";
 
 const WIDGET_TYPES = new Set([
@@ -31,9 +32,14 @@ export async function getOfferDecision(
       shop: input.shop,
       productId: recommendationSourceProductId,
       limit: 5,
-      excludeProductIds: input.cartProductIds,
+      excludeProductIds: [
+        ...input.cartProductIds,
+        ...input.settings.blockedProductIds,
+      ],
     }),
-    getActiveBundlesForProduct(input.shop, input.currentProductId),
+    getActiveBundlesForProduct(input.shop, input.currentProductId, {
+      excludeProductIds: input.settings.blockedProductIds,
+    }),
   ]);
 
   const context = {
@@ -458,10 +464,14 @@ function getProductsFromBundle(bundle: Record<string, unknown>) {
       const record = item as Record<string, unknown>;
       const product = asRecord(record.product);
       if (!product.id || !product.title) return null;
+      const safeProduct = catalogProductToWidgetProduct(product as any);
 
       return {
-        product,
-        productId: String(record.productId || product.id),
+        ...record,
+        product: safeProduct,
+        productId: safeProduct.id,
+        targetId: safeProduct.id,
+        variantId: safeProduct.variantId,
         quantity: Number(record.quantity || 1),
       };
     })
@@ -475,7 +485,19 @@ function getProductsFromAffinities(affinities: unknown[]) {
       const target = asRecord(record.target);
       return Boolean(record.targetId && target.id && target.title);
     })
-    .map((affinity) => affinity as Record<string, unknown>);
+    .map((affinity) => {
+      const record = affinity as Record<string, unknown>;
+      const target = asRecord(record.target);
+      const safeProduct = catalogProductToWidgetProduct(target as any);
+      return {
+        ...record,
+        target: safeProduct,
+        product: safeProduct,
+        targetId: safeProduct.id,
+        productId: safeProduct.id,
+        variantId: safeProduct.variantId,
+      };
+    });
 }
 
 function omitUnsafeProductPayload(payload: Record<string, unknown>) {

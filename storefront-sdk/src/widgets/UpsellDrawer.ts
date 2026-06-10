@@ -4,7 +4,6 @@ import {
   getProducts,
   money,
   text,
-  type WidgetPayload,
 } from "./BaseWidget";
 
 export class UpsellDrawer extends BaseWidget {
@@ -62,7 +61,13 @@ export class UpsellDrawer extends BaseWidget {
                       <span class="price">${text(product.price ? money(product.price, currency) : "")}</span>
                     </div>
                     <p class="reason">${text(product.reason || copy.whyThisGoes || "It pairs well with your cart.")}</p>
-                    <button type="button" class="primary" data-add="${text(product.variantId)}">Add to cart</button>
+                    ${
+                      product.variantId
+                        ? `<button type="button" class="primary" data-add="${text(product.variantId)}">Add to cart</button>`
+                        : product.handle
+                          ? `<a class="primary" href="/products/${text(product.handle)}">View product</a>`
+                          : ""
+                    }
                   </div>
                 </article>
               `,
