@@ -200,6 +200,37 @@ export class SessionManager {
     this.syncGlobalSdkAuth();
   }
 
+  applyStorefrontSession(value: unknown): boolean {
+    const session = asStorefrontSession(value);
+    if (
+      !session ||
+      session.shop !== this.shop ||
+      !session.sessionId ||
+      !session.sessionToken ||
+      Number(session.expiresAt || 0) <= Math.floor(Date.now() / 1000) + 60
+    ) {
+      return false;
+    }
+
+    this.anonymousId = session.sessionId;
+    this.sessionToken = session.sessionToken;
+    this.storeStorefrontSession(session);
+    this.syncGlobalSdkAuth();
+    return true;
+  }
+
+  async applySessionFromResponse(response: Response): Promise<boolean> {
+    try {
+      const data = await response.clone().json();
+      const record = asRecord(data);
+      return this.applyStorefrontSession(
+        record?.storefrontSession || record?.session || data,
+      );
+    } catch {
+      return false;
+    }
+  }
+
   syncGlobalSdkAuth(): void {
     const sdk = (window as any).AOVBoostSDK;
     if (!sdk || typeof sdk !== "object") return;
@@ -283,13 +314,9 @@ export class SessionManager {
     if (!response.ok) throw new Error(`Session bootstrap failed: ${response.status}`);
 
     const next = (await response.json()) as StoredStorefrontSession;
-    if (!next.sessionId || !next.sessionToken || next.shop !== this.shop) {
+    if (!this.applyStorefrontSession(next)) {
       throw new Error("Invalid storefront session bootstrap response");
     }
-
-    this.anonymousId = next.sessionId;
-    this.sessionToken = next.sessionToken;
-    this.storeStorefrontSession(next);
   }
 
   private getStoredStorefrontSession(): StoredStorefrontSession | null {
@@ -344,6 +371,24 @@ export class SessionManager {
     return Math.round((Date.now() - this.startedAt) / 1000);
   }
 
+}
+
+function asStorefrontSession(value: unknown): StoredStorefrontSession | null {
+  const record = asRecord(value);
+  if (!record) return null;
+
+  return {
+    shop: String(record.shop || ""),
+    sessionId: String(record.sessionId || ""),
+    sessionToken: String(record.sessionToken || ""),
+    expiresAt: Number(record.expiresAt || 0),
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function getProductId(event: StorefrontEvent) {

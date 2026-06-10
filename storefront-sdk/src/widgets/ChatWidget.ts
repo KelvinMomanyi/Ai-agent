@@ -159,7 +159,8 @@ export class ChatWidget extends BaseWidget {
     try {
       let response = await this.requestChat(value);
       if (response.status === 401) {
-        await (window as any).AOVBoostSDK?.refreshSession?.();
+        const recovered = await this.applyRecoverySession(response);
+        if (!recovered) await (window as any).AOVBoostSDK?.refreshSession?.();
         response = await this.requestChat(value);
       }
 
@@ -237,6 +238,17 @@ export class ChatWidget extends BaseWidget {
         messageHistory: this.messages.slice(0, -2),
       }),
     });
+  }
+
+  private async applyRecoverySession(response: Response) {
+    try {
+      const data = await response.clone().json();
+      const session = data?.storefrontSession || data?.session;
+      const applySession = (window as any).AOVBoostSDK?.applySession;
+      return typeof applySession === "function" ? Boolean(applySession(session)) : false;
+    } catch {
+      return false;
+    }
   }
 
   private showTyping() {

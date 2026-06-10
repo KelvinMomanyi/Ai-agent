@@ -18,6 +18,7 @@ import {
   isStorefrontAuthError,
   logStorefrontAuthError,
 } from "../utils/storefrontAuth.server";
+import { getStorefrontSessionRecovery } from "../utils/storefrontSessionRecovery.server";
 
 type ChatBody = {
   sessionId?: string;
@@ -57,8 +58,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     auth = authenticateStorefrontRequest(request, body);
   } catch (error) {
     if (isStorefrontAuthError(error)) {
+      const storefrontSession = await getStorefrontSessionRecovery(request);
       logStorefrontAuthError(request, "api.chat", error);
-      return json({ error: "Unauthorized" }, { status: error.status, headers: withCors() });
+      return json(
+        {
+          error: "Unauthorized",
+          reauth: Boolean(storefrontSession),
+          storefrontSession,
+        },
+        {
+          status: error.status,
+          headers: withCors(
+            storefrontSession ? { "X-AOVBoost-Reauth": "true" } : undefined,
+          ),
+        },
+      );
     }
     throw error;
   }

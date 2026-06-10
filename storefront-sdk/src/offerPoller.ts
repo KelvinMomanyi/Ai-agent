@@ -72,7 +72,10 @@ export class OfferPoller {
       };
 
       if (!this.options.sessionManager.getAuthPayload().sessionToken) {
-        return this.mountLocalFallback(trigger, triggerPayload);
+        await this.options.sessionManager.refreshAuth();
+        if (!this.options.sessionManager.getAuthPayload().sessionToken) {
+          return this.mountLocalFallback(trigger, triggerPayload);
+        }
       }
 
       let response = await fetch(this.endpoint("/offer"), {
@@ -81,12 +84,17 @@ export class OfferPoller {
           "Content-Type": "application/json",
           "X-AOVBoost-Shop": this.options.shop,
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          ...body,
+          ...this.options.sessionManager.getAuthPayload(),
+        }),
         keepalive: true,
       });
 
       if (response.status === 401) {
-        await this.options.sessionManager.refreshAuth();
+        const recovered =
+          await this.options.sessionManager.applySessionFromResponse(response);
+        if (!recovered) await this.options.sessionManager.refreshAuth();
         const refreshedAuth = this.options.sessionManager.getAuthPayload();
         if (!refreshedAuth.sessionToken) {
           return this.mountLocalFallback(trigger, triggerPayload);

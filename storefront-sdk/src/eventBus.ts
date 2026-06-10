@@ -110,7 +110,9 @@ export class EventBus {
       });
 
       if (response.status === 401 && !retriedAuth) {
-        await this.options.sessionManager.refreshAuth();
+        const recovered =
+          await this.options.sessionManager.applySessionFromResponse(response);
+        if (!recovered) await this.options.sessionManager.refreshAuth();
         if (!this.options.sessionManager.getAuthPayload().sessionToken) return;
         await this.postEvents(events, true);
         return;

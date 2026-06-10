@@ -21,6 +21,7 @@ import {
   isStorefrontAuthError,
   logStorefrontAuthError,
 } from "../utils/storefrontAuth.server";
+import { getStorefrontSessionRecovery } from "../utils/storefrontSessionRecovery.server";
 
 type OfferBody = {
   sessionId?: string;
@@ -172,10 +173,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json(response, { headers: withCors() });
   } catch (error) {
     if (isStorefrontAuthError(error)) {
+      const storefrontSession = await getStorefrontSessionRecovery(request);
       logStorefrontAuthError(request, "api.offer", error);
       return json(
-        { widgetType: null, payload: {}, reasoning: "unauthorized", confidence: 0 },
-        { status: error.status, headers: withCors() },
+        {
+          widgetType: null,
+          payload: {},
+          reasoning: "unauthorized",
+          confidence: 0,
+          reauth: Boolean(storefrontSession),
+          storefrontSession,
+        },
+        {
+          status: error.status,
+          headers: withCors(
+            storefrontSession ? { "X-AOVBoost-Reauth": "true" } : undefined,
+          ),
+        },
       );
     }
 

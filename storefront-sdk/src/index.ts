@@ -25,6 +25,7 @@ declare global {
       sessionId: string;
       sessionToken: string;
       refreshSession: () => Promise<void>;
+      applySession: (session: unknown) => boolean;
       track: (type: string, payload?: Record<string, unknown>) => void;
       trigger: (type: string, payload?: Record<string, unknown>) => void;
       requestOffer: (
@@ -85,6 +86,7 @@ async function start(): Promise<void> {
         await sessionManager.refreshAuth();
         sessionManager.syncGlobalSdkAuth();
       },
+      applySession: (session) => sessionManager.applyStorefrontSession(session),
       track: (type, payload = {}) => eventBus.track(type, payload),
       trigger: (type, payload = {}) => triggerRouter.trigger(type, payload),
       requestOffer: (trigger = "global", payload = {}) =>
