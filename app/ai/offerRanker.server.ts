@@ -1,4 +1,4 @@
-import { callAi, parseAiJson } from "./client.server";
+import { callAI, parseAiJson } from "./client.server";
 import { OFFER_RANKER_SYSTEM } from "./prompts";
 import type { OfferCandidate, ShopperSessionSnapshot } from "./types";
 
@@ -14,9 +14,10 @@ export async function rankOffers(
     .slice()
     .sort((left, right) => scoreOf(right) - scoreOf(left));
 
-  const raw = await callAi(
-    OFFER_RANKER_SYSTEM,
-    JSON.stringify({
+  const aiResult = await callAI({
+    triggerName: "offer_ranker",
+    systemPrompt: OFFER_RANKER_SYSTEM,
+    userPrompt: JSON.stringify({
       session,
       candidates: candidates.map((candidate) => ({
         id: candidate.id,
@@ -27,8 +28,12 @@ export async function rankOffers(
         payload: candidate.payload,
       })),
     }),
-  );
-  const parsed = parseAiJson<RankedOffer[]>(raw);
+    schemaType: "json",
+    maxTokens: 200,
+    timeoutProfile: "normal",
+    fallback: JSON.stringify(fallback.map((candidate) => candidate.id)),
+  });
+  const parsed = parseAiJson<RankedOffer[]>(aiResult.content);
   if (!Array.isArray(parsed)) return fallback;
 
   const ids = parsed.map((entry) =>

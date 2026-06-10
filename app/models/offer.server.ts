@@ -1,8 +1,13 @@
+import type { Prisma } from "@prisma/client";
 import type { OfferDecision, OfferCandidate, ShopperSessionSnapshot } from "../ai/types";
 import { catalogProductToWidgetProduct } from "./catalogGuard.server";
 import prisma from "../db.server";
 import { getActiveBundlesForProduct } from "./bundle.server";
-import { getTopAffinitiesOrFallback } from "./product.server";
+import {
+  getCatalogSnapshot,
+  pickCatalogProducts,
+  type CatalogCacheProduct,
+} from "./catalogCache.server";
 
 export async function buildOfferCandidates(input: {
   shop: string;
@@ -14,20 +19,20 @@ export async function buildOfferCandidates(input: {
     input.currentProductId ||
     input.session.cartProductIds[0] ||
     input.session.viewedProductIds.at(-1);
-  const [affinities, bundles] = await Promise.all([
-    getTopAffinitiesOrFallback({
-      shop: input.shop,
-      productId: recommendationSourceProductId,
-      limit: 5,
-      excludeProductIds: [
-        ...input.session.cartProductIds,
-        ...(input.excludeProductIds || []),
-      ],
-    }),
+  const [catalog, bundles] = await Promise.all([
+    getCatalogSnapshot(input.shop),
     getActiveBundlesForProduct(input.shop, input.currentProductId, {
       excludeProductIds: input.excludeProductIds,
     }),
   ]);
+  const catalogProducts = pickCatalogProducts({
+    catalog,
+    sourceProductId: recommendationSourceProductId,
+    cartProductIds: input.session.cartProductIds,
+    excludeProductIds: input.excludeProductIds,
+    query: String(input.session.context?.lastSearchQuery || ""),
+    limit: 5,
+  });
 
   const bundleCandidates: OfferCandidate[] = bundles.map((bundle) => ({
     id: bundle.id,
@@ -46,23 +51,21 @@ export async function buildOfferCandidates(input: {
     },
   }));
 
-  const affinityCandidates: OfferCandidate[] = affinities.map((affinity) => ({
-    id: affinity.targetId,
+  const affinityCandidates: OfferCandidate[] = catalogProducts.map((product, index) => ({
+    id: product.id,
     type: "product",
     widgetType:
       input.session.cartProductIds.length > 0 ? "upsell_drawer" : "rec_strip",
-    productId: affinity.targetId,
-    title: (affinity as any).target?.title || affinity.targetId,
-    score: affinity.score,
-    affinityScore: affinity.score,
+    productId: product.id,
+    title: product.title,
+    score: scoreCatalogCandidate(product, index, recommendationSourceProductId),
+    affinityScore: scoreCatalogCandidate(product, index, recommendationSourceProductId),
     payload: {
-      product: (affinity as any).target
-        ? catalogProductToWidgetProduct((affinity as any).target)
-        : null,
+      product: catalogProductToWidgetProduct(product),
       affinity: {
-        score: affinity.score,
-        reason: affinity.reason,
-        orderCount: affinity.orderCount,
+        score: scoreCatalogCandidate(product, index, recommendationSourceProductId),
+        reason: "Selected from the synced store catalog.",
+        orderCount: 0,
       },
     },
   }));
@@ -70,6 +73,16 @@ export async function buildOfferCandidates(input: {
   return [...bundleCandidates, ...affinityCandidates].sort(
     (left, right) => right.score - left.score,
   );
+}
+
+function scoreCatalogCandidate(
+  product: CatalogCacheProduct,
+  index: number,
+  sourceProductId?: string,
+) {
+  const sourceBoost = sourceProductId ? 0.2 : 0;
+  const categoryBoost = product.category && product.category !== "uncategorized" ? 0.1 : 0;
+  return Math.max(0.25, 0.72 + sourceBoost + categoryBoost - index * 0.04);
 }
 
 export async function createOfferRecord(input: {
@@ -86,8 +99,8 @@ export async function createOfferRecord(input: {
       shop: input.shop,
       sessionId: input.sessionId,
       widgetType: input.decision.widgetType,
-      payload: input.decision.payload,
-      triggerContext: input.triggerContext,
+      payload: input.decision.payload as Prisma.InputJsonValue,
+      triggerContext: input.triggerContext as Prisma.InputJsonValue,
       aiProvider: input.decision.aiProvider,
       abVariant: input.abVariant || null,
     },

@@ -1,5 +1,5 @@
 import type { AppSettings } from "@prisma/client";
-import { callAi, parseAiJson } from "./client.server";
+import { callAI, parseAiJson } from "./client.server";
 import { COPY_WRITER_SYSTEM } from "./prompts";
 import type { WidgetCopy } from "./types";
 
@@ -25,16 +25,21 @@ export async function generateWidgetCopy(
     .replace("{offerDetails}", JSON.stringify(offerDetails))
     .replace("{brandVoiceSection}", brandVoiceSection);
 
-  const raw = await callAi(
+  const aiResult = await callAI({
+    triggerName: `copy:${widgetType}`,
     systemPrompt,
-    JSON.stringify({
+    userPrompt: JSON.stringify({
       widgetType,
       productContext,
       offerDetails,
       expectedSchema: getSchemaHint(widgetType),
     }),
-  );
-  const parsed = parseAiJson<Record<string, unknown>>(raw);
+    schemaType: "json",
+    maxTokens: 180,
+    timeoutProfile: "normal",
+    fallback: JSON.stringify(fallback),
+  });
+  const parsed = parseAiJson<Record<string, unknown>>(aiResult.content);
 
   return normalizeCopy(widgetType, parsed, fallback);
 }

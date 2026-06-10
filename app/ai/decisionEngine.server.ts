@@ -1,10 +1,14 @@
-import { callAi, getLastAiProvider, parseAiJson, type AiProvider } from "./client.server";
+import { callAI, parseAiJson, type AiGatewayRequest, type AiProvider } from "./client.server";
 import { generateWidgetCopy } from "./copyWriter.server";
 import { DECISION_ENGINE_SYSTEM } from "./prompts";
 import type { DecisionInput, OfferDecision } from "./types";
 import { getActiveBundlesForProduct } from "../models/bundle.server";
 import { catalogProductToWidgetProduct } from "../models/catalogGuard.server";
-import { getTopAffinitiesOrFallback } from "../models/product.server";
+import {
+  getCatalogSnapshot,
+  pickCatalogProducts,
+  type CatalogCacheProduct,
+} from "../models/catalogCache.server";
 
 const WIDGET_TYPES = new Set([
   "chat",
@@ -27,20 +31,25 @@ export async function getOfferDecision(
     input.currentProductId ||
     input.cartProductIds[0] ||
     input.session.viewedProductIds.at(-1);
-  const [affinities, bundles] = await Promise.all([
-    getTopAffinitiesOrFallback({
-      shop: input.shop,
-      productId: recommendationSourceProductId,
-      limit: 5,
-      excludeProductIds: [
-        ...input.cartProductIds,
-        ...input.settings.blockedProductIds,
-      ],
-    }),
+  const [catalog, bundles] = await Promise.all([
+    getCatalogSnapshot(input.shop),
     getActiveBundlesForProduct(input.shop, input.currentProductId, {
       excludeProductIds: input.settings.blockedProductIds,
     }),
   ]);
+  const promptCatalogProducts = pickCatalogProducts({
+    catalog,
+    sourceProductId: recommendationSourceProductId,
+    cartProductIds: input.cartProductIds,
+    excludeProductIds: input.settings.blockedProductIds,
+    query: getTriggerQuery(input.trigger?.payload),
+    limit: 35,
+  });
+  const affinities = promptCatalogProducts
+    .slice(0, 5)
+    .map((product, index) =>
+      catalogProductToAffinity(product, index, catalog.byId[recommendationSourceProductId || ""]),
+    );
 
   const context = {
     shop: input.shop,
@@ -66,6 +75,11 @@ export async function getOfferDecision(
     candidates: input.candidates,
     affinityProducts: affinities,
     activeBundles: bundles,
+    catalogContext: {
+      refreshedAt: catalog.refreshedAt,
+      productCount: catalog.productCount,
+      candidates: promptCatalogProducts.map(toPromptCatalogProduct),
+    },
     responseSchema: {
       widgetType:
         "chat|toast|countdown_banner|inline_alert|bundle|upsell_drawer|discount_nudge|rec_strip|social_proof|exit_intent|post_purchase|null",
@@ -76,16 +90,32 @@ export async function getOfferDecision(
   };
 
   const fallbackDecision = heuristicFallback(input, bundles.length);
-  const hasNamedTrigger = Boolean(input.trigger?.type && input.trigger.type !== "manual");
   let decision = fallbackDecision;
 
-  if (!hasNamedTrigger || !fallbackDecision.widgetType) {
-    const raw = await callAi(DECISION_ENGINE_SYSTEM, JSON.stringify(context));
+  if (shouldAskAi(input.trigger?.type, fallbackDecision)) {
+    const aiResult = await callAI({
+      triggerName: input.trigger?.type || "manual",
+      systemPrompt: `${DECISION_ENGINE_SYSTEM}\n${getTriggerPromptGuidance(input.trigger?.type)}`,
+      userPrompt: JSON.stringify(context),
+      schemaType: "json",
+      maxTokens: getDecisionMaxTokens(input.trigger?.type),
+      timeoutProfile: getTimeoutProfile(input.trigger?.type),
+      fallback: JSON.stringify(fallbackDecision),
+    });
     const parsed = normalizeDecision(
-      parseAiJson<Partial<OfferDecision>>(raw),
-      getLastAiProvider() === "none" ? "heuristic" : (getLastAiProvider() as Exclude<AiProvider, "none">),
+      parseAiJson<Partial<OfferDecision>>(aiResult.content),
+      toDecisionProvider(aiResult.provider),
     );
     decision = parsed ?? fallbackDecision;
+
+    console.log("AOVBoost trigger decision:", {
+      triggerName: input.trigger?.type || "manual",
+      provider: aiResult.provider,
+      executionMs: aiResult.executionMs,
+      fallbackUsed: aiResult.fallbackUsed,
+      outputFields: Object.keys(decision.payload || {}),
+      widgetType: decision.widgetType,
+    });
   }
 
   if (!decision.widgetType) return noOffer(decision.reasoning, decision.aiProvider);
@@ -164,6 +194,136 @@ function normalizeDecision(
           : 0,
     aiProvider: provider,
   };
+}
+
+function shouldAskAi(_triggerType: string | undefined, _fallbackDecision: OfferDecision) {
+  return process.env.AOVBOOST_DISABLE_AI !== "true";
+}
+
+function toDecisionProvider(
+  provider: AiProvider,
+): "gemini" | "groq" | "mistral" | "deepseek" | "heuristic" {
+  return provider === "none" ? "heuristic" : provider;
+}
+
+function getTimeoutProfile(
+  triggerType?: string,
+): NonNullable<AiGatewayRequest["timeoutProfile"]> {
+  if (
+    triggerType === "exit_intent" ||
+    triggerType === "flash_sale_window" ||
+    triggerType === "seasonal_calendar" ||
+    triggerType === "payment_failure"
+  ) {
+    return "urgent";
+  }
+
+  if (
+    triggerType === "post_purchase_window" ||
+    triggerType === "subscription_renewal_due" ||
+    triggerType === "crm_segment_update"
+  ) {
+    return "relaxed";
+  }
+
+  return "normal";
+}
+
+function getDecisionMaxTokens(triggerType?: string) {
+  if (triggerType === "cart_item_added" || triggerType === "add_to_cart") return 300;
+  if (triggerType === "exit_intent") return 220;
+  if (triggerType === "price_hesitation" || triggerType === "chat_intent") return 220;
+  if (triggerType === "flash_sale_window" || triggerType === "seasonal_calendar") return 180;
+  if (triggerType === "loyalty_tier_reached" || triggerType === "purchase_history_match") return 260;
+  return 220;
+}
+
+function getTriggerPromptGuidance(triggerType?: string) {
+  switch (triggerType) {
+    case "cart_item_added":
+    case "add_to_cart":
+      return `
+Trigger guidance: the shopper just added an item to cart. Prefer upsell_drawer with
+complementary products chosen only from catalogContext.candidates. Do not invent
+products, variants, discount codes, prices, inventory, reviews, or urgency.`;
+    case "exit_intent":
+      return `
+Trigger guidance: the shopper is leaving. Prefer exit_intent only when the cart or
+session context justifies it. Keep the payload headline-focused and cart-specific.
+Do not invent discount codes; use null or general offer wording unless a real code is provided.`;
+    case "price_hesitation":
+    case "coupon_field_focus":
+    case "chat_intent":
+      return `
+Trigger guidance: price sensitivity may be present. Prefer toast or discount_nudge.
+Suggest lower-priced catalog products from catalogContext.candidates and never create
+fake promo codes.`;
+    case "flash_sale_window":
+    case "seasonal_calendar":
+      return `
+Trigger guidance: scheduled urgency should use countdown_banner. Keep copy punchy,
+with fields under 12 words where possible, and pick catalog-backed add-ons only.`;
+    case "loyalty_tier_reached":
+    case "purchase_history_match":
+    case "first_time_visitor":
+      return `
+Trigger guidance: personalization should feel like helpful chat, not a generic pop-up.
+Prefer chat with a concise personalized greeting, using catalog-backed products only.`;
+    default:
+      return "";
+  }
+}
+
+function catalogProductToAffinity(
+  product: CatalogCacheProduct,
+  index: number,
+  source?: CatalogCacheProduct,
+) {
+  const sharedTags = source
+    ? product.tags.filter((tag) => source.tags.includes(tag)).length
+    : 0;
+  const sameCategory = source && product.category === source.category ? 0.18 : 0;
+  const score = Math.max(0.25, 0.82 + sameCategory + sharedTags * 0.03 - index * 0.05);
+
+  return {
+    targetId: product.id,
+    target: product,
+    score,
+    reason: source
+      ? `Catalog match for ${source.title}.`
+      : "Catalog-backed recommendation.",
+    orderCount: 0,
+  };
+}
+
+function toPromptCatalogProduct(product: CatalogCacheProduct) {
+  return {
+    id: product.id,
+    handle: product.handle,
+    url: `/products/${product.handle}`,
+    title: product.title,
+    price: product.price,
+    category: product.category,
+    vendor: product.vendor,
+    tags: product.tags.slice(0, 8),
+    inventory: product.inventory,
+    variantId: product.variants[0]?.id || "",
+  };
+}
+
+function getTriggerQuery(payload?: Record<string, unknown>) {
+  if (!payload) return "";
+  return [
+    payload.query,
+    payload.searchQuery,
+    payload.searchTerm,
+    payload.message,
+    payload.productTitle,
+    payload.title,
+    payload.category,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(" ");
 }
 
 function heuristicFallback(

@@ -2,6 +2,7 @@ import prisma from "../db.server";
 import { cacheKeys, createWorker, queues, redis } from "../redis.server";
 import { getOfferDecision } from "../ai/decisionEngine.server";
 import { buildOfferCandidates, createOfferRecord } from "../models/offer.server";
+import { refreshCatalogCache } from "../models/catalogCache.server";
 import { syncProductsFromAdmin } from "../models/product.server";
 import { getShopperSession, toShopperSessionSnapshot } from "../models/session.server";
 import { unauthenticated } from "../shopify.server";
@@ -56,6 +57,13 @@ export async function syncProductsJob(shop: string) {
       600,
     );
   });
+  await redis.set(
+    cacheKeys.syncProgress(shop),
+    JSON.stringify({ total: result.synced, done: result.synced, status: "catalog_refreshing" }),
+    "EX",
+    600,
+  );
+  await refreshCatalogCache(shop);
   await redis.set(
     cacheKeys.syncProgress(shop),
     JSON.stringify({ total: result.synced, done: result.synced, status: "complete" }),

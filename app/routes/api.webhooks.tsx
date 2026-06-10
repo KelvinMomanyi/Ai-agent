@@ -7,6 +7,7 @@ import {
   incrementOrderAffinities,
   upsertProduct,
 } from "../models/product.server";
+import { refreshCatalogCache } from "../models/catalogCache.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, topic, payload, session } = await authenticate.webhook(request);
@@ -34,6 +35,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           previousPrice: existing?.price?.toString(),
           payload,
         });
+        await refreshCatalogCacheSafely(shop);
         await queues.recomputeAffinityQueue.add("recompute-affinity", {
           shop,
           productId: product.id,
@@ -44,7 +46,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (topic === "PRODUCTS_DELETE") {
       const productId = toProductGid((payload as any).admin_graphql_api_id || (payload as any).id);
-      if (productId) await deleteProduct(shop, productId);
+      if (productId) {
+        await deleteProduct(shop, productId);
+        await refreshCatalogCacheSafely(shop);
+      }
       return new Response("OK");
     }
 
@@ -93,6 +98,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response("Webhook error", { status: 500 });
   }
 };
+
+async function refreshCatalogCacheSafely(shop: string) {
+  try {
+    await refreshCatalogCache(shop);
+  } catch (error) {
+    console.warn("AOVBoost catalog cache refresh after webhook failed:", {
+      shop,
+      error: getErrorMessage(error),
+    });
+  }
+}
 
 async function deleteShopData(shop: string, deleteSessions: boolean) {
   await prisma.$transaction([

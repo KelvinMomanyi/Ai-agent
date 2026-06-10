@@ -1,7 +1,6 @@
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
-import { callAi, getLastAiProvider, streamOpenAIChat, STREAM_PROVIDERS } from "../ai/client.server";
+import { callAI } from "../ai/client.server";
 import prisma from "../db.server";
-import { getProductsByIds } from "../models/product.server";
 import { getActiveBundlesForProduct } from "../models/bundle.server";
 import {
   filterBundlesToCatalog,
@@ -135,8 +134,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
 
   const storeName = shop.replace(/\.[^.]+\.myshopify\.com$/, "").replace(/[-_]/g, " ");
-  const [cartProducts, rawBundles, fullCatalog] = await Promise.all([
-    getProductsByIds(shop, session.cartProductIds),
+  const [rawBundles, fullCatalog] = await Promise.all([
     getActiveBundlesForProduct(shop, session.viewedProductIds[0], {
       excludeProductIds: settings.blockedProductIds,
     }),
@@ -146,6 +144,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     fullCatalog,
     settings.blockedProductIds,
   );
+  const cartProductIds = new Set(session.cartProductIds);
+  const cartProducts = catalogProducts.filter((product) => cartProductIds.has(product.id));
 
   const cartInfo = cartProducts.length > 0
     ? cartProducts.map((p) => `- ${p.title} ($${p.price})`).join("\n")
@@ -214,12 +214,6 @@ Guidelines:
 - Never be pushy; if the shopper declines, respect it immediately
 ${brandVoiceSection}`;
 
-  const messages = [
-    { role: "system", content: systemPrompt },
-    ...(body.messageHistory || []).slice(-12),
-    { role: "user", content: userMessage },
-  ];
-
   const encoder = new TextEncoder();
   let finalReply = "";
   let provider: "gemini" | "groq" | "mistral" | "deepseek" | "heuristic" = "heuristic";
@@ -235,41 +229,29 @@ ${brandVoiceSection}`;
       };
 
       try {
-        for (const cfg of STREAM_PROVIDERS) {
-          if (!process.env[cfg.envKey]) continue;
-          try {
-            let providerReply = "";
-            for await (const delta of streamOpenAIChat(messages, {
-              apiKey: process.env[cfg.envKey]!,
-              url: cfg.url,
-              model: cfg.model,
-            })) {
-              provider = cfg.name;
-              providerReply += delta;
-            }
-            if (providerReply) {
-              finalReply = providerReply;
-              break;
-            }
-          } catch (error) {
-            console.log(`${cfg.name} chat stream skipped:`, getErrorMessage(error));
-          }
-        }
-
         const fallbackReply = buildCatalogFallbackReply(
           userMessage,
           catalogProducts,
           bundles,
           messageIntent,
         );
-        if (!finalReply) {
-          const geminiReply = (await callAi(systemPrompt, userMessage)) || fallbackReply;
-          provider =
-            getLastAiProvider() === "none"
-              ? "heuristic"
-              : (getLastAiProvider() as "gemini" | "groq" | "mistral" | "deepseek");
-          finalReply = geminiReply;
-        }
+        const aiResult = await callAI({
+          triggerName:
+            messageIntent === "price_sensitive"
+              ? "price_sensitive_chat"
+              : `chat:${messageIntent}`,
+          systemPrompt,
+          userPrompt: JSON.stringify({
+            message: userMessage,
+            recentHistory: (body.messageHistory || []).slice(-12),
+          }),
+          schemaType: "text",
+          maxTokens: 300,
+          timeoutProfile: messageIntent === "checkout_assistance" ? "urgent" : "normal",
+          fallback: fallbackReply,
+        });
+        provider = aiResult.provider === "none" ? "heuristic" : aiResult.provider;
+        finalReply = aiResult.content || fallbackReply;
 
         finalReply = sanitizeAssistantReplyToCatalog({
           reply: finalReply,

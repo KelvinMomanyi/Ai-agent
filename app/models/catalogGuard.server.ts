@@ -1,18 +1,32 @@
-import type { Product } from "@prisma/client";
 import type { OfferDecision } from "../ai/types";
-import prisma from "../db.server";
+import {
+  getCatalogSnapshot,
+  type CatalogCacheProduct,
+} from "./catalogCache.server";
 
-export type CatalogProduct = Pick<
-  Product,
-  | "id"
-  | "title"
-  | "handle"
-  | "price"
-  | "compareAtPrice"
-  | "imageUrl"
-  | "tags"
-  | "metafields"
->;
+export type CatalogProduct = CatalogCacheProduct;
+
+type ProductWidgetSource = {
+  id: string;
+  handle: string;
+  title: string;
+  imageUrl?: string | null;
+  price: string | number | { toString(): string };
+  compareAtPrice?: string | number | { toString(): string } | null;
+  tags?: string[] | null;
+  metafields?: unknown;
+};
+
+type WidgetProduct = ReturnType<typeof catalogProductToWidgetProduct>;
+type SanitizedProductItem = Record<string, unknown> & {
+  productId: string;
+  targetId: string;
+  variantId: string;
+  quantity: number;
+  reason: string;
+  product: WidgetProduct;
+  target: WidgetProduct;
+};
 
 const PRODUCT_WIDGET_TYPES = new Set([
   "bundle",
@@ -23,20 +37,7 @@ const PRODUCT_WIDGET_TYPES = new Set([
 ]);
 
 export async function getFullProductCatalog(shop: string) {
-  return prisma.product.findMany({
-    where: { shop },
-    select: {
-      id: true,
-      title: true,
-      handle: true,
-      price: true,
-      compareAtPrice: true,
-      imageUrl: true,
-      tags: true,
-      metafields: true,
-    },
-    orderBy: [{ updatedAt: "desc" }],
-  });
+  return (await getCatalogSnapshot(shop)).products;
 }
 
 export async function enforceCatalogBackedDecision(input: {
@@ -69,7 +70,7 @@ export async function enforceCatalogBackedDecision(input: {
   };
 }
 
-export function catalogProductToWidgetProduct(product: CatalogProduct) {
+export function catalogProductToWidgetProduct(product: ProductWidgetSource) {
   const variantId = getDefaultVariantId(product.metafields);
 
   return {
@@ -78,10 +79,10 @@ export function catalogProductToWidgetProduct(product: CatalogProduct) {
     variantId,
     title: product.title,
     handle: product.handle,
-    imageUrl: product.imageUrl,
+    imageUrl: product.imageUrl || null,
     price: product.price.toString(),
     compareAtPrice: product.compareAtPrice?.toString(),
-    tags: product.tags,
+    tags: product.tags || [],
   };
 }
 
@@ -213,7 +214,7 @@ function sanitizeProductList(items: unknown[], index: CatalogIndex) {
 
   return items
     .map((item) => sanitizeProductItem(item, index))
-    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .filter((item): item is SanitizedProductItem => Boolean(item))
     .filter((item) => {
       const productId = String(item.productId || "");
       if (!productId || seen.has(productId)) return false;
@@ -222,7 +223,10 @@ function sanitizeProductList(items: unknown[], index: CatalogIndex) {
     });
 }
 
-function sanitizeProductItem(item: unknown, index: CatalogIndex) {
+function sanitizeProductItem(
+  item: unknown,
+  index: CatalogIndex,
+): SanitizedProductItem | null {
   const record = asRecord(item);
   const product = asRecord(record.product);
   const target = asRecord(record.target);
