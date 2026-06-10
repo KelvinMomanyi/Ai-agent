@@ -10,6 +10,10 @@ export class ExitIntent extends BaseWidget {
   mount(target = document.body): void {
     target.appendChild(this.container);
     if (this.shouldSkip()) return;
+    if (this.payload.immediate) {
+      this.show();
+      return;
+    }
 
     document.addEventListener("mouseleave", this.handleMouseLeave);
     document.addEventListener("visibilitychange", this.handleVisibility);

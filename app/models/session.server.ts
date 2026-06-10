@@ -90,6 +90,8 @@ export function computeSessionState(
   let addToCartCount = Number(asRecord(existing?.context).addToCartCount || 0);
   let cartValue = Number(asRecord(existing?.context).cartValue || 0);
   let lastEventType = String(asRecord(existing?.context).lastEventType || "");
+  let intentSignals = Number(asRecord(existing?.context).intentSignals || 0);
+  let hesitationSignals = Number(asRecord(existing?.context).hesitationSignals || 0);
   const productViewCounts = new Map<string, number>();
 
   for (const productId of existing?.viewedProductIds || []) {
@@ -116,6 +118,17 @@ export function computeSessionState(
       cartValue = Math.max(cartValue, getCartValue(event));
     }
 
+    if (event.type === "cart_update") {
+      const nextCartProductIds = toStringArray(event.cartProductIds);
+      if (nextCartProductIds.length > 0 || Number(event.cartItemCount || 0) === 0) {
+        cartProductIds.clear();
+      }
+      for (const productId of nextCartProductIds) {
+        cartProductIds.add(productId);
+      }
+      cartValue = getCartValue(event);
+    }
+
     if (event.type === "remove_from_cart") {
       const productId = getProductId(event);
       if (productId) cartProductIds.delete(productId);
@@ -124,6 +137,14 @@ export function computeSessionState(
     if (event.type === "scroll_depth") {
       const depth = Number(event.depth || event.scrollDepth || 0);
       maxScrollDepth = Math.max(maxScrollDepth, depth);
+    }
+
+    if (isIntentSignal(event.type)) {
+      intentSignals += 1;
+    }
+
+    if (isHesitationSignal(event.type)) {
+      hesitationSignals += 1;
     }
 
     if (event.type === "session_sync") {
@@ -154,7 +175,8 @@ export function computeSessionState(
       productViews * 5 +
       (maxScrollDepth >= 90 ? 10 : maxScrollDepth >= 75 ? 8 : maxScrollDepth >= 50 ? 5 : 0) +
       Math.min(sessionDuration / 120, 1) * 30 +
-      (cartProductIds.size > 0 ? 30 : 0),
+      (cartProductIds.size > 0 ? 30 : 0) +
+      Math.min(intentSignals * 6, 24),
     0,
     100,
   );
@@ -163,7 +185,8 @@ export function computeSessionState(
   );
   const hesitationScore = clamp(
     (intentScore > 40 && addToCartCount === 0 && sessionDuration >= 90 ? 55 : 0) +
-      (repeatedProductWithoutCart ? 35 : 0),
+      (repeatedProductWithoutCart ? 35 : 0) +
+      Math.min(hesitationSignals * 15, 45),
     0,
     100,
   );
@@ -186,6 +209,8 @@ export function computeSessionState(
       maxScrollDepth,
       addToCartCount,
       cartValue,
+      intentSignals,
+      hesitationSignals,
       lastEventType,
       lastEventAt: new Date().toISOString(),
     },
@@ -232,6 +257,33 @@ function getCartValue(event: StorefrontEvent) {
       payload.cartTotal ||
       0,
   );
+}
+
+function isIntentSignal(type: string) {
+  return [
+    "long_product_dwell",
+    "repeated_product_view",
+    "scroll_depth_interest",
+    "comparison_page_visit",
+    "search_query",
+    "wishlist_save",
+    "first_time_visitor",
+    "purchase_history_match",
+    "loyalty_tier_reached",
+  ].includes(type);
+}
+
+function isHesitationSignal(type: string) {
+  return [
+    "price_hesitation",
+    "price_sensitive_chat",
+    "coupon_field_focus",
+    "cart_item_removed",
+    "cart_abandoned",
+    "exit_intent",
+    "inactivity_timeout",
+    "payment_failure",
+  ].includes(type);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

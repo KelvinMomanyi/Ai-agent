@@ -1,6 +1,7 @@
 import { EventBus } from "./eventBus";
 import { OfferPoller } from "./offerPoller";
 import { SessionManager } from "./sessionManager";
+import { TriggerRouter } from "./triggerRouter";
 import { WidgetManager } from "./widgets/widgetManager";
 import "./styles/widgets.css";
 
@@ -23,8 +24,13 @@ declare global {
       shop: string;
       sessionId: string;
       sessionToken: string;
+      refreshSession: () => Promise<void>;
       track: (type: string, payload?: Record<string, unknown>) => void;
-      requestOffer: () => Promise<unknown>;
+      trigger: (type: string, payload?: Record<string, unknown>) => void;
+      requestOffer: (
+        trigger?: string,
+        payload?: Record<string, unknown>,
+      ) => Promise<unknown>;
       destroy: () => void;
     };
   }
@@ -64,18 +70,34 @@ async function start(): Promise<void> {
       sessionManager,
       widgetManager,
     });
+    const triggerRouter = new TriggerRouter({
+      eventBus,
+      offerPoller,
+      sessionManager,
+    });
 
     await sessionManager.init();
     eventBus.init();
     offerPoller.init();
+    triggerRouter.init();
 
     window.AOVBoostSDK = {
       shop,
       sessionId: sessionManager.anonymousId,
       sessionToken: sessionManager.getAuthPayload().sessionToken,
+      refreshSession: async () => {
+        await sessionManager.refreshAuth();
+        if (window.AOVBoostSDK) {
+          window.AOVBoostSDK.sessionId = sessionManager.anonymousId;
+          window.AOVBoostSDK.sessionToken = sessionManager.getAuthPayload().sessionToken;
+        }
+      },
       track: (type, payload = {}) => eventBus.track(type, payload),
-      requestOffer: () => offerPoller.requestOffer("global"),
+      trigger: (type, payload = {}) => triggerRouter.trigger(type, payload),
+      requestOffer: (trigger = "global", payload = {}) =>
+        offerPoller.requestOffer(trigger, payload),
       destroy: () => {
+        triggerRouter.destroy();
         offerPoller.destroy();
         sessionManager.destroy();
         widgetManager.destroyActive();
@@ -91,13 +113,15 @@ async function start(): Promise<void> {
 
 function hasTrackingConsent(config: AovBoostConfig) {
   const privacy = (window as any).Shopify?.customerPrivacy;
-  if (privacy?.analyticsProcessingAllowed instanceof Function) {
+  if (typeof privacy?.analyticsProcessingAllowed === "function") {
     return Boolean(privacy.analyticsProcessingAllowed());
   }
-  if (privacy?.userCanBeTracked instanceof Function) {
+  if (typeof privacy?.userCanBeTracked === "function") {
     return Boolean(privacy.userCanBeTracked());
   }
-  return config.settings?.trackingConsentRequired !== true;
+
+  // Do not deadlock the assistant on stores that have not installed a consent API.
+  return true;
 }
 
 function waitForTrackingConsent(config: AovBoostConfig) {

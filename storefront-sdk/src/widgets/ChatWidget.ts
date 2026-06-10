@@ -140,29 +140,28 @@ export class ChatWidget extends BaseWidget {
     this.messages.push({ role: "user", content: value });
     this.appendMessage({ role: "user", content: value });
     this.trackClick("send_message");
+    if (isPriceSensitiveMessage(value)) {
+      this.track("chat_intent", { intent: "price_sensitive" });
+      document.dispatchEvent(
+        new CustomEvent("aovboost:trigger", {
+          detail: {
+            type: "price_sensitive_chat",
+            message: value,
+          },
+        }),
+      );
+    }
 
     const assistantIndex = this.messages.push({ role: "assistant", content: "" }) - 1;
     const assistantEl = this.appendMessage({ role: "assistant", content: "" });
     this.showTyping();
 
     try {
-      const config = (window as any).AOVBoost || {};
-      const sdk = (window as any).AOVBoostSDK;
-      const apiBase = (config.apiBase || "/apps/aovboost").replace(/\/$/, "");
-      const response = await fetch(`${apiBase}/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-AOVBoost-Shop": sdk?.shop || config.shop || "",
-        },
-        body: JSON.stringify({
-          sessionId: sdk?.sessionId,
-          sessionToken: sdk?.sessionToken,
-          shop: sdk?.shop || config.shop,
-          message: value,
-          messageHistory: this.messages.slice(0, -2),
-        }),
-      });
+      let response = await this.requestChat(value);
+      if (response.status === 401) {
+        await (window as any).AOVBoostSDK?.refreshSession?.();
+        response = await this.requestChat(value);
+      }
 
       if (!response.ok) throw new Error(`Server returned ${response.status}`);
       if (!response.body) throw new Error("Missing stream body");
@@ -219,6 +218,27 @@ export class ChatWidget extends BaseWidget {
     }
   }
 
+  private requestChat(value: string) {
+    const config = (window as any).AOVBoost || {};
+    const sdk = (window as any).AOVBoostSDK;
+    const apiBase = (config.apiBase || "/apps/aovboost").replace(/\/$/, "");
+
+    return fetch(`${apiBase}/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AOVBoost-Shop": sdk?.shop || config.shop || "",
+      },
+      body: JSON.stringify({
+        sessionId: sdk?.sessionId,
+        sessionToken: sdk?.sessionToken,
+        shop: sdk?.shop || config.shop,
+        message: value,
+        messageHistory: this.messages.slice(0, -2),
+      }),
+    });
+  }
+
   private showTyping() {
     const container = this.root.querySelector("[data-messages]");
     if (!container) return;
@@ -263,4 +283,10 @@ export class ChatWidget extends BaseWidget {
     );
     window.setTimeout(() => this.destroy(), 190);
   }
+}
+
+function isPriceSensitiveMessage(value: string) {
+  return /\b(expensive|cheaper|cheap|discount|coupon|promo|deal|sale|price|afford|budget|cost)\b/i.test(
+    value,
+  );
 }

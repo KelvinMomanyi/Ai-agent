@@ -46,6 +46,7 @@ export class SessionManager {
   private cartValue = 0;
   private startedAt = Date.now();
   private lastCartActionAt = 0;
+  private lastEventType = "";
   private syncTimer: number | undefined;
 
   constructor(
@@ -64,6 +65,8 @@ export class SessionManager {
   }
 
   recordEvent(event: StorefrontEvent): void {
+    this.lastEventType = event.type;
+
     if (event.type === "page_view") this.pageViews += 1;
 
     if (event.type === "product_view") {
@@ -91,6 +94,15 @@ export class SessionManager {
       }
       this.cartValue = Math.max(this.cartValue, Number(event.cartValue || 0));
       this.journeyStage = "buying";
+    }
+
+    if (event.type === "cart_update") {
+      this.lastCartActionAt = Date.now();
+      if (Array.isArray(event.cartProductIds)) {
+        this.cartProductIds = new Set(event.cartProductIds.map(String));
+      }
+      this.cartValue = Number(event.cartValue || 0);
+      if (this.cartProductIds.size > 0) this.journeyStage = "buying";
     }
 
     if (event.type === "remove_from_cart") {
@@ -154,6 +166,8 @@ export class SessionManager {
         maxScrollDepth: this.maxScrollDepth,
         productViewCounts: Object.fromEntries(this.productViewCounts),
         cartActionCount: this.cartActionCount,
+        cartValue: this.cartValue,
+        lastEventType: this.lastEventType,
       },
     };
   }
@@ -164,6 +178,17 @@ export class SessionManager {
       sessionToken: this.sessionToken,
       shop: this.shop,
     };
+  }
+
+  async refreshAuth(): Promise<void> {
+    try {
+      window.localStorage.removeItem(SIGNED_SESSION_STORAGE_KEY);
+    } catch {
+      // Ignore storage failures; fetching a new in-memory token is enough.
+    }
+    this.anonymousId = "";
+    this.sessionToken = "";
+    await this.ensureStorefrontSession();
   }
 
   private sync(): void {

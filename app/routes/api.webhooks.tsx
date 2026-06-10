@@ -20,7 +20,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (topic === "PRODUCTS_CREATE" || topic === "PRODUCTS_UPDATE") {
       const product = mapProductWebhook(payload);
       if (product.id) {
+        const existing =
+          topic === "PRODUCTS_UPDATE"
+            ? await prisma.product.findFirst({
+                where: { shop, id: product.id },
+                select: { price: true },
+              })
+            : null;
         await upsertProduct(shop, product);
+        await recordProductSystemEvents({
+          shop,
+          product,
+          previousPrice: existing?.price?.toString(),
+          payload,
+        });
         await queues.recomputeAffinityQueue.add("recompute-affinity", {
           shop,
           productId: product.id,
@@ -122,6 +135,58 @@ function mapProductWebhook(payload: unknown) {
     collectionIds: [],
     metafields: {},
   };
+}
+
+async function recordProductSystemEvents(input: {
+  shop: string;
+  product: ReturnType<typeof mapProductWebhook>;
+  previousPrice?: string;
+  payload: unknown;
+}) {
+  const newPrice = Number(input.product.price || 0);
+  const previousPrice = Number(input.previousPrice || 0);
+  if (previousPrice > 0 && newPrice > 0 && newPrice < previousPrice) {
+    await prisma.event.create({
+      data: {
+        event: "price_drop_webhook",
+        storeId: input.shop,
+        timestamp: new Date(),
+        data: {
+          productId: input.product.id,
+          title: input.product.title,
+          oldPrice: previousPrice,
+          newPrice,
+        },
+      },
+    });
+  }
+
+  const inventoryQuantity = getLowestInventoryQuantity(input.payload);
+  if (inventoryQuantity !== null && inventoryQuantity <= 5) {
+    await prisma.event.create({
+      data: {
+        event: "low_inventory_alert",
+        storeId: input.shop,
+        timestamp: new Date(),
+        data: {
+          productId: input.product.id,
+          title: input.product.title,
+          inventoryQuantity,
+        },
+      },
+    });
+  }
+}
+
+function getLowestInventoryQuantity(payload: unknown) {
+  const variants = (payload as any)?.variants;
+  if (!Array.isArray(variants)) return null;
+
+  const quantities = variants
+    .map((variant) => Number(variant.inventory_quantity))
+    .filter((quantity) => Number.isFinite(quantity));
+  if (quantities.length === 0) return null;
+  return Math.min(...quantities);
 }
 
 function toProductGid(value: unknown) {

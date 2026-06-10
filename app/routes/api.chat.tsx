@@ -60,6 +60,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const { shop, sessionId } = auth;
   const userMessage = typeof body.message === "string" ? body.message.trim() : "";
+  const messageIntent = classifyMessageIntent(userMessage);
 
   if (!shop || !sessionId || !userMessage) {
     return json({ error: "Invalid request" }, { status: 400, headers: withCors() });
@@ -94,6 +95,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       storeId: shop,
     },
   });
+  if (messageIntent !== "general") {
+    await prisma.shopperEvent.create({
+      data: {
+        shop,
+        sessionId: session.id,
+        type: "chat_intent",
+        payload: {
+          intent: messageIntent,
+          message: userMessage,
+        },
+      },
+    });
+  }
 
   const settings = await prisma.appSettings.upsert({
     where: { shop },
@@ -157,6 +171,9 @@ ${bundlesInfo}
 Current cart:
 ${cartInfo}
 
+Detected shopper intent:
+- ${messageIntent}
+
 Store settings:
 - Discount threshold: $${settings.discountThreshold}
 - Blocked product GIDs: ${settings.blockedProductIds.join(", ") || "none"}
@@ -168,6 +185,7 @@ Guidelines:
 - When recommending products, explain WHY they go together and include the /products/ link
 - Reference active bundles when they match what the shopper is looking at
 - If the cart qualifies for a discount (above threshold), mention it
+- If intent is price_sensitive, do not invent discount codes; suggest real lower-priced alternatives from the catalog and mention the configured threshold only when relevant
 - Tone: ${settings.aiTone}
 - Keep responses under 3 sentences unless the shopper asks for detail
 - Never be pushy; if the shopper declines, respect it immediately
@@ -223,7 +241,7 @@ ${brandVoiceSection}`;
         if (!finalReply) {
           const geminiReply =
             (await callAi(systemPrompt, userMessage)) ||
-            buildCatalogFallbackReply(userMessage, catalogProducts, bundles);
+            buildCatalogFallbackReply(userMessage, catalogProducts, bundles, messageIntent);
           provider =
             getLastAiProvider() === "none"
               ? "heuristic"
@@ -291,6 +309,7 @@ function buildCatalogFallbackReply(
   userMessage: string,
   catalogProducts: CatalogProduct[],
   bundles: BundleSummary[],
+  messageIntent = "general",
 ) {
   if (catalogProducts.length === 0) {
     return "I do not see synced products in this store yet. Sync the product catalog first, then I can recommend exact items.";
@@ -306,13 +325,20 @@ function buildCatalogFallbackReply(
     .sort((left, right) => right.score - left.score)
     .slice(0, 3);
 
-  const matches = scoredProducts.length > 0
-    ? scoredProducts.map((item) => item.product)
-    : catalogProducts.slice(0, 3);
+  const matches = messageIntent === "price_sensitive"
+    ? catalogProducts
+        .slice()
+        .sort((left, right) => Number(left.price || 0) - Number(right.price || 0))
+        .slice(0, 3)
+    : scoredProducts.length > 0
+      ? scoredProducts.map((item) => item.product)
+      : catalogProducts.slice(0, 3);
 
-  const intro = scoredProducts.length > 0
-    ? "These look like the best matches:"
-    : "I did not find an exact match, but these are good places to start:";
+  const intro = messageIntent === "price_sensitive"
+    ? "Here are lower-priced options from this store:"
+    : scoredProducts.length > 0
+      ? "These look like the best matches:"
+      : "I did not find an exact match, but these are good places to start:";
   const recommendations = matches
     .map((product) => `${product.title} (${formatPrice(product.price)}) /products/${product.handle}`)
     .join("; ");
@@ -364,4 +390,24 @@ function formatPrice(value: unknown) {
   const amount = Number(value || 0);
   if (!Number.isFinite(amount) || amount <= 0) return "price unavailable";
   return `$${amount.toFixed(2)}`;
+}
+
+function classifyMessageIntent(value: string) {
+  if (
+    /\b(expensive|cheaper|cheap|discount|coupon|promo|deal|sale|price|afford|budget|cost)\b/i.test(
+      value,
+    )
+  ) {
+    return "price_sensitive";
+  }
+
+  if (/\b(compare|versus|vs|alternative|similar|difference)\b/i.test(value)) {
+    return "comparison";
+  }
+
+  if (/\b(warranty|protect|support|installment|payment|pay later)\b/i.test(value)) {
+    return "checkout_assistance";
+  }
+
+  return "general";
 }

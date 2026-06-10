@@ -1,10 +1,13 @@
 import { BundleWidget } from "./BundleWidget";
 import { ChatWidget } from "./ChatWidget";
+import { CountdownBanner } from "./CountdownBanner";
 import { DiscountNudge } from "./DiscountNudge";
 import { ExitIntent } from "./ExitIntent";
+import { InlineAlert } from "./InlineAlert";
 import { PostPurchase } from "./PostPurchase";
 import { RecStrip } from "./RecStrip";
 import { SocialProof } from "./SocialProof";
+import { ToastNudge } from "./ToastNudge";
 import { UpsellDrawer } from "./UpsellDrawer";
 import type { BaseWidget, WidgetPayload } from "./BaseWidget";
 
@@ -76,6 +79,10 @@ export class WidgetManager {
       return createMountAfter(".product-form__submit, [data-add-to-cart]");
     }
 
+    if (widgetType === "inline_alert") {
+      return createMountAfter("[data-price], .product__price, .price, .product-form, [data-product-form]");
+    }
+
     return document.body;
   }
 }
@@ -84,6 +91,12 @@ function createWidget(widgetType: string, payload: WidgetPayload) {
   switch (widgetType) {
     case "chat":
       return new ChatWidget(payload);
+    case "toast":
+      return new ToastNudge(payload);
+    case "countdown_banner":
+      return new CountdownBanner(payload);
+    case "inline_alert":
+      return new InlineAlert(payload);
     case "bundle":
       return new BundleWidget(payload);
     case "upsell_drawer":

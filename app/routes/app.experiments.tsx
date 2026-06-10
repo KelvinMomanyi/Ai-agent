@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { json, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
-import { Form, useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
+import { useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
 import {
   Badge,
   BlockStack,
@@ -24,6 +24,9 @@ import { getExperimentAnalytics } from "../models/analytics.server";
 
 const widgetTypeOptions = [
   { label: "AI Assistant (Chat)", value: "chat" },
+  { label: "Toast Nudge", value: "toast" },
+  { label: "Countdown Banner", value: "countdown_banner" },
+  { label: "Inline Alert", value: "inline_alert" },
   { label: "Dynamic Bundle", value: "bundle" },
   { label: "Smart Cart Drawer (Upsell)", value: "upsell_drawer" },
   { label: "Discount Nudge", value: "discount_nudge" },

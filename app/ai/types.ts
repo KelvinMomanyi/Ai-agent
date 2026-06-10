@@ -43,6 +43,12 @@ export interface DecisionInput {
   recentlyDismissedWidgets: string[];
   settings: AppSettings;
   candidates: OfferCandidate[];
+  trigger?: {
+    type: string;
+    category?: string;
+    widgetHint?: string;
+    payload?: Record<string, unknown>;
+  };
 }
 
 export interface OfferDecision {

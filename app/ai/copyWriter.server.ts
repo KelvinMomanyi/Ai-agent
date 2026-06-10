@@ -43,6 +43,12 @@ function getSchemaHint(widgetType: string) {
   switch (widgetType) {
     case "chat":
       return { greeting: "string", assistantIntro: "string", ctaAccept: "string", ctaDecline: "string" };
+    case "toast":
+      return { headline: "string", subheadline: "string", ctaText: "string", dismissText: "string" };
+    case "countdown_banner":
+      return { headline: "string", subheadline: "string", ctaText: "string" };
+    case "inline_alert":
+      return { headline: "string", subheadline: "string", dismissText: "string" };
     case "bundle":
       return { headline: "string", itemList: ["string"], totalSavings: "string", ctaText: "string" };
     case "discount_nudge":
@@ -94,6 +100,22 @@ function normalizeCopy(
         (fallback as any).rewardDescription,
       ),
       ctaText: stringOr(parsed.ctaText, (fallback as any).ctaText),
+    };
+  }
+
+  if (
+    widgetType === "toast" ||
+    widgetType === "countdown_banner" ||
+    widgetType === "inline_alert"
+  ) {
+    return {
+      headline: stringOr(parsed.headline, (fallback as any).headline),
+      subheadline: stringOr(
+        parsed.subheadline ?? parsed.offerLine,
+        (fallback as any).subheadline,
+      ),
+      ctaText: stringOr(parsed.ctaText, (fallback as any).ctaText),
+      dismissText: stringOr(parsed.dismissText, (fallback as any).dismissText),
     };
   }
 
@@ -163,6 +185,31 @@ function buildFallbackCopy(
         progressLabel: "You are close to a reward",
         rewardDescription: "Add one more item to unlock the offer.",
         ctaText: "View picks",
+      };
+    case "toast":
+      return {
+        headline: stringOr(offerDetails.headline, "Need help deciding?"),
+        subheadline: stringOr(
+          offerDetails.body,
+          "I can help find a better match or a relevant offer.",
+        ),
+        ctaText: "Open assistant",
+        dismissText: "No thanks",
+      };
+    case "countdown_banner":
+      return {
+        headline: stringOr(offerDetails.headline, "Limited-time offer"),
+        subheadline: stringOr(
+          offerDetails.body,
+          "Relevant bundles and add-ons are available now.",
+        ),
+        ctaText: "View offer",
+      };
+    case "inline_alert":
+      return {
+        headline: stringOr(offerDetails.headline, "Product update"),
+        subheadline: stringOr(offerDetails.body, "A relevant product update is available."),
+        dismissText: "Dismiss",
       };
     case "exit_intent":
       return {

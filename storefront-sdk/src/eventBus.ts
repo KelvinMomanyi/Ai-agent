@@ -58,6 +58,9 @@ export class EventBus {
 
     this.options.sessionManager.recordEvent(event);
     this.queue.push(event);
+    document.dispatchEvent(
+      new CustomEvent("aovboost:event", { detail: event }),
+    );
     this.scheduleFlush();
   }
 

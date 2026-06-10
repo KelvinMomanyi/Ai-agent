@@ -27,7 +27,11 @@ type OfferBody = {
   currentProductId?: string;
   currentPageType?: string;
   cartProductIds?: string[];
+  cartValue?: number;
   dismissedWidgets?: string[];
+  trigger?: string;
+  triggerCategory?: string;
+  triggerPayload?: Record<string, unknown>;
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -58,7 +62,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
-    const cacheKey = cacheKeys.offer(sessionId, body.currentProductId || "none");
+    const cacheKey = cacheKeys.offer(
+      sessionId,
+      [
+        body.currentProductId || "none",
+        body.trigger || "manual",
+        (body.cartProductIds || []).join(",") || "empty",
+      ].join(":"),
+    );
     const cached = await getJsonCache<OfferDecision>(cacheKey);
     if (cached) return json(cached, { headers: withCors() });
 
@@ -76,20 +87,44 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     ]);
 
     const snapshot = toShopperSessionSnapshot(session);
+    const requestCartProductIds = body.cartProductIds || session.cartProductIds;
+    const decisionSession = {
+      ...snapshot,
+      cartProductIds: requestCartProductIds,
+      context: {
+        ...snapshot.context,
+        cartValue:
+          typeof body.cartValue === "number"
+            ? body.cartValue
+            : (snapshot.context as Record<string, unknown>).cartValue,
+      },
+    };
     const candidates = await buildOfferCandidates({
       shop,
-      session: snapshot,
+      session: decisionSession,
       currentProductId: body.currentProductId,
     });
     const decision = await getOfferDecision({
       shop,
-      session: snapshot,
+      session: decisionSession,
       currentProductId: body.currentProductId,
       currentPageType: normalizePageType(body.currentPageType),
-      cartProductIds: body.cartProductIds || session.cartProductIds,
+      cartProductIds: requestCartProductIds,
       recentlyDismissedWidgets: body.dismissedWidgets || [],
       settings,
       candidates,
+      trigger: {
+        type: body.trigger || "manual",
+        category: body.triggerCategory,
+        widgetHint:
+          typeof body.triggerPayload?.widgetHint === "string"
+            ? body.triggerPayload.widgetHint
+            : undefined,
+        payload: {
+          ...(body.triggerPayload || {}),
+          cartValue: body.cartValue,
+        },
+      },
     });
     const abVariant = decision.widgetType
       ? await getCachedExperimentVariant(shop, decision.widgetType, sessionId)
@@ -100,10 +135,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       sessionId: session.id,
       decision,
       triggerContext: {
+        trigger: body.trigger,
+        triggerCategory: body.triggerCategory,
+        triggerPayload: body.triggerPayload || {},
         currentProductId: body.currentProductId,
         currentPageType: body.currentPageType,
-        cartProductIds: body.cartProductIds || [],
-        session: snapshot,
+        cartProductIds: requestCartProductIds,
+        cartValue: body.cartValue,
+        session: decisionSession,
       },
       abVariant,
     });

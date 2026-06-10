@@ -94,6 +94,9 @@ export async function generateOfferJob(input: {
     recentlyDismissedWidgets: [],
     settings,
     candidates,
+    trigger: {
+      type: input.trigger,
+    },
   });
 
   return createOfferRecord({

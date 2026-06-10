@@ -1,6 +1,6 @@
 import type { EventBus } from "./eventBus";
 import type { SessionManager } from "./sessionManager";
-import { type OfferDecision, WidgetManager } from "./widgets/widgetManager";
+import type { OfferDecision, WidgetManager } from "./widgets/widgetManager";
 
 type OfferPollerOptions = {
   shop: string;
@@ -15,8 +15,11 @@ export class OfferPoller {
   private timer: number | undefined;
   private inFlight = false;
   private stopped = false;
+  private options: OfferPollerOptions;
 
-  constructor(private options: OfferPollerOptions) {}
+  constructor(options: OfferPollerOptions) {
+    this.options = options;
+  }
 
   init(): void {
     window.setTimeout(() => this.requestOffer("initial"), 1200);
@@ -27,9 +30,6 @@ export class OfferPoller {
       );
     }
 
-    document.addEventListener("add-to-cart", () => {
-      window.setTimeout(() => this.requestOffer("add_to_cart"), 250);
-    });
     document.addEventListener("aovboost:request-offer", () => {
       this.requestOffer("manual");
     });
@@ -43,22 +43,35 @@ export class OfferPoller {
     if (this.timer) window.clearInterval(this.timer);
   }
 
-  async requestOffer(trigger = "manual"): Promise<OfferDecision | null> {
+  async requestOffer(
+    trigger = "manual",
+    triggerPayload: Record<string, unknown> = {},
+  ): Promise<OfferDecision | null> {
     if (this.inFlight || this.stopped) return null;
     this.inFlight = true;
 
     try {
       const snapshot = this.options.sessionManager.getSnapshot();
+      const cartProductIds = Array.isArray(triggerPayload.cartProductIds)
+        ? triggerPayload.cartProductIds.map(String)
+        : snapshot.cartProductIds;
+      const cartValue =
+        typeof triggerPayload.cartValue === "number"
+          ? triggerPayload.cartValue
+          : snapshot.cartValue;
       const body = {
         ...this.options.sessionManager.getAuthPayload(),
         currentProductId: getCurrentProductId(),
         currentPageType: getCurrentPageType(),
-        cartProductIds: snapshot.cartProductIds,
+        cartProductIds,
+        cartValue,
         dismissedWidgets: this.options.widgetManager.getDismissedWidgets(),
         trigger,
+        triggerCategory: triggerPayload.triggerCategory,
+        triggerPayload,
       };
 
-      const response = await fetch(this.endpoint("/offer"), {
+      let response = await fetch(this.endpoint("/offer"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -67,6 +80,22 @@ export class OfferPoller {
         body: JSON.stringify(body),
         keepalive: true,
       });
+
+      if (response.status === 401) {
+        await this.options.sessionManager.refreshAuth();
+        response = await fetch(this.endpoint("/offer"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-AOVBoost-Shop": this.options.shop,
+          },
+          body: JSON.stringify({
+            ...body,
+            ...this.options.sessionManager.getAuthPayload(),
+          }),
+          keepalive: true,
+        });
+      }
 
       if (!response.ok) return null;
 
