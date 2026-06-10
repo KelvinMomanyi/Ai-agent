@@ -83,10 +83,7 @@ async function start(): Promise<void> {
       sessionToken: sessionManager.getAuthPayload().sessionToken,
       refreshSession: async () => {
         await sessionManager.refreshAuth();
-        if (window.AOVBoostSDK) {
-          window.AOVBoostSDK.sessionId = sessionManager.anonymousId;
-          window.AOVBoostSDK.sessionToken = sessionManager.getAuthPayload().sessionToken;
-        }
+        sessionManager.syncGlobalSdkAuth();
       },
       track: (type, payload = {}) => eventBus.track(type, payload),
       trigger: (type, payload = {}) => triggerRouter.trigger(type, payload),

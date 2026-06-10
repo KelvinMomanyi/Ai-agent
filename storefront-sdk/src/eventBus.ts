@@ -75,34 +75,7 @@ export class EventBus {
     if (!this.options.sessionManager.getAuthPayload().sessionToken) return;
 
     const events = this.queue.splice(0);
-    const body = JSON.stringify({
-      ...this.options.sessionManager.getAuthPayload(),
-      events,
-    });
-
-    try {
-      if (navigator.sendBeacon) {
-        const sent = navigator.sendBeacon(
-          this.endpoint("/events"),
-          new Blob([body], { type: "application/json" }),
-        );
-        if (sent) return;
-      }
-    } catch {
-      // Fetch fallback below.
-    }
-
-    fetch(this.endpoint("/events"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-AOVBoost-Shop": this.options.shop,
-      },
-      body,
-      keepalive: true,
-    }).catch(() => {
-      this.queue.unshift(...events);
-    });
+    void this.postEvents(events);
   }
 
   private scheduleFlush(): void {
@@ -113,6 +86,42 @@ export class EventBus {
   private endpoint(path: string): string {
     const base = this.options.apiBase || "/apps/aovboost";
     return `${base.replace(/\/$/, "")}${path}`;
+  }
+
+  private async postEvents(
+    events: AovboostEvent[],
+    retriedAuth = false,
+  ): Promise<void> {
+    const auth = this.options.sessionManager.getAuthPayload();
+    if (!auth.sessionToken) return;
+
+    try {
+      const response = await fetch(this.endpoint("/events"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AOVBoost-Shop": this.options.shop,
+        },
+        body: JSON.stringify({
+          ...auth,
+          events,
+        }),
+        keepalive: true,
+      });
+
+      if (response.status === 401 && !retriedAuth) {
+        await this.options.sessionManager.refreshAuth();
+        if (!this.options.sessionManager.getAuthPayload().sessionToken) return;
+        await this.postEvents(events, true);
+        return;
+      }
+
+      if (!response.ok && response.status !== 401) {
+        this.queue.unshift(...events);
+      }
+    } catch {
+      this.queue.unshift(...events);
+    }
   }
 
   private installNavigationTracking(): void {

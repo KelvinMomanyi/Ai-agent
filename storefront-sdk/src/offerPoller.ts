@@ -87,6 +87,10 @@ export class OfferPoller {
 
       if (response.status === 401) {
         await this.options.sessionManager.refreshAuth();
+        const refreshedAuth = this.options.sessionManager.getAuthPayload();
+        if (!refreshedAuth.sessionToken) {
+          return this.mountLocalFallback(trigger, triggerPayload);
+        }
         response = await fetch(this.endpoint("/offer"), {
           method: "POST",
           headers: {
@@ -95,7 +99,7 @@ export class OfferPoller {
           },
           body: JSON.stringify({
             ...body,
-            ...this.options.sessionManager.getAuthPayload(),
+            ...refreshedAuth,
           }),
           keepalive: true,
         });

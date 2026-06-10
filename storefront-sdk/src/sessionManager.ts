@@ -197,6 +197,14 @@ export class SessionManager {
     } catch {
       this.bootstrapLocalSession();
     }
+    this.syncGlobalSdkAuth();
+  }
+
+  syncGlobalSdkAuth(): void {
+    const sdk = (window as any).AOVBoostSDK;
+    if (!sdk || typeof sdk !== "object") return;
+    sdk.sessionId = this.anonymousId;
+    sdk.sessionToken = this.sessionToken;
   }
 
   private sync(): void {
@@ -227,7 +235,11 @@ export class SessionManager {
       },
       body,
       keepalive: true,
-    }).catch(() => {});
+    })
+      .then((response) => {
+        if (response.status === 401) void this.refreshAuth();
+      })
+      .catch(() => {});
   }
 
   private updateJourneyStage(): void {

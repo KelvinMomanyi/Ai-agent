@@ -134,26 +134,32 @@ export function logStorefrontAuthError(
 
 function verifyStorefrontSessionToken(token: string, shop: string) {
   const [version, encodedPayload, signature] = token.split(".");
+  if (!token) {
+    throw new StorefrontAuthError("Missing storefront session token");
+  }
   if (version !== "v1" || !encodedPayload || !signature) {
-    throw new StorefrontAuthError("Invalid storefront session token");
+    throw new StorefrontAuthError("Malformed storefront session token");
   }
 
   const expected = base64UrlEncode(
     crypto.createHmac("sha256", getTokenSecret()).update(encodedPayload).digest(),
   );
   if (!safeCompare(signature, expected)) {
-    throw new StorefrontAuthError("Invalid storefront session token");
+    throw new StorefrontAuthError("Invalid storefront session token signature");
   }
 
   let payload: StorefrontTokenPayload;
   try {
     payload = JSON.parse(base64UrlDecode(encodedPayload)) as StorefrontTokenPayload;
   } catch {
-    throw new StorefrontAuthError("Invalid storefront session token");
+    throw new StorefrontAuthError("Unreadable storefront session token");
   }
 
-  if (payload.v !== 1 || payload.shop !== shop || !payload.sid) {
-    throw new StorefrontAuthError("Invalid storefront session token");
+  if (payload.v !== 1 || !payload.sid) {
+    throw new StorefrontAuthError("Invalid storefront session token payload");
+  }
+  if (payload.shop !== shop) {
+    throw new StorefrontAuthError("Storefront session token shop mismatch");
   }
   if (payload.exp <= Math.floor(Date.now() / 1000)) {
     throw new StorefrontAuthError("Expired storefront session token");
