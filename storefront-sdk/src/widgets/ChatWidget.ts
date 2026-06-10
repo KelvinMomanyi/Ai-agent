@@ -221,7 +221,7 @@ export class ChatWidget extends BaseWidget {
   private requestChat(value: string) {
     const config = (window as any).AOVBoost || {};
     const sdk = (window as any).AOVBoostSDK;
-    const apiBase = (config.apiBase || "/apps/aovboost").replace(/\/$/, "");
+    const apiBase = normalizeProxyApiBase(config.apiBase).replace(/\/$/, "");
 
     return fetch(`${apiBase}/chat`, {
       method: "POST",
@@ -289,4 +289,14 @@ function isPriceSensitiveMessage(value: string) {
   return /\b(expensive|cheaper|cheap|discount|coupon|promo|deal|sale|price|afford|budget|cost)\b/i.test(
     value,
   );
+}
+
+function normalizeProxyApiBase(value?: string) {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  if (!candidate || candidate === "/api" || candidate.startsWith("/api/")) {
+    return "/apps/aovboost";
+  }
+  if (candidate.includes("/apps/aovboost")) return candidate;
+  if (candidate.startsWith("/apps/")) return candidate;
+  return "/apps/aovboost";
 }

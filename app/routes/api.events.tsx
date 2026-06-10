@@ -6,6 +6,7 @@ import { optionsResponse, withCors } from "../utils/cors.server";
 import {
   authenticateStorefrontRequest,
   isStorefrontAuthError,
+  logStorefrontAuthError,
 } from "../utils/storefrontAuth.server";
 
 type EventsBody = {
@@ -48,6 +49,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ ok: true }, { headers: withCors() });
   } catch (error) {
     if (isStorefrontAuthError(error)) {
+      logStorefrontAuthError(request, "api.events", error);
       return json(
         { ok: false, error: "Unauthorized" },
         { status: error.status, headers: withCors() },

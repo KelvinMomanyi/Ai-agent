@@ -59,7 +59,7 @@ async function start(): Promise<void> {
       await waitForTrackingConsent(config);
     }
 
-    const apiBase = config.apiBase || "/apps/aovboost";
+    const apiBase = normalizeProxyApiBase(config.apiBase);
     const sessionManager = new SessionManager(shop, apiBase);
     const eventBus = new EventBus({ shop, sessionManager, apiBase });
     const widgetManager = new WidgetManager();
@@ -111,7 +111,19 @@ async function start(): Promise<void> {
   }
 }
 
+function normalizeProxyApiBase(value?: string) {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  if (!candidate || candidate === "/api" || candidate.startsWith("/api/")) {
+    return "/apps/aovboost";
+  }
+  if (candidate.includes("/apps/aovboost")) return candidate;
+  if (candidate.startsWith("/apps/")) return candidate;
+  return "/apps/aovboost";
+}
+
 function hasTrackingConsent(config: AovBoostConfig) {
+  if (config.settings?.trackingConsentRequired !== true) return true;
+
   const privacy = (window as any).Shopify?.customerPrivacy;
   if (typeof privacy?.analyticsProcessingAllowed === "function") {
     return Boolean(privacy.analyticsProcessingAllowed());

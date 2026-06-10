@@ -18,6 +18,7 @@ import { optionsResponse, withCors } from "../utils/cors.server";
 import {
   authenticateStorefrontRequest,
   isStorefrontAuthError,
+  logStorefrontAuthError,
 } from "../utils/storefrontAuth.server";
 
 type OfferBody = {
@@ -160,6 +161,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json(response, { headers: withCors() });
   } catch (error) {
     if (isStorefrontAuthError(error)) {
+      logStorefrontAuthError(request, "api.offer", error);
       return json(
         { widgetType: null, payload: {}, reasoning: "unauthorized", confidence: 0 },
         { status: error.status, headers: withCors() },

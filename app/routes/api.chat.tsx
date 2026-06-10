@@ -9,6 +9,7 @@ import { optionsResponse, withCors } from "../utils/cors.server";
 import {
   authenticateStorefrontRequest,
   isStorefrontAuthError,
+  logStorefrontAuthError,
 } from "../utils/storefrontAuth.server";
 
 type ChatBody = {
@@ -53,6 +54,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     auth = authenticateStorefrontRequest(request, body);
   } catch (error) {
     if (isStorefrontAuthError(error)) {
+      logStorefrontAuthError(request, "api.chat", error);
       return json({ error: "Unauthorized" }, { status: error.status, headers: withCors() });
     }
     throw error;

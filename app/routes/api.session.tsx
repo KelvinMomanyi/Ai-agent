@@ -3,6 +3,7 @@ import prisma from "../db.server";
 import {
   isStorefrontAuthError,
   issueStorefrontSession,
+  logStorefrontAuthError,
   verifyAppProxyRequest,
 } from "../utils/storefrontAuth.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
@@ -21,6 +22,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   } catch (error) {
     const status = isStorefrontAuthError(error) ? error.status : 500;
+    if (isStorefrontAuthError(error)) {
+      logStorefrontAuthError(request, "api.session", error);
+    }
     return json({ error: "Unauthorized" }, { status, headers: withCors() });
   }
 };

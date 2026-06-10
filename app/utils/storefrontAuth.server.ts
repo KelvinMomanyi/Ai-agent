@@ -115,6 +115,23 @@ export function isStorefrontAuthError(error: unknown): error is StorefrontAuthEr
   return error instanceof StorefrontAuthError;
 }
 
+export function logStorefrontAuthError(
+  request: Request,
+  route: string,
+  error: StorefrontAuthError,
+) {
+  const url = new URL(request.url);
+  console.warn("AOVBoost storefront auth rejected:", {
+    route,
+    reason: error.message,
+    status: error.status,
+    path: url.pathname,
+    hasSignature: url.searchParams.has("signature"),
+    hasShop: url.searchParams.has("shop"),
+    hasTimestamp: url.searchParams.has("timestamp"),
+  });
+}
+
 function verifyStorefrontSessionToken(token: string, shop: string) {
   const [version, encodedPayload, signature] = token.split(".");
   if (version !== "v1" || !encodedPayload || !signature) {
