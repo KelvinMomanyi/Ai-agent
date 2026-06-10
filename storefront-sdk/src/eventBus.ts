@@ -29,6 +29,7 @@ export class EventBus {
   init(): void {
     this.installNavigationTracking();
     this.installCartFetchTracking();
+    this.installCartDomTracking();
     this.installScrollTracking();
     this.installHoverTracking();
     this.installSearchTracking();
@@ -71,6 +72,7 @@ export class EventBus {
     }
 
     if (this.queue.length === 0) return;
+    if (!this.options.sessionManager.getAuthPayload().sessionToken) return;
 
     const events = this.queue.splice(0);
     const body = JSON.stringify({
@@ -190,6 +192,49 @@ export class EventBus {
 
       return response;
     };
+  }
+
+  private installCartDomTracking(): void {
+    document.addEventListener(
+      "submit",
+      (event) => {
+        const form = event.target as HTMLFormElement | null;
+        if (!form || !isCartAddUrl(form.action || "")) return;
+
+        try {
+          this.track("add_to_cart", {
+            ...getCartPayload(new FormData(form)),
+            source: "cart_form_submit",
+            requestUrl: form.action,
+          });
+        } catch {
+          this.track("add_to_cart", {
+            source: "cart_form_submit",
+            requestUrl: form.action,
+          });
+        }
+      },
+      true,
+    );
+
+    document.addEventListener(
+      "click",
+      (event) => {
+        const target = event.target as HTMLElement | null;
+        const button = target?.closest?.(
+          "button[name='add'], [type='submit'][name='add'], [data-add-to-cart]",
+        ) as HTMLElement | null;
+        if (!button) return;
+        const form = button.closest("form") as HTMLFormElement | null;
+        if (form && !isCartAddUrl(form.action || "")) return;
+
+        this.track("add_to_cart", {
+          source: "add_button_click",
+          requestUrl: form?.action || "",
+        });
+      },
+      true,
+    );
   }
 
   private installScrollTracking(): void {

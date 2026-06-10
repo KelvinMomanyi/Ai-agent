@@ -71,6 +71,10 @@ export class OfferPoller {
         triggerPayload,
       };
 
+      if (!this.options.sessionManager.getAuthPayload().sessionToken) {
+        return this.mountLocalFallback(trigger, triggerPayload);
+      }
+
       let response = await fetch(this.endpoint("/offer"), {
         method: "POST",
         headers: {
@@ -97,13 +101,17 @@ export class OfferPoller {
         });
       }
 
-      if (!response.ok) return null;
+      if (!response.ok) return this.mountLocalFallback(trigger, triggerPayload);
 
       const decision = (await response.json()) as OfferDecision;
+      if (!decision.widgetType) {
+        return this.mountLocalFallback(trigger, triggerPayload);
+      }
+
       this.options.widgetManager.mountDecision(decision);
       return decision;
     } catch {
-      return null;
+      return this.mountLocalFallback(trigger, triggerPayload);
     } finally {
       this.inFlight = false;
     }
@@ -112,6 +120,189 @@ export class OfferPoller {
   private endpoint(path: string): string {
     return `${this.options.apiBase.replace(/\/$/, "")}${path}`;
   }
+
+  private mountLocalFallback(
+    trigger: string,
+    triggerPayload: Record<string, unknown>,
+  ): OfferDecision | null {
+    const decision = buildLocalFallbackDecision(trigger, triggerPayload);
+    if (!decision) return null;
+
+    this.options.widgetManager.mountDecision(decision);
+    return decision;
+  }
+}
+
+function buildLocalFallbackDecision(
+  trigger: string,
+  payload: Record<string, unknown>,
+): OfferDecision | null {
+  const cartValue = Number(payload.cartValue || 0);
+
+  switch (trigger) {
+    case "first_time_visitor":
+    case "long_product_dwell":
+    case "scroll_depth_interest":
+    case "comparison_page_visit":
+    case "inactivity_timeout":
+    case "purchase_history_match":
+    case "loyalty_tier_reached":
+    case "crm_segment_update":
+      return {
+        widgetType: "chat",
+        payload: {
+          offerId: `local:${trigger}`,
+          greeting: "Hi. I can help you compare products and find useful add-ons.",
+          copy: {
+            greeting: "Hi. I can help you compare products and find useful add-ons.",
+            ctaAccept: "Chat with AI",
+            ctaDecline: "Browse myself",
+          },
+        },
+        reasoning: "Local fallback for proactive chat trigger.",
+        confidence: 0.4,
+        aiProvider: "heuristic",
+      };
+
+    case "exit_intent":
+      return {
+        widgetType: "exit_intent",
+        payload: {
+          offerId: "local:exit_intent",
+          immediate: true,
+          offerLine: "Before you go, I can help find a better match or bundle.",
+          copy: {
+            headline: "Wait before you go",
+            offerLine: "I can help find a better match or bundle.",
+            ctaText: "Open assistant",
+            dismissText: "No thanks",
+          },
+        },
+        reasoning: "Local fallback for exit intent.",
+        confidence: 0.4,
+        aiProvider: "heuristic",
+      };
+
+    case "cart_value_threshold":
+    case "cart_abandoned":
+      return {
+        widgetType: "discount_nudge",
+        payload: {
+          offerId: `local:${trigger}`,
+          cartValue,
+          threshold: Number(payload.threshold || 50),
+          copy: {
+            progressLabel: "You are close to a reward",
+            rewardDescription: "Add one more item to unlock the offer.",
+            ctaText: "View picks",
+          },
+        },
+        reasoning: "Local fallback for cart value or idle cart trigger.",
+        confidence: 0.4,
+        aiProvider: "heuristic",
+      };
+
+    case "flash_sale_window":
+    case "seasonal_calendar":
+      return {
+        widgetType: "countdown_banner",
+        payload: {
+          offerId: `local:${trigger}`,
+          endsAt: payload.endsAt,
+          body: "Limited-time product picks are available right now.",
+          copy: {
+            headline: "Limited-time offer",
+            subheadline: "Relevant bundles and add-ons are available now.",
+            ctaText: "View offer",
+          },
+        },
+        reasoning: "Local fallback for scheduled campaign trigger.",
+        confidence: 0.4,
+        aiProvider: "heuristic",
+      };
+
+    case "low_inventory_alert":
+    case "price_drop_webhook":
+      return {
+        widgetType: "inline_alert",
+        payload: {
+          offerId: `local:${trigger}`,
+          body:
+            trigger === "price_drop_webhook"
+              ? "The price on this product has changed."
+              : "Inventory is limited for this product.",
+          copy: {
+            headline:
+              trigger === "price_drop_webhook" ? "Price update" : "Limited stock",
+            subheadline:
+              trigger === "price_drop_webhook"
+                ? "The price on this product has changed."
+                : "Inventory is limited for this product.",
+          },
+        },
+        reasoning: "Local fallback for system alert trigger.",
+        confidence: 0.4,
+        aiProvider: "heuristic",
+      };
+
+    case "cart_item_added":
+    case "cart_item_removed":
+    case "search_query":
+    case "repeated_product_view":
+    case "price_hesitation":
+    case "wishlist_save":
+    case "coupon_field_focus":
+    case "subscription_renewal_due":
+    case "payment_failure":
+      return {
+        widgetType: "toast",
+        payload: {
+          offerId: `local:${trigger}`,
+          headline: getToastHeadline(trigger),
+          body: getToastBody(trigger),
+          copy: {
+            headline: getToastHeadline(trigger),
+            subheadline: getToastBody(trigger),
+            ctaText: "Open assistant",
+            dismissText: "No thanks",
+          },
+        },
+        reasoning: "Local fallback for low-disruption trigger.",
+        confidence: 0.4,
+        aiProvider: "heuristic",
+      };
+
+    default:
+      return null;
+  }
+}
+
+function getToastHeadline(trigger: string) {
+  if (trigger === "cart_item_added") return "Complete the set";
+  if (trigger === "coupon_field_focus") return "Looking for a code?";
+  if (trigger === "price_hesitation") return "Need a better fit?";
+  if (trigger === "wishlist_save") return "Saved for later";
+  if (trigger === "search_query") return "Need help choosing?";
+  return "Need help deciding?";
+}
+
+function getToastBody(trigger: string) {
+  if (trigger === "cart_item_added") {
+    return "I can help find matching accessories or add-ons.";
+  }
+  if (trigger === "cart_item_removed") {
+    return "I can help find a better alternative.";
+  }
+  if (trigger === "coupon_field_focus") {
+    return "I can help find a relevant offer or lower-priced option.";
+  }
+  if (trigger === "price_hesitation") {
+    return "I can help compare value and find a lower-priced alternative.";
+  }
+  if (trigger === "wishlist_save") {
+    return "I can compare this with related products when you are ready.";
+  }
+  return "I can help find the right product or useful add-on.";
 }
 
 function getCurrentPageType() {

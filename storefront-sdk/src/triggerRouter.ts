@@ -198,6 +198,7 @@ export class TriggerRouter {
     this.installWishlistTracking();
     this.installInactivityTracking();
     this.installFirstTimeVisitorTracking();
+    this.installInitialCartTracking();
     this.installPostPurchaseTracking();
     this.installScheduledCampaignTracking();
   }
@@ -419,6 +420,23 @@ export class TriggerRouter {
     } catch {
       // Storage failures should not break the SDK.
     }
+  }
+
+  private installInitialCartTracking(): void {
+    if (!/\/cart(?:\/|$)/.test(window.location.pathname)) return;
+
+    window.setTimeout(async () => {
+      const cart = await this.readCart();
+      if (cart.cartItemCount <= 0) return;
+
+      const payload = {
+        ...cart,
+        source: "initial_cart_state",
+      };
+      this.options.eventBus.track("cart_update", payload);
+      this.fire("cart_item_added", payload);
+      this.handleCartState(payload);
+    }, 900);
   }
 
   private installPostPurchaseTracking(): void {

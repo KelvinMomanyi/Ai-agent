@@ -20,6 +20,7 @@ export type OfferDecision = {
 };
 
 const DISMISSED_KEY = "aovboost_dismissed_widgets";
+const DISMISS_TTL_MS = 30 * 60 * 1000;
 
 export class WidgetManager {
   private activeWidget: BaseWidget | null = null;
@@ -60,7 +61,16 @@ export class WidgetManager {
   getDismissedWidgets(): string[] {
     try {
       const parsed = JSON.parse(localStorage.getItem(DISMISSED_KEY) || "[]");
-      return Array.isArray(parsed) ? parsed.map(String) : [];
+      if (!Array.isArray(parsed)) return [];
+
+      const now = Date.now();
+      const active = parsed
+        .filter((entry) => entry && typeof entry === "object")
+        .filter((entry: any) => now - Number(entry.dismissedAt || 0) < DISMISS_TTL_MS);
+      if (active.length !== parsed.length) {
+        localStorage.setItem(DISMISSED_KEY, JSON.stringify(active));
+      }
+      return active.map((entry: any) => String(entry.widgetType || "")).filter(Boolean);
     } catch {
       return [];
     }

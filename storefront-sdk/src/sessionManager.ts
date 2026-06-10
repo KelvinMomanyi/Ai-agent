@@ -55,7 +55,11 @@ export class SessionManager {
   ) {}
 
   async init(): Promise<void> {
-    await this.ensureStorefrontSession();
+    try {
+      await this.ensureStorefrontSession();
+    } catch {
+      this.bootstrapLocalSession();
+    }
     this.syncTimer = window.setInterval(() => this.sync(), 30000);
     window.addEventListener("pagehide", () => this.sync());
   }
@@ -188,7 +192,11 @@ export class SessionManager {
     }
     this.anonymousId = "";
     this.sessionToken = "";
-    await this.ensureStorefrontSession();
+    try {
+      await this.ensureStorefrontSession();
+    } catch {
+      this.bootstrapLocalSession();
+    }
   }
 
   private sync(): void {
@@ -299,6 +307,25 @@ export class SessionManager {
     } catch {
       // Storage failures leave the current in-memory session usable for this page.
     }
+  }
+
+  private bootstrapLocalSession(): void {
+    let sessionId = "";
+    try {
+      sessionId = window.localStorage.getItem(STORAGE_KEY) || "";
+      if (!sessionId) {
+        sessionId =
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        window.localStorage.setItem(STORAGE_KEY, sessionId);
+      }
+    } catch {
+      sessionId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+
+    this.anonymousId = sessionId;
+    this.sessionToken = "";
   }
 
   private getSnapshotDuration(): number {

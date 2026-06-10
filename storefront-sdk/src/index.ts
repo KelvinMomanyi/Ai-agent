@@ -77,10 +77,6 @@ async function start(): Promise<void> {
     });
 
     await sessionManager.init();
-    eventBus.init();
-    offerPoller.init();
-    triggerRouter.init();
-
     window.AOVBoostSDK = {
       shop,
       sessionId: sessionManager.anonymousId,
@@ -103,6 +99,10 @@ async function start(): Promise<void> {
         widgetManager.destroyActive();
       },
     };
+
+    triggerRouter.init();
+    eventBus.init();
+    offerPoller.init();
   } catch (error) {
     console.log(
       "AOVBoost SDK skipped:",

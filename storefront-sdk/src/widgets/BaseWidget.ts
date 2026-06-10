@@ -4,6 +4,8 @@ export type WidgetPayload = {
   [key: string]: unknown;
 };
 
+const DISMISSED_KEY = "aovboost_dismissed_widgets";
+
 export abstract class BaseWidget {
   protected root: ShadowRoot;
   protected container: HTMLElement;
@@ -45,12 +47,15 @@ export abstract class BaseWidget {
   protected trackDismiss(): void {
     this.track("widget_dismiss", {});
     try {
-      const key = "aovboost_dismissed_widgets";
-      const dismissed = JSON.parse(localStorage.getItem(key) || "[]") as string[];
-      localStorage.setItem(
-        key,
-        JSON.stringify(Array.from(new Set([...dismissed, this.getWidgetType()]))),
-      );
+      const dismissed = JSON.parse(localStorage.getItem(DISMISSED_KEY) || "[]");
+      const entries = Array.isArray(dismissed)
+        ? dismissed.filter((entry) => typeof entry === "object" && entry)
+        : [];
+      const next = [
+        ...entries.filter((entry: any) => entry.widgetType !== this.getWidgetType()),
+        { widgetType: this.getWidgetType(), dismissedAt: Date.now() },
+      ];
+      localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
     } catch {
       // Ignore storage failures.
     }
