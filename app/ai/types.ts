@@ -40,6 +40,8 @@ export interface DecisionInput {
   currentProductId?: string;
   currentPageType: CurrentPageType;
   cartProductIds: string[];
+  cartVariantIds?: string[];
+  cartItemCount?: number;
   recentlyDismissedWidgets: string[];
   settings: AppSettings;
   candidates: OfferCandidate[];

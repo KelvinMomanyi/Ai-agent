@@ -40,6 +40,7 @@ type OfferBody = {
   cartProductIds?: string[];
   cartVariantIds?: string[];
   cartItems?: Array<Record<string, unknown>>;
+  cartItemCount?: number;
   cartValue?: number;
   dismissedWidgets?: string[];
   trigger?: string;
@@ -83,6 +84,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ...toStringArray(body.cartVariantIds),
       ...extractCartItemVariantIds(body.cartItems),
     ]);
+    const requestCartItemCount =
+      typeof body.cartItemCount === "number"
+        ? body.cartItemCount
+        : body.cartItems?.length ||
+          requestCartVariantIds.length ||
+          requestCartProductIds.length;
     const cacheKey = cacheKeys.offer(
       sessionId,
       [
@@ -114,8 +121,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             type: "session_sync",
             cartProductIds: requestCartProductIds,
             cartVariantIds: requestCartVariantIds,
-            cartItemCount:
-              body.cartItems?.length || requestCartVariantIds.length,
+            cartItemCount: requestCartItemCount,
             cartValue: body.cartValue,
           },
         ],
@@ -125,11 +131,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const snapshot = toShopperSessionSnapshot(session);
     const decisionSession = {
       ...snapshot,
+      journeyStage:
+        requestCartProductIds.length > 0 ||
+        requestCartVariantIds.length > 0 ||
+        requestCartItemCount > 0
+          ? "buying"
+          : snapshot.journeyStage,
       cartProductIds: requestCartProductIds,
       context: {
         ...snapshot.context,
         cartVariantIds: requestCartVariantIds,
-        cartItemCount: body.cartItems?.length || requestCartVariantIds.length,
+        cartItemCount: requestCartItemCount,
         cartValue:
           typeof body.cartValue === "number"
             ? body.cartValue
@@ -148,6 +160,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       currentProductId: body.currentProductId,
       currentPageType: normalizePageType(body.currentPageType),
       cartProductIds: requestCartProductIds,
+      cartVariantIds: requestCartVariantIds,
+      cartItemCount: requestCartItemCount,
       recentlyDismissedWidgets: body.dismissedWidgets || [],
       settings,
       candidates,
@@ -161,6 +175,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         payload: {
           ...(body.triggerPayload || {}),
           cartValue: body.cartValue,
+          cartVariantIds: requestCartVariantIds,
+          cartItemCount: requestCartItemCount,
+          cartItems: body.cartItems || [],
         },
       },
     });
@@ -186,6 +203,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         cartProductIds: requestCartProductIds,
         cartVariantIds: requestCartVariantIds,
         cartItems: body.cartItems || [],
+        cartItemCount: requestCartItemCount,
         cartValue: body.cartValue,
         session: decisionSession,
       },

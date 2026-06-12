@@ -1,4 +1,9 @@
-import { callAI, parseAiJson, type AiGatewayRequest, type AiProvider } from "./client.server";
+import {
+  callAI,
+  parseAiJson,
+  type AiGatewayRequest,
+  type AiProvider,
+} from "./client.server";
 import { generateWidgetCopy } from "./copyWriter.server";
 import { DECISION_ENGINE_SYSTEM } from "./prompts";
 import type { DecisionInput, OfferDecision } from "./types";
@@ -27,6 +32,11 @@ const WIDGET_TYPES = new Set([
 export async function getOfferDecision(
   input: DecisionInput,
 ): Promise<OfferDecision> {
+  const cartVariantIds =
+    input.cartVariantIds || toStringArray(input.session.context.cartVariantIds);
+  const cartItemCount = Number(
+    input.cartItemCount ?? input.session.context.cartItemCount ?? 0,
+  );
   const recommendationSourceProductId =
     input.currentProductId ||
     input.cartProductIds[0] ||
@@ -51,7 +61,11 @@ export async function getOfferDecision(
   const affinities = promptCatalogProducts
     .slice(0, 5)
     .map((product, index) =>
-      catalogProductToAffinity(product, index, catalog.byId[recommendationSourceProductId || ""]),
+      catalogProductToAffinity(
+        product,
+        index,
+        catalog.byId[recommendationSourceProductId || ""],
+      ),
     );
 
   const context = {
@@ -61,6 +75,8 @@ export async function getOfferDecision(
     currentPageType: input.currentPageType,
     trigger: input.trigger,
     cartProductIds: input.cartProductIds,
+    cartVariantIds,
+    cartItemCount,
     recentlyDismissedWidgets: input.recentlyDismissedWidgets,
     settings: {
       chatEnabled: input.settings.chatEnabled,
@@ -92,7 +108,14 @@ export async function getOfferDecision(
     },
   };
 
-  const fallbackDecision = heuristicFallback(input, bundles.length);
+  const fallbackDecision = heuristicFallback(
+    {
+      ...input,
+      cartVariantIds,
+      cartItemCount,
+    },
+    bundles.length,
+  );
   let decision = fallbackDecision;
 
   if (shouldAskAi(input.trigger?.type, fallbackDecision)) {
@@ -121,7 +144,8 @@ export async function getOfferDecision(
     });
   }
 
-  if (!decision.widgetType) return noOffer(decision.reasoning, decision.aiProvider);
+  if (!decision.widgetType)
+    return noOffer(decision.reasoning, decision.aiProvider);
   if (input.recentlyDismissedWidgets.includes(decision.widgetType)) {
     return noOffer("Widget was recently dismissed.", decision.aiProvider);
   }
@@ -171,7 +195,8 @@ function normalizeDecision(
   const widgetType =
     parsed.widgetType === null
       ? null
-      : typeof parsed.widgetType === "string" && WIDGET_TYPES.has(parsed.widgetType)
+      : typeof parsed.widgetType === "string" &&
+          WIDGET_TYPES.has(parsed.widgetType)
         ? parsed.widgetType
         : undefined;
 
@@ -180,7 +205,9 @@ function normalizeDecision(
   return {
     widgetType,
     payload:
-      parsed.payload && typeof parsed.payload === "object" && !Array.isArray(parsed.payload)
+      parsed.payload &&
+      typeof parsed.payload === "object" &&
+      !Array.isArray(parsed.payload)
         ? parsed.payload
         : {},
     reasoning:
@@ -199,7 +226,10 @@ function normalizeDecision(
   };
 }
 
-function shouldAskAi(_triggerType: string | undefined, _fallbackDecision: OfferDecision) {
+function shouldAskAi(
+  _triggerType: string | undefined,
+  _fallbackDecision: OfferDecision,
+) {
   return process.env.AOVBOOST_DISABLE_AI !== "true";
 }
 
@@ -233,11 +263,21 @@ function getTimeoutProfile(
 }
 
 function getDecisionMaxTokens(triggerType?: string) {
-  if (triggerType === "cart_item_added" || triggerType === "add_to_cart") return 300;
+  if (triggerType === "cart_item_added" || triggerType === "add_to_cart")
+    return 300;
   if (triggerType === "exit_intent") return 220;
-  if (triggerType === "price_hesitation" || triggerType === "chat_intent") return 220;
-  if (triggerType === "flash_sale_window" || triggerType === "seasonal_calendar") return 180;
-  if (triggerType === "loyalty_tier_reached" || triggerType === "purchase_history_match") return 260;
+  if (triggerType === "price_hesitation" || triggerType === "chat_intent")
+    return 220;
+  if (
+    triggerType === "flash_sale_window" ||
+    triggerType === "seasonal_calendar"
+  )
+    return 180;
+  if (
+    triggerType === "loyalty_tier_reached" ||
+    triggerType === "purchase_history_match"
+  )
+    return 260;
   return 220;
 }
 
@@ -285,8 +325,12 @@ function catalogProductToAffinity(
   const sharedTags = source
     ? product.tags.filter((tag) => source.tags.includes(tag)).length
     : 0;
-  const sameCategory = source && product.category === source.category ? 0.18 : 0;
-  const score = Math.max(0.25, 0.82 + sameCategory + sharedTags * 0.03 - index * 0.05);
+  const sameCategory =
+    source && product.category === source.category ? 0.18 : 0;
+  const score = Math.max(
+    0.25,
+    0.82 + sameCategory + sharedTags * 0.03 - index * 0.05,
+  );
 
   return {
     targetId: product.id,
@@ -325,7 +369,10 @@ function getTriggerQuery(payload?: Record<string, unknown>) {
     payload.title,
     payload.category,
   ]
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .filter(
+      (value): value is string =>
+        typeof value === "string" && value.trim().length > 0,
+    )
     .join(" ");
 }
 
@@ -334,11 +381,21 @@ function heuristicFallback(
   activeBundleCount: number,
 ): OfferDecision {
   const context = input.session.context || {};
-  const triggerType = input.trigger?.type || String(context.lastEventType || "");
+  const triggerType =
+    input.trigger?.type || String(context.lastEventType || "");
   const triggerPayload = input.trigger?.payload || {};
   const cartValue = Number(
     triggerPayload.cartValue || context.cartValue || context.cartTotal || 0,
   );
+  const cartVariantIds =
+    input.cartVariantIds || toStringArray(context.cartVariantIds);
+  const cartItemCount = Number(
+    input.cartItemCount ?? context.cartItemCount ?? 0,
+  );
+  const cartHasItems =
+    input.cartProductIds.length > 0 ||
+    cartVariantIds.length > 0 ||
+    cartItemCount > 0;
   const threshold = Number(input.settings.discountThreshold || 0);
 
   if (triggerType === "exit_intent" && input.settings.exitIntentEnabled) {
@@ -354,20 +411,27 @@ function heuristicFallback(
     };
   }
 
-  if (triggerType === "flash_sale_window" || triggerType === "seasonal_calendar") {
+  if (
+    triggerType === "flash_sale_window" ||
+    triggerType === "seasonal_calendar"
+  ) {
     return {
       widgetType: "countdown_banner",
       payload: {
         endsAt: triggerPayload.endsAt,
         body: "Relevant bundles and add-ons are available during this campaign.",
       },
-      reasoning: "Scheduled urgency is best shown as a persistent countdown banner.",
+      reasoning:
+        "Scheduled urgency is best shown as a persistent countdown banner.",
       confidence: 0.68,
       aiProvider: "heuristic",
     };
   }
 
-  if (triggerType === "low_inventory_alert" || triggerType === "price_drop_webhook") {
+  if (
+    triggerType === "low_inventory_alert" ||
+    triggerType === "price_drop_webhook"
+  ) {
     return {
       widgetType: "inline_alert",
       payload: {
@@ -376,17 +440,22 @@ function heuristicFallback(
             ? "The price on this product has changed."
             : "Inventory is limited for this product.",
       },
-      reasoning: "System facts should be shown inline near the product context.",
+      reasoning:
+        "System facts should be shown inline near the product context.",
       confidence: 0.66,
       aiProvider: "heuristic",
     };
   }
 
-  if (triggerType === "post_purchase_window" && input.settings.postPurchaseEnabled) {
+  if (
+    triggerType === "post_purchase_window" &&
+    input.settings.postPurchaseEnabled
+  ) {
     return {
       widgetType: "post_purchase",
       payload: {},
-      reasoning: "Thank-you page session is eligible for a post-purchase add-on.",
+      reasoning:
+        "Thank-you page session is eligible for a post-purchase add-on.",
       confidence: 0.65,
       aiProvider: "heuristic",
     };
@@ -394,7 +463,7 @@ function heuristicFallback(
 
   if (
     input.settings.upsellEnabled &&
-    input.cartProductIds.length > 0 &&
+    cartHasItems &&
     !isRecoveryOrThresholdTrigger(triggerType) &&
     (triggerType === "cart_item_added" ||
       triggerType === "checkout_started" ||
@@ -404,8 +473,13 @@ function heuristicFallback(
   ) {
     return {
       widgetType: "upsell_drawer",
-      payload: { cartProductIds: input.cartProductIds },
-      reasoning: "Add-to-cart or buying-stage session is eligible for an upsell.",
+      payload: {
+        cartProductIds: input.cartProductIds,
+        cartVariantIds,
+        cartItemCount,
+      },
+      reasoning:
+        "Add-to-cart or buying-stage session is eligible for an upsell.",
       confidence: 0.64,
       aiProvider: "heuristic",
     };
@@ -423,7 +497,8 @@ function heuristicFallback(
   ) {
     return {
       widgetType:
-        triggerType === "cart_abandoned" || triggerType === "cart_value_threshold"
+        triggerType === "cart_abandoned" ||
+        triggerType === "cart_value_threshold"
           ? "discount_nudge"
           : "toast",
       payload: {
@@ -438,13 +513,17 @@ function heuristicFallback(
             ? "You are close to a useful offer for this cart."
             : "I can help find an offer or a lower-priced alternative.",
       },
-      reasoning: "Price-sensitive or recovery signal should receive a low-disruption nudge.",
+      reasoning:
+        "Price-sensitive or recovery signal should receive a low-disruption nudge.",
       confidence: 0.63,
       aiProvider: "heuristic",
     };
   }
 
-  if (triggerType === "wishlist_save" || triggerType === "subscription_renewal_due") {
+  if (
+    triggerType === "wishlist_save" ||
+    triggerType === "subscription_renewal_due"
+  ) {
     return {
       widgetType: "toast",
       payload: {
@@ -461,7 +540,9 @@ function heuristicFallback(
     input.currentPageType === "product" &&
     input.settings.bundlesEnabled &&
     activeBundleCount > 0 &&
-    (triggerType === "repeated_product_view" || triggerType === "manual" || !triggerType)
+    (triggerType === "repeated_product_view" ||
+      triggerType === "manual" ||
+      !triggerType)
   ) {
     return {
       widgetType: "bundle",
@@ -481,7 +562,8 @@ function heuristicFallback(
     return {
       widgetType: "rec_strip",
       payload: {},
-      reasoning: "Search, remove, or repeated-view intent is suited to related products.",
+      reasoning:
+        "Search, remove, or repeated-view intent is suited to related products.",
       confidence: 0.61,
       aiProvider: "heuristic",
     };
@@ -511,7 +593,8 @@ function heuristicFallback(
     return {
       widgetType: "chat",
       payload: { greeting: input.settings.chatGreeting },
-      reasoning: "High-intent browsing/profile signal is best handled by proactive chat.",
+      reasoning:
+        "High-intent browsing/profile signal is best handled by proactive chat.",
       confidence: 0.62,
       aiProvider: "heuristic",
     };
@@ -526,7 +609,8 @@ function heuristicFallback(
     return {
       widgetType: "discount_nudge",
       payload: { threshold: threshold.toString(), cartValue },
-      reasoning: "Cart value is within 20% of the configured discount threshold.",
+      reasoning:
+        "Cart value is within 20% of the configured discount threshold.",
       confidence: 0.55,
       aiProvider: "heuristic",
     };
@@ -575,17 +659,18 @@ function enrichPayload(
   }
 
   if (
-    (widgetType === "upsell_drawer" ||
-      widgetType === "post_purchase" ||
-      widgetType === "rec_strip" ||
-      widgetType === "social_proof")
+    widgetType === "upsell_drawer" ||
+    widgetType === "post_purchase" ||
+    widgetType === "rec_strip" ||
+    widgetType === "social_proof"
   ) {
     const products = getProductsFromAffinities(context.affinities);
     if (products.length === 0) return null;
 
     return {
       ...omitUnsafeProductPayload(payload),
-      products: widgetType === "post_purchase" ? products.slice(0, 1) : products,
+      products:
+        widgetType === "post_purchase" ? products.slice(0, 1) : products,
       cartProductIds: context.cartProductIds,
     };
   }
@@ -680,6 +765,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function toStringArray(value: unknown) {
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
 
 function noOffer(

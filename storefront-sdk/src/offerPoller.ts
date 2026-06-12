@@ -52,18 +52,37 @@ export class OfferPoller {
 
     try {
       const snapshot = this.options.sessionManager.getSnapshot();
+      const cart = await readCart();
+      const hasLiveCart = cart.cartItemCount > 0 || cart.cartValue > 0;
       const cartProductIds = Array.isArray(triggerPayload.cartProductIds)
         ? triggerPayload.cartProductIds.map(String)
-        : snapshot.cartProductIds;
+        : hasLiveCart
+          ? cart.cartProductIds
+          : snapshot.cartProductIds;
       const cartVariantIds = Array.isArray(triggerPayload.cartVariantIds)
         ? triggerPayload.cartVariantIds.map(String)
-        : Array.isArray(snapshot.context.cartVariantIds)
-          ? snapshot.context.cartVariantIds.map(String)
+        : hasLiveCart
+          ? cart.cartVariantIds
+          : Array.isArray(snapshot.context.cartVariantIds)
+            ? snapshot.context.cartVariantIds.map(String)
+            : [];
+      const cartItems = Array.isArray(triggerPayload.cartItems)
+        ? triggerPayload.cartItems
+        : hasLiveCart
+          ? cart.cartItems
           : [];
+      const cartItemCount =
+        typeof triggerPayload.cartItemCount === "number"
+          ? triggerPayload.cartItemCount
+          : hasLiveCart
+            ? cart.cartItemCount
+            : Number(snapshot.context.cartItemCount || 0);
       const cartValue =
         typeof triggerPayload.cartValue === "number"
           ? triggerPayload.cartValue
-          : snapshot.cartValue;
+          : hasLiveCart
+            ? cart.cartValue
+            : snapshot.cartValue;
       const auth = await this.options.sessionManager.getSignedAuthPayload();
       if (!auth) {
         return this.mountLocalFallback(trigger, triggerPayload);
@@ -75,6 +94,8 @@ export class OfferPoller {
         currentPageType: getCurrentPageType(),
         cartProductIds,
         cartVariantIds,
+        cartItems,
+        cartItemCount,
         cartValue,
         dismissedWidgets: this.options.widgetManager.getDismissedWidgets(),
         trigger,
@@ -364,4 +385,94 @@ function getCurrentProductId() {
   return id.startsWith("gid://shopify/Product/")
     ? id
     : `gid://shopify/Product/${id}`;
+}
+
+async function readCart() {
+  try {
+    const response = await fetch("/cart.js", {
+      headers: { Accept: "application/json" },
+      keepalive: true,
+    });
+    if (!response.ok) throw new Error(`Cart read failed: ${response.status}`);
+    const cart = await response.json();
+    const items = Array.isArray(cart.items) ? cart.items : [];
+    const cartProductIds = items
+      .map((item: Record<string, unknown>) => getCartItemProductId(item))
+      .filter(Boolean);
+    const cartVariantIds = items
+      .map((item: Record<string, unknown>) => getCartItemVariantId(item))
+      .filter(Boolean);
+
+    return {
+      cartToken: cart.token || "",
+      cartProductIds,
+      cartVariantIds,
+      cartItems: items.map((item: Record<string, unknown>) => ({
+        productId: getCartItemProductId(item),
+        variantId: getCartItemVariantId(item),
+        quantity: Number(item.quantity || 1),
+        title: String(item.product_title || item.title || ""),
+        handle:
+          String(item.handle || item.url || "")
+            .split("/products/")[1]
+            ?.split(/[?#/]/)[0] || "",
+      })),
+      cartItemCount: Number(cart.item_count || items.length || 0),
+      cartValue: Number(cart.total_price || 0) / 100,
+    };
+  } catch {
+    return {
+      cartToken: "",
+      cartProductIds: [],
+      cartVariantIds: [],
+      cartItems: [],
+      cartItemCount: 0,
+      cartValue: 0,
+    };
+  }
+}
+
+function toProductGid(value: unknown) {
+  const text = String(value || "");
+  if (!text) return "";
+  return text.startsWith("gid://shopify/Product/")
+    ? text
+    : `gid://shopify/Product/${text}`;
+}
+
+function toVariantGid(value: unknown) {
+  const text = String(value || "");
+  if (!text) return "";
+  return text.startsWith("gid://shopify/ProductVariant/")
+    ? text
+    : `gid://shopify/ProductVariant/${text}`;
+}
+
+function getCartItemProductId(item: Record<string, unknown>) {
+  const product = asRecord(item.product);
+  return toProductGid(
+    item.product_id ||
+      item.productId ||
+      item.product_gid ||
+      item.productGid ||
+      product.id,
+  );
+}
+
+function getCartItemVariantId(item: Record<string, unknown>) {
+  const variant = asRecord(item.variant);
+  return toVariantGid(
+    item.variant_id ||
+      item.variantId ||
+      item.id ||
+      item.variant_gid ||
+      item.variantGid ||
+      variant.id,
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
