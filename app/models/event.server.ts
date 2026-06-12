@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { queues } from "../redis.server";
 import {
@@ -23,7 +24,7 @@ export async function ingestStorefrontEvents(input: {
         shop: input.shop,
         sessionId: session.id,
         type: event.type,
-        payload: event,
+        payload: event as Prisma.InputJsonValue,
         createdAt: event.ts ? new Date(Number(event.ts)) : new Date(),
       })),
     });

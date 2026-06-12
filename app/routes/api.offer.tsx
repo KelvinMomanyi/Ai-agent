@@ -1,9 +1,17 @@
-import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
+import {
+  json,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "@remix-run/node";
+import type { AppSettings, Experiment } from "@prisma/client";
 import prisma from "../db.server";
 import { getOfferDecision } from "../ai/decisionEngine.server";
 import type { CurrentPageType, OfferDecision } from "../ai/types";
 import { enforceCatalogBackedDecision } from "../models/catalogGuard.server";
-import { buildOfferCandidates, createOfferRecord } from "../models/offer.server";
+import {
+  buildOfferCandidates,
+  createOfferRecord,
+} from "../models/offer.server";
 import {
   getShopperSession,
   toShopperSessionSnapshot,
@@ -30,6 +38,8 @@ type OfferBody = {
   currentProductId?: string;
   currentPageType?: string;
   cartProductIds?: string[];
+  cartVariantIds?: string[];
+  cartItems?: Array<Record<string, unknown>>;
   cartValue?: number;
   dismissedWidgets?: string[];
   trigger?: string;
@@ -51,7 +61,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const { shop, sessionId } = auth;
 
     if (!shop || !(await isInstalledShop(shop))) {
-      return json({ widgetType: null, payload: {} }, { status: 400, headers: withCors() });
+      return json(
+        { widgetType: null, payload: {} },
+        { status: 400, headers: withCors() },
+      );
     }
 
     const requestCount = await incrementRateLimit(
@@ -65,12 +78,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
+    const requestCartProductIds = await resolveCartProductIds(shop, body);
+    const requestCartVariantIds = uniqueStrings([
+      ...toStringArray(body.cartVariantIds),
+      ...extractCartItemVariantIds(body.cartItems),
+    ]);
     const cacheKey = cacheKeys.offer(
       sessionId,
       [
         body.currentProductId || "none",
         body.trigger || "manual",
-        (body.cartProductIds || []).join(",") || "empty",
+        requestCartProductIds.join(",") ||
+          requestCartVariantIds.join(",") ||
+          "empty",
       ].join(":"),
     );
     const settings = await getCachedAppSettings(shop);
@@ -89,17 +109,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return upsertShopperSessionFromEvents({
         shop,
         sessionId,
-        events: [{ type: "session_sync", cartProductIds: body.cartProductIds || [] }],
+        events: [
+          {
+            type: "session_sync",
+            cartProductIds: requestCartProductIds,
+            cartVariantIds: requestCartVariantIds,
+            cartItemCount:
+              body.cartItems?.length || requestCartVariantIds.length,
+            cartValue: body.cartValue,
+          },
+        ],
       });
     });
 
     const snapshot = toShopperSessionSnapshot(session);
-    const requestCartProductIds = body.cartProductIds || session.cartProductIds;
     const decisionSession = {
       ...snapshot,
       cartProductIds: requestCartProductIds,
       context: {
         ...snapshot.context,
+        cartVariantIds: requestCartVariantIds,
+        cartItemCount: body.cartItems?.length || requestCartVariantIds.length,
         cartValue:
           typeof body.cartValue === "number"
             ? body.cartValue
@@ -154,6 +184,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         currentProductId: body.currentProductId,
         currentPageType: body.currentPageType,
         cartProductIds: requestCartProductIds,
+        cartVariantIds: requestCartVariantIds,
+        cartItems: body.cartItems || [],
         cartValue: body.cartValue,
         session: decisionSession,
       },
@@ -195,7 +227,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.error("AOVBoost offer route failed:", getErrorMessage(error));
     return json(
-      { widgetType: null, payload: {}, reasoning: "failed_closed", confidence: 0 },
+      {
+        widgetType: null,
+        payload: {},
+        reasoning: "failed_closed",
+        confidence: 0,
+      },
       { headers: withCors() },
     );
   }
@@ -227,18 +264,129 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function resolveCartProductIds(shop: string, body: OfferBody) {
+  const directProductIds = uniqueStrings([
+    ...toStringArray(body.cartProductIds),
+    ...extractCartItemProductIds(body.cartItems),
+  ]);
+  if (directProductIds.length > 0) return directProductIds;
+
+  const cartVariantIds = uniqueStrings([
+    ...toStringArray(body.cartVariantIds),
+    ...extractCartItemVariantIds(body.cartItems),
+  ]);
+  if (cartVariantIds.length === 0) return [];
+
+  const cartVariantKeys = new Set(cartVariantIds.flatMap(toVariantLookupKeys));
+  const products = await prisma.product.findMany({
+    where: { shop },
+    select: { id: true, metafields: true },
+  });
+
+  return products
+    .filter((product) =>
+      getProductVariantIds(product.metafields).some((variantId) =>
+        toVariantLookupKeys(variantId).some((key) => cartVariantKeys.has(key)),
+      ),
+    )
+    .map((product) => product.id);
+}
+
+function extractCartItemProductIds(items: OfferBody["cartItems"]) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map(
+      (item) =>
+        item.productId ||
+        item.product_id ||
+        item.productGid ||
+        item.product_gid,
+    )
+    .map(String)
+    .filter(Boolean);
+}
+
+function extractCartItemVariantIds(items: OfferBody["cartItems"]) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map(
+      (item) =>
+        item.variantId ||
+        item.variant_id ||
+        item.variantGid ||
+        item.variant_gid,
+    )
+    .map(String)
+    .filter(Boolean);
+}
+
+function getProductVariantIds(metafields: unknown) {
+  const record = asRecord(metafields);
+  return [
+    record.defaultVariantId,
+    record.variantId,
+    record["aovboost.defaultVariantId"],
+    record["aovboost.variantId"],
+    asRecord(record.defaultVariantId).value,
+    asRecord(record.variantId).value,
+    asRecord(record["aovboost.defaultVariantId"]).value,
+    asRecord(record["aovboost.variantId"]).value,
+  ]
+    .map(String)
+    .filter((value) => value && value !== "[object Object]");
+}
+
+function toVariantLookupKeys(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+
+  const withoutQuery = text.split("?")[0];
+  const lastSegment =
+    withoutQuery.split("/").filter(Boolean).pop() || withoutQuery;
+  return uniqueStrings([
+    text,
+    withoutQuery,
+    lastSegment,
+    `gid://shopify/ProductVariant/${lastSegment}`,
+  ]);
+}
+
+function toStringArray(value: unknown) {
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
+function uniqueStrings(values: unknown[]) {
+  return Array.from(
+    new Set(
+      values
+        .map(String)
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 async function isInstalledShop(shop: string) {
   const [session, legacyShop] = await Promise.all([
     prisma.session.findFirst({ where: { shop }, select: { id: true } }),
-    prisma.shop.findUnique({ where: { shopDomain: shop }, select: { shopDomain: true } }),
+    prisma.shop.findUnique({
+      where: { shopDomain: shop },
+      select: { shopDomain: true },
+    }),
   ]);
 
   return Boolean(session || legacyShop);
 }
 
-async function getCachedAppSettings(shop: string) {
+async function getCachedAppSettings(shop: string): Promise<AppSettings> {
   const key = `settings:${shop}`;
-  const cached = await getJsonCache(key);
+  const cached = await getJsonCache<AppSettings>(key);
   if (cached) return cached;
 
   const settings = await prisma.appSettings.upsert({
@@ -256,12 +404,14 @@ async function getCachedExperimentVariant(
   sessionId: string,
 ) {
   const key = `experiment:${shop}:${widgetType}`;
-  const experiment = await getJsonCache(key);
+  const experiment = await getJsonCache<Experiment>(key);
 
-  const exp = experiment || (await prisma.experiment.findFirst({
-    where: { shop, isActive: true, widgetType },
-    orderBy: { startedAt: "desc" },
-  }));
+  const exp =
+    experiment ||
+    (await prisma.experiment.findFirst({
+      where: { shop, isActive: true, widgetType },
+      orderBy: { startedAt: "desc" },
+    }));
 
   if (!exp) return null;
 

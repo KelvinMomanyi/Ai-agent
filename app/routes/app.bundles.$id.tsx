@@ -1,9 +1,18 @@
-import { json, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
+import {
+  json,
+  redirect,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "@remix-run/node";
 import { useActionData, useLoaderData } from "@remix-run/react";
 import { Banner, BlockStack, Layout, Page } from "@shopify/polaris";
 import { BundleForm } from "../components/bundles/BundleForm";
 import prisma from "../db.server";
-import { getBundle, saveBundle, type BundleInput } from "../models/bundle.server";
+import {
+  getBundle,
+  saveBundle,
+  type BundleInput,
+} from "../models/bundle.server";
 import { authenticate } from "../shopify.server";
 
 type BundleItemInput = {
@@ -49,10 +58,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
           description: "",
           discountType: "none" as const,
           discountValue: "0",
-          triggerProductIds: [],
+          triggerProductIds: [] as string[],
           isActive: true,
           priority: 0,
-          items: [],
+          items: [] as BundleItemInput[],
         },
     products: products.map((product) => ({
       id: product.id,
@@ -77,9 +86,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return json(
       {
         errors: {
-          items: error instanceof Error
-            ? error.message
-            : "Bundle products must exist in this store.",
+          items:
+            error instanceof Error
+              ? error.message
+              : "Bundle products must exist in this store.",
         },
       },
       { status: 400 },
@@ -132,7 +142,11 @@ function parseBundleInput(formData: FormData): BundleInput {
     discountValue: String(formData.get("discountValue") || "0"),
     triggerProductIds: triggerProductIds.map(String).filter(Boolean),
     isActive: String(formData.get("isActive")) === "true",
-    priority: clampNumber(parseInt(String(formData.get("priority") || "0"), 10), 0, 100),
+    priority: clampNumber(
+      parseInt(String(formData.get("priority") || "0"), 10),
+      0,
+      100,
+    ),
     items: items
       .map((item) => ({
         productId: String(item.productId || ""),

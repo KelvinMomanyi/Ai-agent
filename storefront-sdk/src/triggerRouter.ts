@@ -183,9 +183,13 @@ export class TriggerRouter {
     document.addEventListener("aovboost:trigger", this.handleCustomTrigger, {
       signal: this.abortController.signal,
     });
-    document.addEventListener("aovboost:profile-event", this.handleProfileEvent, {
-      signal: this.abortController.signal,
-    });
+    document.addEventListener(
+      "aovboost:profile-event",
+      this.handleProfileEvent,
+      {
+        signal: this.abortController.signal,
+      },
+    );
     document.addEventListener("aovboost:system-event", this.handleSystemEvent, {
       signal: this.abortController.signal,
     });
@@ -214,7 +218,9 @@ export class TriggerRouter {
   }
 
   private handleStorefrontEvent = (event: Event) => {
-    const detail = normalizePayload((event as CustomEvent).detail) as AovboostEvent;
+    const detail = normalizePayload(
+      (event as CustomEvent).detail,
+    ) as AovboostEvent;
     if (!detail.type) return;
 
     if (detail.type === "product_view") {
@@ -228,7 +234,10 @@ export class TriggerRouter {
       });
     }
 
-    if (detail.type === "search" && String(detail.query || "").trim().length >= 2) {
+    if (
+      detail.type === "search" &&
+      String(detail.query || "").trim().length >= 2
+    ) {
       this.fire("search_query", {
         query: String(detail.query || "").trim(),
       });
@@ -279,12 +288,16 @@ export class TriggerRouter {
     this.clearTimer("product_dwell");
     if (!productId || !isProductPage()) return;
 
-    this.setTimer("product_dwell", () => {
-      this.fire("long_product_dwell", {
-        productId,
-        dwellSeconds: PRODUCT_DWELL_MS / 1000,
-      });
-    }, PRODUCT_DWELL_MS);
+    this.setTimer(
+      "product_dwell",
+      () => {
+        this.fire("long_product_dwell", {
+          productId,
+          dwellSeconds: PRODUCT_DWELL_MS / 1000,
+        });
+      },
+      PRODUCT_DWELL_MS,
+    );
   }
 
   private handleRepeatedProductView(productId: string): void {
@@ -303,7 +316,9 @@ export class TriggerRouter {
 
   private installComparisonTracking(): void {
     const text = `${window.location.pathname} ${document.title}`.toLowerCase();
-    if (/\b(compare|comparison|versus|vs|alternative|competitor)\b/.test(text)) {
+    if (
+      /\b(compare|comparison|versus|vs|alternative|competitor)\b/.test(text)
+    ) {
       window.setTimeout(() => {
         this.fire("comparison_page_visit", { path: window.location.pathname });
       }, 800);
@@ -335,12 +350,16 @@ export class TriggerRouter {
 
         this.activePriceTarget = target;
         this.clearTimer("price_hover");
-        this.setTimer("price_hover", () => {
-          this.fire("price_hesitation", {
-            productId: getCurrentProductId(),
-            priceText: target.textContent?.trim().slice(0, 80) || "",
-          });
-        }, 1200);
+        this.setTimer(
+          "price_hover",
+          () => {
+            this.fire("price_hesitation", {
+              productId: getCurrentProductId(),
+              priceText: target.textContent?.trim().slice(0, 80) || "",
+            });
+          },
+          1200,
+        );
       },
       { signal: this.abortController.signal },
     );
@@ -363,7 +382,10 @@ export class TriggerRouter {
     document.addEventListener(
       "focusin",
       (event) => {
-        const target = event.target as HTMLInputElement | HTMLTextAreaElement | null;
+        const target = event.target as
+          | HTMLInputElement
+          | HTMLTextAreaElement
+          | null;
         if (!target || !isCouponField(target)) return;
         this.fire("coupon_field_focus", {
           fieldName: target.name || target.id || "",
@@ -393,11 +415,15 @@ export class TriggerRouter {
   private installInactivityTracking(): void {
     const reset = () => {
       this.clearTimer("inactivity");
-      this.setTimer("inactivity", () => {
-        this.fire("inactivity_timeout", {
-          idleSeconds: INACTIVITY_MS / 1000,
-        });
-      }, INACTIVITY_MS);
+      this.setTimer(
+        "inactivity",
+        () => {
+          this.fire("inactivity_timeout", {
+            idleSeconds: INACTIVITY_MS / 1000,
+          });
+        },
+        INACTIVITY_MS,
+      );
     };
 
     ["click", "keydown", "scroll", "touchstart"].forEach((eventName) => {
@@ -465,7 +491,10 @@ export class TriggerRouter {
     });
   }
 
-  private syncCartAndFire(trigger: KnownTrigger, basePayload: TriggerPayload): void {
+  private syncCartAndFire(
+    trigger: KnownTrigger,
+    basePayload: TriggerPayload,
+  ): void {
     window.setTimeout(async () => {
       const cart = await this.readCart();
       const payload = { ...basePayload, ...cart };
@@ -487,12 +516,26 @@ export class TriggerRouter {
       const cart = await response.json();
       const items = Array.isArray(cart.items) ? cart.items : [];
       const cartProductIds = items
-        .map((item: Record<string, unknown>) => toProductGid(item.product_id))
+        .map((item: Record<string, unknown>) => getCartItemProductId(item))
+        .filter(Boolean);
+      const cartVariantIds = items
+        .map((item: Record<string, unknown>) => getCartItemVariantId(item))
         .filter(Boolean);
 
       return {
         cartToken: cart.token || "",
         cartProductIds,
+        cartVariantIds,
+        cartItems: items.map((item: Record<string, unknown>) => ({
+          productId: getCartItemProductId(item),
+          variantId: getCartItemVariantId(item),
+          quantity: Number(item.quantity || 1),
+          title: String(item.product_title || item.title || ""),
+          handle:
+            String(item.handle || item.url || "")
+              .split("/products/")[1]
+              ?.split(/[?#/]/)[0] || "",
+        })),
         cartItemCount: Number(cart.item_count || items.length || 0),
         cartValue: Number(cart.total_price || 0) / 100,
       };
@@ -500,6 +543,8 @@ export class TriggerRouter {
       return {
         cartToken: "",
         cartProductIds: [],
+        cartVariantIds: [],
+        cartItems: [],
         cartItemCount: 0,
         cartValue: 0,
       };
@@ -515,12 +560,16 @@ export class TriggerRouter {
 
     this.clearTimer("cart_idle");
     if (cartItemCount > 0) {
-      this.setTimer("cart_idle", () => {
-        this.fire("cart_abandoned", {
-          ...payload,
-          idleSeconds: CART_IDLE_MS / 1000,
-        });
-      }, CART_IDLE_MS);
+      this.setTimer(
+        "cart_idle",
+        () => {
+          this.fire("cart_abandoned", {
+            ...payload,
+            idleSeconds: CART_IDLE_MS / 1000,
+          });
+        },
+        CART_IDLE_MS,
+      );
     }
   }
 
@@ -563,11 +612,13 @@ export class TriggerRouter {
 }
 
 function getTriggerDefinition(type: string): TriggerDefinition {
-  return TRIGGERS[type as KnownTrigger] || {
-    category: "external_system",
-    widgetHint: "chat",
-    throttleMs: 30 * 1000,
-  };
+  return (
+    TRIGGERS[type as KnownTrigger] || {
+      category: "external_system",
+      widgetHint: "chat",
+      throttleMs: 30 * 1000,
+    }
+  );
 }
 
 function normalizePayload(value: unknown): TriggerPayload {
@@ -593,7 +644,10 @@ function markSessionTrigger(type: string) {
 }
 
 function isProductPage() {
-  return /\/products(?:\/|$)/.test(window.location.pathname) || Boolean(getCurrentProductId());
+  return (
+    /\/products(?:\/|$)/.test(window.location.pathname) ||
+    Boolean(getCurrentProductId())
+  );
 }
 
 function isThankYouPage() {
@@ -619,6 +673,37 @@ function toProductGid(value: unknown) {
   return text.startsWith("gid://shopify/Product/")
     ? text
     : `gid://shopify/Product/${text}`;
+}
+
+function toVariantGid(value: unknown) {
+  const text = String(value || "");
+  if (!text) return "";
+  return text.startsWith("gid://shopify/ProductVariant/")
+    ? text
+    : `gid://shopify/ProductVariant/${text}`;
+}
+
+function getCartItemProductId(item: Record<string, unknown>) {
+  const product = normalizePayload(item.product);
+  return toProductGid(
+    item.product_id ||
+      item.productId ||
+      item.product_gid ||
+      item.productGid ||
+      product.id,
+  );
+}
+
+function getCartItemVariantId(item: Record<string, unknown>) {
+  const variant = normalizePayload(item.variant);
+  return toVariantGid(
+    item.variant_id ||
+      item.variantId ||
+      item.id ||
+      item.variant_gid ||
+      item.variantGid ||
+      variant.id,
+  );
 }
 
 function closestPriceElement(target: EventTarget | null) {

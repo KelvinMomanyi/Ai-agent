@@ -55,6 +55,11 @@ export class OfferPoller {
       const cartProductIds = Array.isArray(triggerPayload.cartProductIds)
         ? triggerPayload.cartProductIds.map(String)
         : snapshot.cartProductIds;
+      const cartVariantIds = Array.isArray(triggerPayload.cartVariantIds)
+        ? triggerPayload.cartVariantIds.map(String)
+        : Array.isArray(snapshot.context.cartVariantIds)
+          ? snapshot.context.cartVariantIds.map(String)
+          : [];
       const cartValue =
         typeof triggerPayload.cartValue === "number"
           ? triggerPayload.cartValue
@@ -69,6 +74,7 @@ export class OfferPoller {
         currentProductId: getCurrentProductId(),
         currentPageType: getCurrentPageType(),
         cartProductIds,
+        cartVariantIds,
         cartValue,
         dismissedWidgets: this.options.widgetManager.getDismissedWidgets(),
         trigger,
@@ -93,7 +99,8 @@ export class OfferPoller {
         const recovered =
           await this.options.sessionManager.applySessionFromResponse(response);
         if (!recovered) await this.options.sessionManager.refreshAuth();
-        const refreshedAuth = await this.options.sessionManager.getSignedAuthPayload();
+        const refreshedAuth =
+          await this.options.sessionManager.getSignedAuthPayload();
         if (!refreshedAuth) {
           return this.mountLocalFallback(trigger, triggerPayload);
         }
@@ -162,9 +169,11 @@ function buildLocalFallbackDecision(
         widgetType: "chat",
         payload: {
           offerId: `local:${trigger}`,
-          greeting: "Hi. I can help you compare products and find useful add-ons.",
+          greeting:
+            "Hi. I can help you compare products and find useful add-ons.",
           copy: {
-            greeting: "Hi. I can help you compare products and find useful add-ons.",
+            greeting:
+              "Hi. I can help you compare products and find useful add-ons.",
             ctaAccept: "Chat with AI",
             ctaDecline: "Browse myself",
           },
@@ -243,7 +252,9 @@ function buildLocalFallbackDecision(
               : "Inventory is limited for this product.",
           copy: {
             headline:
-              trigger === "price_drop_webhook" ? "Price update" : "Limited stock",
+              trigger === "price_drop_webhook"
+                ? "Price update"
+                : "Limited stock",
             subheadline:
               trigger === "price_drop_webhook"
                 ? "The price on this product has changed."
@@ -332,7 +343,10 @@ function getCurrentPageType() {
   }
   if (/\/cart(?:\/|$)/.test(path) || pageType.includes("cart")) return "cart";
   if (/\/checkout(?:\/|$)/.test(path)) return "checkout";
-  if (/\/thank_you(?:\/|$)/.test(path) || Boolean((window as any).Shopify?.checkout)) {
+  if (
+    /\/thank_you(?:\/|$)/.test(path) ||
+    Boolean((window as any).Shopify?.checkout)
+  ) {
     return "thankyou";
   }
   return "other";

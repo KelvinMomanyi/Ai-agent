@@ -1,4 +1,9 @@
-import { json, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
+import {
+  json,
+  redirect,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 import {
   Badge,
@@ -10,7 +15,11 @@ import {
   Page,
   Text,
 } from "@shopify/polaris";
-import { deleteBundle, listBundles, toggleBundle } from "../models/bundle.server";
+import {
+  deleteBundle,
+  listBundles,
+  toggleBundle,
+} from "../models/bundle.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -98,9 +107,9 @@ export default function BundleIndex() {
                         </Badge>
                       </InlineStack>
                       <Text as="p" tone="subdued">
-                        {bundle.triggerProductCount} triggers, {bundle.itemCount} items,
-                        {" "}
-                        {bundle.discountSummary}, priority {bundle.priority}
+                        {bundle.triggerProductCount} triggers,{" "}
+                        {bundle.itemCount} items, {bundle.discountSummary},
+                        priority {bundle.priority}
                       </Text>
                     </BlockStack>
 
@@ -113,14 +122,14 @@ export default function BundleIndex() {
                           name="isActive"
                           value={String(bundle.isActive)}
                         />
-                        <button type="hidden" name="intent" value="toggle" />
+                        <input type="hidden" name="intent" value="toggle" />
                         <Button submit loading={isSubmitting}>
                           {bundle.isActive ? "Deactivate" : "Activate"}
                         </Button>
                       </Form>
                       <Form method="post">
                         <input type="hidden" name="id" value={bundle.id} />
-                        <button type="hidden" name="intent" value="delete" />
+                        <input type="hidden" name="intent" value="delete" />
                         <Button submit tone="critical" loading={isSubmitting}>
                           Delete
                         </Button>

@@ -19,6 +19,8 @@ type StorefrontEvent = {
   productId?: string;
   depth?: number;
   cartProductIds?: string[];
+  cartVariantIds?: string[];
+  cartItemCount?: number;
   cartValue?: number;
   [key: string]: unknown;
 };
@@ -40,6 +42,8 @@ export class SessionManager {
   private viewedProductIds = new Set<string>();
   private productViewCounts = new Map<string, number>();
   private cartProductIds = new Set<string>();
+  private cartVariantIds = new Set<string>();
+  private cartItemCount = 0;
   private pageViews = 0;
   private maxScrollDepth = 0;
   private cartActionCount = 0;
@@ -85,7 +89,10 @@ export class SessionManager {
     }
 
     if (event.type === "scroll_depth") {
-      this.maxScrollDepth = Math.max(this.maxScrollDepth, Number(event.depth || 0));
+      this.maxScrollDepth = Math.max(
+        this.maxScrollDepth,
+        Number(event.depth || 0),
+      );
     }
 
     if (event.type === "add_to_cart") {
@@ -94,8 +101,19 @@ export class SessionManager {
       const productId = getProductId(event);
       if (productId) this.cartProductIds.add(productId);
       if (Array.isArray(event.cartProductIds)) {
-        event.cartProductIds.forEach((id) => this.cartProductIds.add(String(id)));
+        event.cartProductIds.forEach((id) =>
+          this.cartProductIds.add(String(id)),
+        );
       }
+      if (Array.isArray(event.cartVariantIds)) {
+        event.cartVariantIds.forEach((id) =>
+          this.cartVariantIds.add(String(id)),
+        );
+      }
+      this.cartItemCount = Math.max(
+        this.cartItemCount,
+        Number(event.cartItemCount || this.cartItemCount),
+      );
       this.cartValue = Math.max(this.cartValue, Number(event.cartValue || 0));
       this.journeyStage = "buying";
     }
@@ -105,8 +123,16 @@ export class SessionManager {
       if (Array.isArray(event.cartProductIds)) {
         this.cartProductIds = new Set(event.cartProductIds.map(String));
       }
+      if (Array.isArray(event.cartVariantIds)) {
+        this.cartVariantIds = new Set(event.cartVariantIds.map(String));
+      }
+      this.cartItemCount = Number(
+        event.cartItemCount || this.cartProductIds.size,
+      );
       this.cartValue = Number(event.cartValue || 0);
-      if (this.cartProductIds.size > 0) this.journeyStage = "buying";
+      if (this.cartProductIds.size > 0 || this.cartItemCount > 0) {
+        this.journeyStage = "buying";
+      }
     }
 
     if (event.type === "remove_from_cart") {
@@ -142,14 +168,18 @@ export class SessionManager {
       0,
       100,
     );
-    const repeatedProductWithoutCart = Array.from(this.productViewCounts.entries()).some(
+    const repeatedProductWithoutCart = Array.from(
+      this.productViewCounts.entries(),
+    ).some(
       ([productId, count]) => count >= 2 && !this.cartProductIds.has(productId),
     );
     const secondsSinceCartAction = this.lastCartActionAt
       ? (Date.now() - this.lastCartActionAt) / 1000
       : sessionDuration;
     const hesitationScore = clamp(
-      (intentScore > 40 && this.cartActionCount === 0 && secondsSinceCartAction >= 90
+      (intentScore > 40 &&
+      this.cartActionCount === 0 &&
+      secondsSinceCartAction >= 90
         ? 55
         : 0) + (repeatedProductWithoutCart ? 35 : 0),
       0,
@@ -170,6 +200,8 @@ export class SessionManager {
         maxScrollDepth: this.maxScrollDepth,
         productViewCounts: Object.fromEntries(this.productViewCounts),
         cartActionCount: this.cartActionCount,
+        cartItemCount: this.cartItemCount,
+        cartVariantIds: Array.from(this.cartVariantIds),
         cartValue: this.cartValue,
         lastEventType: this.lastEventType,
       },
@@ -317,6 +349,10 @@ export class SessionManager {
       this.journeyStage = "buying";
       return;
     }
+    if (this.cartItemCount > 0) {
+      this.journeyStage = "buying";
+      return;
+    }
 
     if (
       this.getSnapshotDuration() >= 60 ||
@@ -341,7 +377,9 @@ export class SessionManager {
   private async ensureStorefrontSession(
     options: { forceRefresh?: boolean } = {},
   ): Promise<void> {
-    const stored = options.forceRefresh ? null : this.getStoredStorefrontSession();
+    const stored = options.forceRefresh
+      ? null
+      : this.getStoredStorefrontSession();
     if (stored) {
       this.anonymousId = stored.sessionId;
       this.sessionToken = stored.sessionToken;
@@ -352,7 +390,8 @@ export class SessionManager {
       method: "GET",
       headers: { Accept: "application/json" },
     });
-    if (!response.ok) throw new Error(`Session bootstrap failed: ${response.status}`);
+    if (!response.ok)
+      throw new Error(`Session bootstrap failed: ${response.status}`);
 
     const next = (await response.json()) as StoredStorefrontSession;
     if (!this.applyStorefrontSession(next)) {
@@ -382,7 +421,10 @@ export class SessionManager {
 
   private storeStorefrontSession(session: StoredStorefrontSession) {
     try {
-      window.localStorage.setItem(SIGNED_SESSION_STORAGE_KEY, JSON.stringify(session));
+      window.localStorage.setItem(
+        SIGNED_SESSION_STORAGE_KEY,
+        JSON.stringify(session),
+      );
       window.localStorage.setItem(STORAGE_KEY, session.sessionId);
     } catch {
       // Storage failures leave the current in-memory session usable for this page.
@@ -411,7 +453,6 @@ export class SessionManager {
   private getSnapshotDuration(): number {
     return Math.round((Date.now() - this.startedAt) / 1000);
   }
-
 }
 
 function asStorefrontSession(value: unknown): StoredStorefrontSession | null {

@@ -31,7 +31,10 @@ export async function getShopperSession(shop: string, sessionId: string) {
   });
 }
 
-export async function getShopperSessionSnapshot(shop: string, sessionId: string) {
+export async function getShopperSessionSnapshot(
+  shop: string,
+  sessionId: string,
+) {
   const session = await getShopperSession(shop, sessionId);
   if (!session) return null;
   return toShopperSessionSnapshot(session);
@@ -84,14 +87,22 @@ export function computeSessionState(
 ): SessionComputation {
   const viewedProductIds = new Set(existing?.viewedProductIds || []);
   const cartProductIds = new Set(existing?.cartProductIds || []);
+  const cartVariantIds = new Set(
+    toStringArray(asRecord(existing?.context).cartVariantIds),
+  );
   let totalPageViews = existing?.totalPageViews || 0;
   let sessionDuration = existing?.sessionDuration || 0;
   let maxScrollDepth = Number(asRecord(existing?.context).maxScrollDepth || 0);
   let addToCartCount = Number(asRecord(existing?.context).addToCartCount || 0);
+  let cartItemCount = Number(
+    asRecord(existing?.context).cartItemCount || cartProductIds.size,
+  );
   let cartValue = Number(asRecord(existing?.context).cartValue || 0);
   let lastEventType = String(asRecord(existing?.context).lastEventType || "");
   let intentSignals = Number(asRecord(existing?.context).intentSignals || 0);
-  let hesitationSignals = Number(asRecord(existing?.context).hesitationSignals || 0);
+  let hesitationSignals = Number(
+    asRecord(existing?.context).hesitationSignals || 0,
+  );
   const productViewCounts = new Map<string, number>();
 
   for (const productId of existing?.viewedProductIds || []) {
@@ -107,7 +118,10 @@ export function computeSessionState(
       const productId = getProductId(event);
       if (productId) {
         viewedProductIds.add(productId);
-        productViewCounts.set(productId, (productViewCounts.get(productId) || 0) + 1);
+        productViewCounts.set(
+          productId,
+          (productViewCounts.get(productId) || 0) + 1,
+        );
       }
     }
 
@@ -115,17 +129,40 @@ export function computeSessionState(
       addToCartCount += 1;
       const productId = getProductId(event);
       if (productId) cartProductIds.add(productId);
+      for (const variantId of toStringArray(event.cartVariantIds)) {
+        cartVariantIds.add(variantId);
+      }
+      cartItemCount = Math.max(cartItemCount, Number(event.cartItemCount || 0));
       cartValue = Math.max(cartValue, getCartValue(event));
     }
 
     if (event.type === "cart_update") {
       const nextCartProductIds = toStringArray(event.cartProductIds);
-      if (nextCartProductIds.length > 0 || Number(event.cartItemCount || 0) === 0) {
+      if (
+        nextCartProductIds.length > 0 ||
+        Number(event.cartItemCount || 0) === 0
+      ) {
         cartProductIds.clear();
       }
       for (const productId of nextCartProductIds) {
         cartProductIds.add(productId);
       }
+      const nextCartVariantIds = toStringArray(event.cartVariantIds);
+      if (
+        nextCartVariantIds.length > 0 ||
+        Number(event.cartItemCount || 0) === 0
+      ) {
+        cartVariantIds.clear();
+      }
+      for (const variantId of nextCartVariantIds) {
+        cartVariantIds.add(variantId);
+      }
+      cartItemCount = Number(
+        event.cartItemCount ||
+          nextCartProductIds.length ||
+          nextCartVariantIds.length ||
+          0,
+      );
       cartValue = getCartValue(event);
     }
 
@@ -155,14 +192,38 @@ export function computeSessionState(
       );
       cartValue = Math.max(
         cartValue,
-        Number(snapshot.cartValue || snapshot.cartTotal || event.cartValue || event.cartTotal || 0),
+        Number(
+          snapshot.cartValue ||
+            snapshot.cartTotal ||
+            event.cartValue ||
+            event.cartTotal ||
+            0,
+        ),
       );
-      for (const productId of toStringArray(snapshot.viewedProductIds || event.viewedProductIds)) {
+      for (const productId of toStringArray(
+        snapshot.viewedProductIds || event.viewedProductIds,
+      )) {
         viewedProductIds.add(productId);
       }
-      for (const productId of toStringArray(snapshot.cartProductIds || event.cartProductIds)) {
+      for (const productId of toStringArray(
+        snapshot.cartProductIds || event.cartProductIds,
+      )) {
         cartProductIds.add(productId);
       }
+      for (const variantId of toStringArray(
+        snapshot.cartVariantIds || event.cartVariantIds,
+      )) {
+        cartVariantIds.add(variantId);
+      }
+      cartItemCount = Math.max(
+        cartItemCount,
+        Number(
+          snapshot.cartItemCount ||
+            event.cartItemCount ||
+            cartProductIds.size ||
+            cartVariantIds.size,
+        ),
+      );
     }
   }
 
@@ -173,18 +234,26 @@ export function computeSessionState(
   const intentScore = clamp(
     totalPageViews * 2 +
       productViews * 5 +
-      (maxScrollDepth >= 90 ? 10 : maxScrollDepth >= 75 ? 8 : maxScrollDepth >= 50 ? 5 : 0) +
+      (maxScrollDepth >= 90
+        ? 10
+        : maxScrollDepth >= 75
+          ? 8
+          : maxScrollDepth >= 50
+            ? 5
+            : 0) +
       Math.min(sessionDuration / 120, 1) * 30 +
-      (cartProductIds.size > 0 ? 30 : 0) +
+      (cartProductIds.size > 0 || cartItemCount > 0 ? 30 : 0) +
       Math.min(intentSignals * 6, 24),
     0,
     100,
   );
-  const repeatedProductWithoutCart = Array.from(productViewCounts.entries()).some(
-    ([productId, count]) => count >= 2 && !cartProductIds.has(productId),
-  );
+  const repeatedProductWithoutCart = Array.from(
+    productViewCounts.entries(),
+  ).some(([productId, count]) => count >= 2 && !cartProductIds.has(productId));
   const hesitationScore = clamp(
-    (intentScore > 40 && addToCartCount === 0 && sessionDuration >= 90 ? 55 : 0) +
+    (intentScore > 40 && addToCartCount === 0 && sessionDuration >= 90
+      ? 55
+      : 0) +
       (repeatedProductWithoutCart ? 35 : 0) +
       Math.min(hesitationSignals * 15, 45),
     0,
@@ -193,7 +262,7 @@ export function computeSessionState(
   const journeyStage = computeJourneyStage({
     viewedCount: viewedProductIds.size,
     productViewCounts,
-    cartCount: cartProductIds.size,
+    cartCount: Math.max(cartProductIds.size, cartItemCount),
     sessionDuration,
   });
 
@@ -208,6 +277,8 @@ export function computeSessionState(
     context: {
       maxScrollDepth,
       addToCartCount,
+      cartItemCount,
+      cartVariantIds: Array.from(cartVariantIds),
       cartValue,
       intentSignals,
       hesitationSignals,

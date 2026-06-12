@@ -178,20 +178,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   );
   const bundlesInfo = bundles.length > 0
     ? bundles.map((b) => {
-        const items = b.items.map((i) => `  - ${i.product?.title || i.productId}`).join("\n");
-        const discount = b.discountType === "none" ? "" : ` (${b.discountValue}% off)`;
-        return `- "${b.name}"${discount}\n${items}`;
-      }).join("\n")
+      const items = b.items.map((i) => `  - ${i.product?.title || i.productId}`).join("\n");
+      const discount = b.discountType === "none" ? "" : ` (${b.discountValue}% off)`;
+      return `- "${b.name}"${discount}\n${items}`;
+    }).join("\n")
     : "No active bundles right now.";
 
   const catalogInfo =
     catalogProducts.length > 0
       ? catalogProducts
-          .map(
-            (p) =>
-              `- ${p.title} | $${p.price} | /products/${p.handle} | tags: ${p.tags.join(", ")}`,
-          )
-          .join("\n")
+        .map(
+          (p) =>
+            `- ${p.title} | $${p.price} | /products/${p.handle} | tags: ${p.tags.join(", ")}`,
+        )
+        .join("\n")
       : "No synced catalog products are available.";
 
   const brandVoiceSection = settings.brandVoice
@@ -360,9 +360,9 @@ function buildCatalogFallbackReply(
 
   const matches = messageIntent === "price_sensitive"
     ? catalogProducts
-        .slice()
-        .sort((left, right) => Number(left.price || 0) - Number(right.price || 0))
-        .slice(0, 3)
+      .slice()
+      .sort((left, right) => Number(left.price || 0) - Number(right.price || 0))
+      .slice(0, 3)
     : scoredProducts.length > 0
       ? scoredProducts.map((item) => item.product)
       : catalogProducts.slice(0, 3);
