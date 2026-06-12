@@ -265,6 +265,7 @@ export class ChatWidget extends BaseWidget {
         message: value,
         messageHistory: this.messages.slice(0, -2),
         currency: currency.code,
+        currencySource: currency.source,
         moneyFormat: currency.moneyFormat,
         moneyWithCurrencyFormat: currency.moneyWithCurrencyFormat,
         locale: currency.locale,

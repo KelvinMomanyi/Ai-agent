@@ -20,7 +20,13 @@ import {
   getShopperSession,
   upsertShopperSessionFromEvents,
 } from "../models/session.server";
-import { cacheKeys, incrementRateLimit } from "../redis.server";
+import {
+  cacheKeys,
+  getJsonCache,
+  incrementRateLimit,
+  setJsonCache,
+} from "../redis.server";
+import { unauthenticated } from "../shopify.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
 import {
   authenticateStorefrontRequest,
@@ -36,6 +42,7 @@ type ChatBody = {
   message?: string;
   messageHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   currency?: string;
+  currencySource?: string;
   moneyFormat?: string;
   moneyWithCurrencyFormat?: string;
   locale?: string;
@@ -163,7 +170,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const storeName = shop
     .replace(/\.[^.]+\.myshopify\.com$/, "")
     .replace(/[-_]/g, " ");
-  const currency = normalizeCurrencyInfo(body);
+  const currency = await resolveCurrencyInfo(shop, body);
   const recommendationSourceProductId =
     session.cartProductIds[0] || session.viewedProductIds.at(-1);
   const [rawBundles, recommendationCatalog] = await Promise.all([
@@ -256,6 +263,7 @@ Detected shopper intent:
 
 Store settings:
 - Discount threshold: ${formatPrice(settings.discountThreshold, currency)}
+- Active currency code: ${currency.code}
 - Blocked product GIDs: ${settings.blockedProductIds.join(", ") || "none"}
 - Shopper journey stage: ${session.journeyStage}
 
@@ -266,6 +274,7 @@ Guidelines:
 - Reference active bundles when they match what the shopper is looking at
 - If the cart qualifies for a discount (above threshold), mention it
 - If intent is price_sensitive, do not invent discount codes; suggest real lower-priced alternatives from the catalog and mention the configured threshold only when relevant
+- Use the active store currency exactly as shown in the catalog and threshold above. Do not use $, dollars, or USD unless the active currency code is USD.
 - Tone: ${settings.aiTone}
 - Keep responses under 3 sentences unless the shopper asks for detail
 - Never be pushy; if the shopper declines, respect it immediately
@@ -305,6 +314,7 @@ ${brandVoiceSection}`;
           userPrompt: JSON.stringify({
             message: userMessage,
             recentHistory: (body.messageHistory || []).slice(-12),
+            activeCurrency: currency,
           }),
           schemaType: "text",
           maxTokens: 300,
@@ -323,6 +333,7 @@ ${brandVoiceSection}`;
           catalog: catalogProducts,
           fallback: fallbackReply,
         });
+        finalReply = enforceReplyCurrency(finalReply, fallbackReply, currency);
         send({ delta: finalReply });
 
         await persistAssistantMessage(shop, session.id, finalReply, provider);
@@ -480,15 +491,97 @@ type CurrencyInfo = {
   moneyFormat?: string;
   moneyWithCurrencyFormat?: string;
   locale?: string;
+  source?: string;
 };
 
-function normalizeCurrencyInfo(body: ChatBody): CurrencyInfo {
+async function resolveCurrencyInfo(
+  shop: string,
+  body: ChatBody,
+): Promise<CurrencyInfo> {
+  const clientCurrency = normalizeCurrencyInfo(body, "");
+  const storeCurrency = await getCachedShopCurrencyInfo(shop);
+  const source = stringOrEmpty(body.currencySource);
+  const clientLooksLikeFallback =
+    source === "fallback" || (!source && clientCurrency.code === "USD");
+  const shouldTrustClient =
+    Boolean(clientCurrency.code) && !clientLooksLikeFallback;
+
   return {
-    code: normalizeCurrencyCode(body.currency),
+    code: shouldTrustClient
+      ? clientCurrency.code
+      : storeCurrency?.code || clientCurrency.code || "USD",
+    moneyFormat: shouldTrustClient
+      ? clientCurrency.moneyFormat || storeCurrency?.moneyFormat
+      : storeCurrency?.moneyFormat || clientCurrency.moneyFormat,
+    moneyWithCurrencyFormat: shouldTrustClient
+      ? clientCurrency.moneyWithCurrencyFormat ||
+        storeCurrency?.moneyWithCurrencyFormat
+      : storeCurrency?.moneyWithCurrencyFormat ||
+        clientCurrency.moneyWithCurrencyFormat,
+    locale: clientCurrency.locale || storeCurrency?.locale,
+    source: shouldTrustClient
+      ? source || "storefront"
+      : storeCurrency?.source || source,
+  };
+}
+
+function normalizeCurrencyInfo(body: ChatBody, fallback = "USD"): CurrencyInfo {
+  return {
+    code: normalizeCurrencyCode(body.currency, fallback),
     moneyFormat: stringOrEmpty(body.moneyFormat),
     moneyWithCurrencyFormat: stringOrEmpty(body.moneyWithCurrencyFormat),
     locale: stringOrEmpty(body.locale),
+    source: stringOrEmpty(body.currencySource),
   };
+}
+
+async function getCachedShopCurrencyInfo(shop: string) {
+  const key = `shop-currency:${shop}`;
+  const cached = await getJsonCache<CurrencyInfo>(key);
+  if (cached?.code) return cached;
+
+  try {
+    const { admin } = await unauthenticated.admin(shop);
+    const response = await admin.graphql(`#graphql
+      query AOVBoostShopCurrency {
+        shop {
+          currencyCode
+          currencyFormats {
+            moneyFormat
+            moneyWithCurrencyFormat
+          }
+        }
+      }
+    `);
+    const json = await response.json();
+    const shopData = json?.data?.shop || {};
+    const currency: CurrencyInfo = {
+      code: normalizeCurrencyCode(shopData.currencyCode),
+      moneyFormat: stringOrEmpty(shopData.currencyFormats?.moneyFormat),
+      moneyWithCurrencyFormat: stringOrEmpty(
+        shopData.currencyFormats?.moneyWithCurrencyFormat,
+      ),
+      source: "shopify_admin",
+    };
+    await setJsonCache(key, currency, 60 * 60 * 6);
+    return currency;
+  } catch (error) {
+    console.warn("AOVBoost could not resolve shop currency:", {
+      shop,
+      error: getErrorMessage(error),
+    });
+    return null;
+  }
+}
+
+function enforceReplyCurrency(
+  reply: string,
+  fallback: string,
+  currency: CurrencyInfo,
+) {
+  if (currency.code === "USD") return reply;
+  if (/\$\s*\d|\bUSD\b|\bdollars?\b/i.test(reply)) return fallback;
+  return reply;
 }
 
 function formatPrice(value: unknown, currency: CurrencyInfo) {

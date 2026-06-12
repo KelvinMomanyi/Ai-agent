@@ -12,6 +12,7 @@ type StorefrontCurrency = {
   moneyFormat?: string;
   moneyWithCurrencyFormat?: string;
   locale?: string;
+  source?: string;
 };
 
 export abstract class BaseWidget {
@@ -114,16 +115,21 @@ export function getStorefrontCurrency(): StorefrontCurrency {
     string,
     any
   >;
-  const code = normalizeCurrencyCode(
-    config.currency ||
-      config.currencyCode ||
-      shopify.currency?.active ||
-      shopify.checkout?.currency ||
-      analytics.meta?.currency,
+  const candidates: Array<{ value: unknown; source: string }> = [
+    { value: config.currency, source: "aovboost_config" },
+    { value: config.currencyCode, source: "aovboost_config" },
+    { value: shopify.currency?.active, source: "shopify_currency" },
+    { value: shopify.checkout?.currency, source: "shopify_checkout" },
+    { value: analytics.meta?.currency, source: "shopify_analytics" },
+  ];
+  const match = candidates.find(
+    (candidate) => normalizeCurrencyCode(candidate.value, "") !== "",
   );
+  const code = normalizeCurrencyCode(match?.value);
 
   return {
     code,
+    source: match?.source || "fallback",
     moneyFormat: stringOrEmpty(config.moneyFormat),
     moneyWithCurrencyFormat: stringOrEmpty(config.moneyWithCurrencyFormat),
     locale:
