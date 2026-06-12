@@ -12,7 +12,6 @@ export class DiscountNudge extends BaseWidget {
 
   private draw(): void {
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
-    const currency = String((window as any).AOVBoost?.currency || "USD");
     const threshold = Number(this.payload.threshold || 50);
     const cartValue = Number(this.payload.cartValue || 0);
     const remaining = Math.max(threshold - cartValue, 0);
@@ -40,7 +39,10 @@ export class DiscountNudge extends BaseWidget {
         <div class="label">
           <span>${
             remaining > 0
-              ? text(copy.progressLabel || `You're ${money(remaining, currency)} away from your reward`)
+              ? text(
+                  copy.progressLabel ||
+                    `You're ${money(remaining)} away from your reward`,
+                )
               : text(copy.rewardDescription || "Reward unlocked")
           }</span>
           <button type="button" class="icon" data-dismiss aria-label="Close">x</button>

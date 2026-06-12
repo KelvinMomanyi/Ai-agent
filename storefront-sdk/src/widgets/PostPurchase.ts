@@ -19,7 +19,6 @@ export class PostPurchase extends BaseWidget {
   render(): void {
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
     const product = getProducts(this.payload)[0] || this.payload.product || {};
-    const currency = String((window as any).AOVBoost?.currency || "USD");
 
     this.html(`
       <style>
@@ -32,7 +31,7 @@ export class PostPurchase extends BaseWidget {
           <div class="stack">
             <div>
               <p class="product-name">${text(copy.productName || (product as any).title || "Recommended product")}</p>
-              <span class="price">${text((product as any).price ? money((product as any).price, currency) : "")}</span>
+              <span class="price">${text((product as any).price ? money((product as any).price) : "")}</span>
             </div>
             <p class="reason">${text(copy.oneLineReason || "A useful add-on for what you just bought.")}</p>
             <button type="button" class="primary" data-add>${text(copy.ctaText || "Add to my order")}</button>
@@ -41,16 +40,18 @@ export class PostPurchase extends BaseWidget {
       </section>
     `);
 
-    this.root.querySelector("[data-add]")?.addEventListener("click", async () => {
-      this.trackClick("add_post_purchase");
-      const variantId = (product as any).variantId;
-      if (variantId) {
-        await addVariantToCart(variantId);
-        return;
-      }
-      const handle = (product as any).handle;
-      if (handle) window.location.href = `/products/${handle}`;
-    });
+    this.root
+      .querySelector("[data-add]")
+      ?.addEventListener("click", async () => {
+        this.trackClick("add_post_purchase");
+        const variantId = (product as any).variantId;
+        if (variantId) {
+          await addVariantToCart(variantId);
+          return;
+        }
+        const handle = (product as any).handle;
+        if (handle) window.location.href = `/products/${handle}`;
+      });
   }
 
   private isThankYouPage() {

@@ -15,10 +15,16 @@ export class BundleWidget extends BaseWidget {
     const bundle = (this.payload.bundle || {}) as Record<string, any>;
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
     const products = getProducts(this.payload);
-    const currency = String((window as any).AOVBoost?.currency || "USD");
-    const canAddBundle = products.length > 0 && products.every((product) => product.variantId);
-    const firstProductHandle = products.find((product) => product.handle)?.handle;
-    const total = products.reduce((sum, product) => sum + Number(product.price || 0) * Number(product.quantity || 1), 0);
+    const canAddBundle =
+      products.length > 0 && products.every((product) => product.variantId);
+    const firstProductHandle = products.find(
+      (product) => product.handle,
+    )?.handle;
+    const total = products.reduce(
+      (sum, product) =>
+        sum + Number(product.price || 0) * Number(product.quantity || 1),
+      0,
+    );
     const discountValue = Number(bundle.discountValue || 0);
     const discounted =
       bundle.discountType === "percentage"
@@ -48,15 +54,15 @@ export class BundleWidget extends BaseWidget {
                   <article class="tile">
                     ${product.imageUrl ? `<img src="${text(product.imageUrl)}" alt="${text(product.title)}" loading="lazy">` : ""}
                     <p class="product-name">${text(product.title)}</p>
-                    <span class="price">${text(product.price ? money(product.price, currency) : "")}</span>
+                    <span class="price">${text(product.price ? money(product.price) : "")}</span>
                   </article>
                 `,
               )
               .join("")}
           </div>
           <div class="totals">
-            ${total > discounted ? `<span class="strike">${money(total, currency)}</span>` : ""}
-            <strong>${money(discounted, currency)}</strong>
+            ${total > discounted ? `<span class="strike">${money(total)}</span>` : ""}
+            <strong>${money(discounted)}</strong>
           </div>
           <div class="actions">
             ${
@@ -71,15 +77,21 @@ export class BundleWidget extends BaseWidget {
       </section>
     `);
 
-    this.root.querySelector("[data-add]")?.addEventListener("click", async () => {
-      this.trackClick("add_bundle");
-      await addManyToCart(
-        products.map((product) => ({
-          variantId: product.variantId,
-          quantity: Number(product.quantity || 1),
-        })),
-      );
-      document.dispatchEvent(new CustomEvent("add-to-cart", { detail: { source: "bundle_widget" } }));
-    });
+    this.root
+      .querySelector("[data-add]")
+      ?.addEventListener("click", async () => {
+        this.trackClick("add_bundle");
+        await addManyToCart(
+          products.map((product) => ({
+            variantId: product.variantId,
+            quantity: Number(product.quantity || 1),
+          })),
+        );
+        document.dispatchEvent(
+          new CustomEvent("add-to-cart", {
+            detail: { source: "bundle_widget" },
+          }),
+        );
+      });
   }
 }

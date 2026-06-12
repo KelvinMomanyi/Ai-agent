@@ -1,6 +1,7 @@
 import type { AovboostEvent, EventBus } from "./eventBus";
 import type { OfferPoller } from "./offerPoller";
 import type { SessionManager } from "./sessionManager";
+import { setStorefrontCurrency } from "./widgets/BaseWidget";
 
 type TriggerDefinition = {
   category: string;
@@ -514,6 +515,7 @@ export class TriggerRouter {
       });
       if (!response.ok) throw new Error(`Cart read failed: ${response.status}`);
       const cart = await response.json();
+      setStorefrontCurrency(cart.currency);
       const items = Array.isArray(cart.items) ? cart.items : [];
       const cartProductIds = items
         .map((item: Record<string, unknown>) => getCartItemProductId(item))
@@ -538,6 +540,7 @@ export class TriggerRouter {
         })),
         cartItemCount: Number(cart.item_count || items.length || 0),
         cartValue: Number(cart.total_price || 0) / 100,
+        currency: String(cart.currency || ""),
       };
     } catch {
       return {
@@ -547,6 +550,7 @@ export class TriggerRouter {
         cartItems: [],
         cartItemCount: 0,
         cartValue: 0,
+        currency: "",
       };
     }
   }

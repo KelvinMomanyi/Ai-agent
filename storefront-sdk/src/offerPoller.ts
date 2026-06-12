@@ -1,6 +1,10 @@
 import type { EventBus } from "./eventBus";
 import type { SessionManager } from "./sessionManager";
 import type { OfferDecision, WidgetManager } from "./widgets/widgetManager";
+import {
+  getStorefrontCurrency,
+  setStorefrontCurrency,
+} from "./widgets/BaseWidget";
 
 type OfferPollerOptions = {
   shop: string;
@@ -87,6 +91,7 @@ export class OfferPoller {
       if (!auth) {
         return this.mountLocalFallback(trigger, triggerPayload);
       }
+      const currency = getStorefrontCurrency();
 
       const body = {
         ...auth,
@@ -97,6 +102,10 @@ export class OfferPoller {
         cartItems,
         cartItemCount,
         cartValue,
+        currency: currency.code,
+        moneyFormat: currency.moneyFormat,
+        moneyWithCurrencyFormat: currency.moneyWithCurrencyFormat,
+        locale: currency.locale,
         dismissedWidgets: this.options.widgetManager.getDismissedWidgets(),
         trigger,
         triggerCategory: triggerPayload.triggerCategory,
@@ -395,6 +404,7 @@ async function readCart() {
     });
     if (!response.ok) throw new Error(`Cart read failed: ${response.status}`);
     const cart = await response.json();
+    setStorefrontCurrency(cart.currency);
     const items = Array.isArray(cart.items) ? cart.items : [];
     const cartProductIds = items
       .map((item: Record<string, unknown>) => getCartItemProductId(item))
@@ -419,6 +429,7 @@ async function readCart() {
       })),
       cartItemCount: Number(cart.item_count || items.length || 0),
       cartValue: Number(cart.total_price || 0) / 100,
+      currency: String(cart.currency || ""),
     };
   } catch {
     return {
@@ -428,6 +439,7 @@ async function readCart() {
       cartItems: [],
       cartItemCount: 0,
       cartValue: 0,
+      currency: "",
     };
   }
 }

@@ -541,6 +541,7 @@ function heuristicFallback(
     input.settings.bundlesEnabled &&
     activeBundleCount > 0 &&
     (triggerType === "repeated_product_view" ||
+      triggerType === "initial" ||
       triggerType === "manual" ||
       !triggerType)
   ) {

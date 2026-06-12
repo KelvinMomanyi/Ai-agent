@@ -8,6 +8,10 @@ import "./styles/widgets.css";
 type AovBoostConfig = {
   shop?: string;
   currency?: string;
+  currencyCode?: string;
+  moneyFormat?: string;
+  moneyWithCurrencyFormat?: string;
+  locale?: string;
   cartToken?: string;
   apiBase?: string;
   settings?: {
@@ -144,7 +148,13 @@ function hasTrackingConsent(config: AovBoostConfig) {
 function waitForTrackingConsent(config: AovBoostConfig) {
   return new Promise<void>((resolve) => {
     const complete = () => {
-      if (!hasTrackingConsent({ ...config, settings: { ...config.settings, trackingConsentRequired: false } })) return;
+      if (
+        !hasTrackingConsent({
+          ...config,
+          settings: { ...config.settings, trackingConsentRequired: false },
+        })
+      )
+        return;
       cleanup();
       resolve();
     };

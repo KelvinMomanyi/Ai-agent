@@ -1,4 +1,9 @@
-import { BaseWidget, text, type WidgetPayload } from "./BaseWidget";
+import {
+  BaseWidget,
+  getStorefrontCurrency,
+  text,
+  type WidgetPayload,
+} from "./BaseWidget";
 
 type Message = { role: "user" | "assistant"; content: string };
 
@@ -12,7 +17,11 @@ export class ChatWidget extends BaseWidget {
     const copy = payload.copy as Record<string, unknown> | undefined;
     this.messages.push({
       role: "assistant",
-      content: String(copy?.greeting || payload.greeting || "Hi. Can I help you find the perfect product today?"),
+      content: String(
+        copy?.greeting ||
+          payload.greeting ||
+          "Hi. Can I help you find the perfect product today?",
+      ),
     });
   }
 
@@ -65,14 +74,20 @@ export class ChatWidget extends BaseWidget {
       </aside>
     `);
 
-    this.root.querySelector("[data-close]")?.addEventListener("click", () => this.dismiss());
-    this.root.querySelector("[data-dismiss]")?.addEventListener("click", () => this.dismiss());
+    this.root
+      .querySelector("[data-close]")
+      ?.addEventListener("click", () => this.dismiss());
+    this.root
+      .querySelector("[data-dismiss]")
+      ?.addEventListener("click", () => this.dismiss());
     this.root.querySelector("[data-expand]")?.addEventListener("click", () => {
       this.expanded = true;
       this.trackClick("open_chat");
       this.render();
     });
-    this.root.querySelector("[data-send]")?.addEventListener("click", () => this.sendMessage());
+    this.root
+      .querySelector("[data-send]")
+      ?.addEventListener("click", () => this.sendMessage());
     this.root.querySelector("input")?.addEventListener("keydown", (event) => {
       if ((event as KeyboardEvent).key === "Enter") {
         event.preventDefault();
@@ -129,8 +144,12 @@ export class ChatWidget extends BaseWidget {
   private async sendMessage() {
     if (this.sending) return;
 
-    const input = this.root.querySelector("[data-input]") as HTMLInputElement | null;
-    const button = this.root.querySelector("[data-send]") as HTMLButtonElement | null;
+    const input = this.root.querySelector(
+      "[data-input]",
+    ) as HTMLInputElement | null;
+    const button = this.root.querySelector(
+      "[data-send]",
+    ) as HTMLButtonElement | null;
     const value = input?.value.trim();
     if (!value) return;
 
@@ -152,7 +171,8 @@ export class ChatWidget extends BaseWidget {
       );
     }
 
-    const assistantIndex = this.messages.push({ role: "assistant", content: "" }) - 1;
+    const assistantIndex =
+      this.messages.push({ role: "assistant", content: "" }) - 1;
     const assistantEl = this.appendMessage({ role: "assistant", content: "" });
     this.showTyping();
 
@@ -191,7 +211,10 @@ export class ChatWidget extends BaseWidget {
               }
               this.messages[assistantIndex].content += parsed.delta;
               assistantEl.textContent = this.messages[assistantIndex].content;
-              this.updateProductLink(this.messages[assistantIndex].content, assistantEl);
+              this.updateProductLink(
+                this.messages[assistantIndex].content,
+                assistantEl,
+              );
               this.scrollToBottom();
             }
           } catch {
@@ -203,7 +226,8 @@ export class ChatWidget extends BaseWidget {
       if (!started) {
         this.removeTyping();
         if (!this.messages[assistantIndex].content) {
-          this.messages[assistantIndex].content = "I can help you compare products and find the right add-ons.";
+          this.messages[assistantIndex].content =
+            "I can help you compare products and find the right add-ons.";
           assistantEl.textContent = this.messages[assistantIndex].content;
         }
       }
@@ -228,6 +252,7 @@ export class ChatWidget extends BaseWidget {
         ? await sdk.getSignedAuthPayload()
         : null;
     if (!auth) throw new Error("Missing signed storefront auth");
+    const currency = getStorefrontCurrency();
 
     return fetch(`${apiBase}/chat`, {
       method: "POST",
@@ -239,6 +264,10 @@ export class ChatWidget extends BaseWidget {
         ...auth,
         message: value,
         messageHistory: this.messages.slice(0, -2),
+        currency: currency.code,
+        moneyFormat: currency.moneyFormat,
+        moneyWithCurrencyFormat: currency.moneyWithCurrencyFormat,
+        locale: currency.locale,
       }),
     });
   }
@@ -248,7 +277,9 @@ export class ChatWidget extends BaseWidget {
       const data = await response.clone().json();
       const session = data?.storefrontSession || data?.session;
       const applySession = (window as any).AOVBoostSDK?.applySession;
-      return typeof applySession === "function" ? Boolean(applySession(session)) : false;
+      return typeof applySession === "function"
+        ? Boolean(applySession(session))
+        : false;
     } catch {
       return false;
     }

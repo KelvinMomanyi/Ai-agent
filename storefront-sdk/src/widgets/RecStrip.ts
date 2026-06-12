@@ -13,7 +13,6 @@ export class RecStrip extends BaseWidget {
 
   render(): void {
     const products = getProducts(this.payload);
-    const currency = String((window as any).AOVBoost?.currency || "USD");
 
     this.html(`
       <style>
@@ -40,7 +39,7 @@ export class RecStrip extends BaseWidget {
                   ${product.reason ? `<span class="badge">${text(product.reason)}</span>` : ""}
                   ${product.imageUrl ? `<img data-src="${text(product.imageUrl)}" alt="${text(product.title)}">` : ""}
                   <p class="product-name">${text(product.title)}</p>
-                  <span class="price">${text(product.price ? money(product.price, currency) : "")}</span>
+                  <span class="price">${text(product.price ? money(product.price) : "")}</span>
                   ${
                     product.variantId
                       ? `<button type="button" class="primary" data-add="${text(product.variantId)}">Add to cart</button>`
@@ -66,7 +65,9 @@ export class RecStrip extends BaseWidget {
   }
 
   private lazyLoadImages() {
-    const images = Array.from(this.root.querySelectorAll("img[data-src]")) as HTMLImageElement[];
+    const images = Array.from(
+      this.root.querySelectorAll("img[data-src]"),
+    ) as HTMLImageElement[];
     if (!("IntersectionObserver" in window)) {
       images.forEach((image) => {
         image.src = image.dataset.src || "";

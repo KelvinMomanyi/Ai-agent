@@ -2,7 +2,10 @@
 <script>
   window.AOVBoost = {
     shop: {{ shop.permanent_domain | json }},
-    currency: {{ cart.currency.iso_code | json }},
+    currency: {{ cart.currency.iso_code | default: localization.country.currency.iso_code | default: shop.currency | json }},
+    moneyFormat: {{ shop.money_format | json }},
+    moneyWithCurrencyFormat: {{ shop.money_with_currency_format | json }},
+    locale: {{ request.locale.iso_code | json }},
     cartToken: {{ cart.token | json }},
     apiBase: "/apps/aovboost",
     settings: {

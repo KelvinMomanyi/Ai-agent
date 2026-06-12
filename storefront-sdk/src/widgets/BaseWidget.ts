@@ -5,6 +5,14 @@ export type WidgetPayload = {
 };
 
 const DISMISSED_KEY = "aovboost_dismissed_widgets";
+const DEFAULT_CURRENCY = "USD";
+
+type StorefrontCurrency = {
+  code: string;
+  moneyFormat?: string;
+  moneyWithCurrencyFormat?: string;
+  locale?: string;
+};
 
 export abstract class BaseWidget {
   protected root: ShadowRoot;
@@ -52,7 +60,9 @@ export abstract class BaseWidget {
         ? dismissed.filter((entry) => typeof entry === "object" && entry)
         : [];
       const next = [
-        ...entries.filter((entry: any) => entry.widgetType !== this.getWidgetType()),
+        ...entries.filter(
+          (entry: any) => entry.widgetType !== this.getWidgetType(),
+        ),
         { widgetType: this.getWidgetType(), dismissedAt: Date.now() },
       ];
       localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
@@ -75,7 +85,9 @@ export abstract class BaseWidget {
       return;
     }
 
-    document.dispatchEvent(new CustomEvent("aovboost:track", { detail: payload }));
+    document.dispatchEvent(
+      new CustomEvent("aovboost:track", { detail: payload }),
+    );
   }
 
   protected html(markup: string): void {
@@ -90,19 +102,164 @@ export abstract class BaseWidget {
 }
 
 export function text(value: unknown, fallback = "") {
-  return escapeHtml(typeof value === "string" && value.trim() ? value : fallback);
+  return escapeHtml(
+    typeof value === "string" && value.trim() ? value : fallback,
+  );
 }
 
-export function money(value: unknown, currency = "USD") {
+export function getStorefrontCurrency(): StorefrontCurrency {
+  const config = ((window as any).AOVBoost || {}) as Record<string, unknown>;
+  const shopify = ((window as any).Shopify || {}) as Record<string, any>;
+  const analytics = ((window as any).ShopifyAnalytics || {}) as Record<
+    string,
+    any
+  >;
+  const code = normalizeCurrencyCode(
+    config.currency ||
+      config.currencyCode ||
+      shopify.currency?.active ||
+      shopify.checkout?.currency ||
+      analytics.meta?.currency,
+  );
+
+  return {
+    code,
+    moneyFormat: stringOrEmpty(config.moneyFormat),
+    moneyWithCurrencyFormat: stringOrEmpty(config.moneyWithCurrencyFormat),
+    locale:
+      stringOrEmpty(config.locale) ||
+      document.documentElement.lang ||
+      navigator.language,
+  };
+}
+
+export function setStorefrontCurrency(currency: unknown): void {
+  const code = normalizeCurrencyCode(currency, "");
+  if (!code) return;
+  const config = ((window as any).AOVBoost || {}) as Record<string, unknown>;
+  (window as any).AOVBoost = {
+    ...config,
+    currency: code,
+  };
+}
+
+export function money(
+  value: unknown,
+  currency: string | Partial<StorefrontCurrency> = getStorefrontCurrency(),
+) {
   const amount = Number(value || 0);
+  if (!Number.isFinite(amount)) return "";
+  const currencyInfo = normalizeCurrencyInput(currency);
+  const moneyFormat =
+    currencyInfo.moneyFormat || currencyInfo.moneyWithCurrencyFormat || "";
+
+  if (moneyFormat) {
+    return applyShopifyMoneyFormat(amount, moneyFormat, currencyInfo.code);
+  }
+
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat(currencyInfo.locale || undefined, {
       style: "currency",
-      currency,
+      currency: currencyInfo.code,
+      currencyDisplay: "symbol",
     }).format(amount);
   } catch {
-    return `$${amount.toFixed(2)}`;
+    return `${currencyInfo.code} ${amount.toFixed(2)}`.trim();
   }
+}
+
+function normalizeCurrencyInput(
+  currency: string | Partial<StorefrontCurrency>,
+): StorefrontCurrency {
+  if (typeof currency === "string") {
+    return {
+      ...getStorefrontCurrency(),
+      code: normalizeCurrencyCode(currency),
+    };
+  }
+
+  const fallback = getStorefrontCurrency();
+  return {
+    ...fallback,
+    ...currency,
+    code:
+      currency.code === undefined
+        ? fallback.code
+        : normalizeCurrencyCode(currency.code),
+  };
+}
+
+function normalizeCurrencyCode(value: unknown, fallback = DEFAULT_CURRENCY) {
+  const code = String(value || "")
+    .trim()
+    .toUpperCase();
+  return /^[A-Z]{3}$/.test(code) ? code : fallback;
+}
+
+function stringOrEmpty(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function applyShopifyMoneyFormat(
+  amount: number,
+  format: string,
+  currencyCode: string,
+) {
+  const safeFormat = stripHtml(format);
+  const match = safeFormat.match(/\{\{\s*(amount[a-z_]*)\s*\}\}/i);
+  const placeholder = match?.[1] || "amount";
+  const formattedAmount = formatShopifyAmount(amount, placeholder);
+
+  const output = match
+    ? safeFormat.replace(match[0], formattedAmount)
+    : `${safeFormat}${formattedAmount}`;
+  return output.replace(/\{\{\s*currency\s*\}\}/gi, currencyCode);
+}
+
+function formatShopifyAmount(amount: number, placeholder: string) {
+  switch (placeholder) {
+    case "amount_no_decimals":
+      return formatNumber(amount, 0, ",", ".");
+    case "amount_with_comma_separator":
+      return formatNumber(amount, 2, ".", ",");
+    case "amount_no_decimals_with_comma_separator":
+      return formatNumber(amount, 0, ".", ",");
+    case "amount_with_apostrophe_separator":
+      return formatNumber(amount, 2, "'", ".");
+    case "amount_no_decimals_with_space_separator":
+      return formatNumber(amount, 0, " ", ".");
+    case "amount_with_space_separator":
+      return formatNumber(amount, 2, " ", ".");
+    default:
+      return formatNumber(amount, 2, ",", ".");
+  }
+}
+
+function formatNumber(
+  amount: number,
+  decimals: number,
+  thousandsSeparator: string,
+  decimalSeparator: string,
+) {
+  const fixed =
+    decimals > 0 ? amount.toFixed(decimals) : String(Math.round(amount));
+  const [integerPart, decimalPart] = fixed.split(".");
+  const integer = integerPart.replace(
+    /\B(?=(\d{3})+(?!\d))/g,
+    thousandsSeparator,
+  );
+  return decimalPart ? `${integer}${decimalSeparator}${decimalPart}` : integer;
+}
+
+function stripHtml(value: string) {
+  return value
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'");
 }
 
 export function getProducts(payload: WidgetPayload): any[] {
@@ -121,7 +278,8 @@ export function getProducts(payload: WidgetPayload): any[] {
       variantId: product.variantId || item.variantId || "",
       title: product.title || item.title || "Recommended product",
       handle: product.handle || item.handle || "",
-      imageUrl: product.imageUrl || product.image || item.imageUrl || item.image,
+      imageUrl:
+        product.imageUrl || product.image || item.imageUrl || item.image,
       price: product.price || item.price || "",
       quantity: item.quantity || 1,
       reason: item.reason || item.affinity?.reason || item.reasoning || "",
@@ -141,7 +299,9 @@ export async function addVariantToCart(variantId: unknown, quantity = 1) {
   return response.ok ? response.json() : null;
 }
 
-export async function addManyToCart(items: Array<{ variantId: unknown; quantity: number }>) {
+export async function addManyToCart(
+  items: Array<{ variantId: unknown; quantity: number }>,
+) {
   const cartItems = items
     .filter((item) => item.variantId)
     .map((item) => ({

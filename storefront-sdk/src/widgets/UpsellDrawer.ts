@@ -17,7 +17,6 @@ export class UpsellDrawer extends BaseWidget {
   render(): void {
     const products = getProducts(this.payload).slice(0, 3);
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
-    const currency = String((window as any).AOVBoost?.currency || "USD");
 
     this.html(`
       <style>
@@ -58,7 +57,7 @@ export class UpsellDrawer extends BaseWidget {
                   <div class="stack">
                     <div>
                       <p class="product-name">${text(product.title)}</p>
-                      <span class="price">${text(product.price ? money(product.price, currency) : "")}</span>
+                      <span class="price">${text(product.price ? money(product.price) : "")}</span>
                     </div>
                     <p class="reason">${text(product.reason || copy.whyThisGoes || "It pairs well with your cart.")}</p>
                     ${

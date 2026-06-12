@@ -1,4 +1,8 @@
-import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
+import {
+  json,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "@remix-run/node";
 import { callAI } from "../ai/client.server";
 import prisma from "../db.server";
 import { getActiveBundlesForProduct } from "../models/bundle.server";
@@ -12,7 +16,10 @@ import {
   getRecommendationCatalog,
   pickCatalogProducts,
 } from "../models/catalogCache.server";
-import { getShopperSession, upsertShopperSessionFromEvents } from "../models/session.server";
+import {
+  getShopperSession,
+  upsertShopperSessionFromEvents,
+} from "../models/session.server";
 import { cacheKeys, incrementRateLimit } from "../redis.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
 import {
@@ -28,6 +35,10 @@ type ChatBody = {
   shop?: string;
   message?: string;
   messageHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+  currency?: string;
+  moneyFormat?: string;
+  moneyWithCurrencyFormat?: string;
+  locale?: string;
 };
 
 type BundleSummary = {
@@ -52,7 +63,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     body = (await request.json()) as ChatBody;
   } catch {
-    return json({ error: "Invalid JSON" }, { status: 400, headers: withCors() });
+    return json(
+      { error: "Invalid JSON" },
+      { status: 400, headers: withCors() },
+    );
   }
 
   let auth;
@@ -80,18 +94,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const { shop, sessionId } = auth;
-  const userMessage = typeof body.message === "string" ? body.message.trim() : "";
+  const userMessage =
+    typeof body.message === "string" ? body.message.trim() : "";
   const messageIntent = classifyMessageIntent(userMessage);
 
   if (!shop || !sessionId || !userMessage) {
-    return json({ error: "Invalid request" }, { status: 400, headers: withCors() });
+    return json(
+      { error: "Invalid request" },
+      { status: 400, headers: withCors() },
+    );
   }
 
   if (!(await isInstalledShop(shop))) {
-    return json({ error: "Invalid shop" }, { status: 401, headers: withCors() });
+    return json(
+      { error: "Invalid shop" },
+      { status: 401, headers: withCors() },
+    );
   }
 
-  const chatRequestCount = await incrementRateLimit(cacheKeys.chatRateLimit(sessionId), 60);
+  const chatRequestCount = await incrementRateLimit(
+    cacheKeys.chatRateLimit(sessionId),
+    60,
+  );
   if (chatRequestCount > 12) {
     return json(
       { error: "Rate limited" },
@@ -136,7 +160,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     create: { shop },
   });
 
-  const storeName = shop.replace(/\.[^.]+\.myshopify\.com$/, "").replace(/[-_]/g, " ");
+  const storeName = shop
+    .replace(/\.[^.]+\.myshopify\.com$/, "")
+    .replace(/[-_]/g, " ");
+  const currency = normalizeCurrencyInfo(body);
   const recommendationSourceProductId =
     session.cartProductIds[0] || session.viewedProductIds.at(-1);
   const [rawBundles, recommendationCatalog] = await Promise.all([
@@ -168,30 +195,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     cartProductIds.has(product.id),
   );
 
-  const cartInfo = cartProducts.length > 0
-    ? cartProducts.map((p) => `- ${p.title} ($${p.price})`).join("\n")
-    : "Cart is empty";
+  const cartInfo =
+    cartProducts.length > 0
+      ? cartProducts
+          .map((p) => `- ${p.title} (${formatPrice(p.price, currency)})`)
+          .join("\n")
+      : "Cart is empty";
 
   const bundles = filterBundlesToCatalog(
     rawBundles as unknown as BundleSummary[],
     catalogProducts,
   );
-  const bundlesInfo = bundles.length > 0
-    ? bundles.map((b) => {
-      const items = b.items.map((i) => `  - ${i.product?.title || i.productId}`).join("\n");
-      const discount = b.discountType === "none" ? "" : ` (${b.discountValue}% off)`;
-      return `- "${b.name}"${discount}\n${items}`;
-    }).join("\n")
-    : "No active bundles right now.";
+  const bundlesInfo =
+    bundles.length > 0
+      ? bundles
+          .map((b) => {
+            const items = b.items
+              .map((i) => `  - ${i.product?.title || i.productId}`)
+              .join("\n");
+            const discount =
+              b.discountType === "none" ? "" : ` (${b.discountValue}% off)`;
+            return `- "${b.name}"${discount}\n${items}`;
+          })
+          .join("\n")
+      : "No active bundles right now.";
 
   const catalogInfo =
     catalogProducts.length > 0
       ? catalogProducts
-        .map(
-          (p) =>
-            `- ${p.title} | $${p.price} | /products/${p.handle} | tags: ${p.tags.join(", ")}`,
-        )
-        .join("\n")
+          .map(
+            (p) =>
+              `- ${p.title} | ${formatPrice(p.price, currency)} | /products/${p.handle} | tags: ${p.tags.join(", ")}`,
+          )
+          .join("\n")
       : "No synced catalog products are available.";
 
   const brandVoiceSection = settings.brandVoice
@@ -219,7 +255,7 @@ Detected shopper intent:
 - ${messageIntent}
 
 Store settings:
-- Discount threshold: $${settings.discountThreshold}
+- Discount threshold: ${formatPrice(settings.discountThreshold, currency)}
 - Blocked product GIDs: ${settings.blockedProductIds.join(", ") || "none"}
 - Shopper journey stage: ${session.journeyStage}
 
@@ -237,12 +273,15 @@ ${brandVoiceSection}`;
 
   const encoder = new TextEncoder();
   let finalReply = "";
-  let provider: "gemini" | "groq" | "mistral" | "deepseek" | "heuristic" = "heuristic";
+  let provider: "gemini" | "groq" | "mistral" | "deepseek" | "heuristic" =
+    "heuristic";
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (value: unknown) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`));
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify(value)}\n\n`),
+        );
       };
       const done = () => {
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
@@ -255,6 +294,7 @@ ${brandVoiceSection}`;
           catalogProducts,
           bundles,
           messageIntent,
+          currency,
         );
         const aiResult = await callAI({
           triggerName:
@@ -268,10 +308,12 @@ ${brandVoiceSection}`;
           }),
           schemaType: "text",
           maxTokens: 300,
-          timeoutProfile: messageIntent === "checkout_assistance" ? "urgent" : "normal",
+          timeoutProfile:
+            messageIntent === "checkout_assistance" ? "urgent" : "normal",
           fallback: fallbackReply,
         });
-        provider = aiResult.provider === "none" ? "heuristic" : aiResult.provider;
+        provider =
+          aiResult.provider === "none" ? "heuristic" : aiResult.provider;
         finalReply = aiResult.content || fallbackReply;
 
         finalReply = sanitizeAssistantReplyToCatalog({
@@ -332,7 +374,10 @@ function getErrorMessage(error: unknown) {
 async function isInstalledShop(shop: string) {
   const [session, legacyShop] = await Promise.all([
     prisma.session.findFirst({ where: { shop }, select: { id: true } }),
-    prisma.shop.findUnique({ where: { shopDomain: shop }, select: { shopDomain: true } }),
+    prisma.shop.findUnique({
+      where: { shopDomain: shop },
+      select: { shopDomain: true },
+    }),
   ]);
 
   return Boolean(session || legacyShop);
@@ -343,6 +388,7 @@ function buildCatalogFallbackReply(
   catalogProducts: CatalogProduct[],
   bundles: BundleSummary[],
   messageIntent = "general",
+  currency: CurrencyInfo = { code: "USD" },
 ) {
   if (catalogProducts.length === 0) {
     return "I do not see synced products in this store yet. Sync the product catalog first, then I can recommend exact items.";
@@ -358,22 +404,29 @@ function buildCatalogFallbackReply(
     .sort((left, right) => right.score - left.score)
     .slice(0, 3);
 
-  const matches = messageIntent === "price_sensitive"
-    ? catalogProducts
-      .slice()
-      .sort((left, right) => Number(left.price || 0) - Number(right.price || 0))
-      .slice(0, 3)
-    : scoredProducts.length > 0
-      ? scoredProducts.map((item) => item.product)
-      : catalogProducts.slice(0, 3);
+  const matches =
+    messageIntent === "price_sensitive"
+      ? catalogProducts
+          .slice()
+          .sort(
+            (left, right) => Number(left.price || 0) - Number(right.price || 0),
+          )
+          .slice(0, 3)
+      : scoredProducts.length > 0
+        ? scoredProducts.map((item) => item.product)
+        : catalogProducts.slice(0, 3);
 
-  const intro = messageIntent === "price_sensitive"
-    ? "Here are lower-priced options from this store:"
-    : scoredProducts.length > 0
-      ? "These look like the best matches:"
-      : "I did not find an exact match, but these are good places to start:";
+  const intro =
+    messageIntent === "price_sensitive"
+      ? "Here are lower-priced options from this store:"
+      : scoredProducts.length > 0
+        ? "These look like the best matches:"
+        : "I did not find an exact match, but these are good places to start:";
   const recommendations = matches
-    .map((product) => `${product.title} (${formatPrice(product.price)}) /products/${product.handle}`)
+    .map(
+      (product) =>
+        `${product.title} (${formatPrice(product.price, currency)}) /products/${product.handle}`,
+    )
     .join("; ");
   const bundle = bundles[0]
     ? ` There is also an active bundle: ${bundles[0].name}.`
@@ -389,11 +442,14 @@ function scoreProduct(product: CatalogProduct, queryTokens: string[]) {
     product.title,
     product.handle,
     ...(Array.isArray(product.tags) ? product.tags : []),
-  ].join(" ").toLowerCase();
+  ]
+    .join(" ")
+    .toLowerCase();
 
   return queryTokens.reduce((score, token) => {
     if (searchable.includes(token)) return score + 2;
-    if (token.length > 4 && searchable.includes(token.slice(0, -1))) return score + 1;
+    if (token.length > 4 && searchable.includes(token.slice(0, -1)))
+      return score + 1;
     return score;
   }, 0);
 }
@@ -419,10 +475,113 @@ function tokenize(value: string) {
     .filter((token) => token.length > 2 && !stopWords.has(token));
 }
 
-function formatPrice(value: unknown) {
+type CurrencyInfo = {
+  code: string;
+  moneyFormat?: string;
+  moneyWithCurrencyFormat?: string;
+  locale?: string;
+};
+
+function normalizeCurrencyInfo(body: ChatBody): CurrencyInfo {
+  return {
+    code: normalizeCurrencyCode(body.currency),
+    moneyFormat: stringOrEmpty(body.moneyFormat),
+    moneyWithCurrencyFormat: stringOrEmpty(body.moneyWithCurrencyFormat),
+    locale: stringOrEmpty(body.locale),
+  };
+}
+
+function formatPrice(value: unknown, currency: CurrencyInfo) {
   const amount = Number(value || 0);
   if (!Number.isFinite(amount) || amount <= 0) return "price unavailable";
-  return `$${amount.toFixed(2)}`;
+  const moneyFormat =
+    currency.moneyFormat || currency.moneyWithCurrencyFormat || "";
+  if (moneyFormat) {
+    return applyShopifyMoneyFormat(amount, moneyFormat, currency.code);
+  }
+
+  try {
+    return new Intl.NumberFormat(currency.locale || undefined, {
+      style: "currency",
+      currency: currency.code,
+      currencyDisplay: "symbol",
+    }).format(amount);
+  } catch {
+    return `${currency.code} ${amount.toFixed(2)}`.trim();
+  }
+}
+
+function normalizeCurrencyCode(value: unknown, fallback = "USD") {
+  const code = String(value || "")
+    .trim()
+    .toUpperCase();
+  return /^[A-Z]{3}$/.test(code) ? code : fallback;
+}
+
+function stringOrEmpty(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function applyShopifyMoneyFormat(
+  amount: number,
+  format: string,
+  currencyCode: string,
+) {
+  const safeFormat = stripHtml(format);
+  const match = safeFormat.match(/\{\{\s*(amount[a-z_]*)\s*\}\}/i);
+  const placeholder = match?.[1] || "amount";
+  const formattedAmount = formatShopifyAmount(amount, placeholder);
+
+  const output = match
+    ? safeFormat.replace(match[0], formattedAmount)
+    : `${safeFormat}${formattedAmount}`;
+  return output.replace(/\{\{\s*currency\s*\}\}/gi, currencyCode);
+}
+
+function formatShopifyAmount(amount: number, placeholder: string) {
+  switch (placeholder) {
+    case "amount_no_decimals":
+      return formatNumber(amount, 0, ",", ".");
+    case "amount_with_comma_separator":
+      return formatNumber(amount, 2, ".", ",");
+    case "amount_no_decimals_with_comma_separator":
+      return formatNumber(amount, 0, ".", ",");
+    case "amount_with_apostrophe_separator":
+      return formatNumber(amount, 2, "'", ".");
+    case "amount_no_decimals_with_space_separator":
+      return formatNumber(amount, 0, " ", ".");
+    case "amount_with_space_separator":
+      return formatNumber(amount, 2, " ", ".");
+    default:
+      return formatNumber(amount, 2, ",", ".");
+  }
+}
+
+function formatNumber(
+  amount: number,
+  decimals: number,
+  thousandsSeparator: string,
+  decimalSeparator: string,
+) {
+  const fixed =
+    decimals > 0 ? amount.toFixed(decimals) : String(Math.round(amount));
+  const [integerPart, decimalPart] = fixed.split(".");
+  const integer = integerPart.replace(
+    /\B(?=(\d{3})+(?!\d))/g,
+    thousandsSeparator,
+  );
+  return decimalPart ? `${integer}${decimalSeparator}${decimalPart}` : integer;
+}
+
+function stripHtml(value: string) {
+  return value
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'");
 }
 
 function classifyMessageIntent(value: string) {
@@ -438,7 +597,9 @@ function classifyMessageIntent(value: string) {
     return "comparison";
   }
 
-  if (/\b(warranty|protect|support|installment|payment|pay later)\b/i.test(value)) {
+  if (
+    /\b(warranty|protect|support|installment|payment|pay later)\b/i.test(value)
+  ) {
     return "checkout_assistance";
   }
 
