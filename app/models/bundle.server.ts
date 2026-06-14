@@ -28,11 +28,13 @@ export async function getBundle(shop: string, id: string) {
 }
 
 function findActiveBundlesForProduct(shop: string, productId: string) {
+  const productIds = toProductLookupKeys(productId);
+
   return prisma.bundle.findMany({
     where: {
       shop,
       isActive: true,
-      triggerProductIds: { has: productId },
+      OR: productIds.map((id) => ({ triggerProductIds: { has: id } })),
     },
     include: { items: { include: { product: true } } },
     orderBy: [{ priority: "desc" }, { updatedAt: "desc" }],
@@ -40,7 +42,9 @@ function findActiveBundlesForProduct(shop: string, productId: string) {
   });
 }
 
-type ActiveBundle = Awaited<ReturnType<typeof findActiveBundlesForProduct>>[number];
+type ActiveBundle = Awaited<
+  ReturnType<typeof findActiveBundlesForProduct>
+>[number];
 
 export async function getActiveBundlesForProduct(
   shop: string,
@@ -49,27 +53,45 @@ export async function getActiveBundlesForProduct(
 ) {
   if (!productId) return [];
 
-  const key = `bundles:${shop}:${productId}`;
+  const key = bundleCacheKey(shop, productId);
   const cached = await getJsonCache<ActiveBundle[]>(key);
   if (cached) {
-    const validCached = await filterBundlesToExistingProducts(shop, productId, cached);
+    const validCached = await filterBundlesToExistingProducts(
+      shop,
+      productId,
+      cached,
+    );
     const allowedCached = filterBundlesToAllowedProducts(
       validCached,
       options.excludeProductIds || [],
     );
     if (validCached.length === cached.length) return allowedCached;
-    await redis.del(key);
+    await invalidateBundleCaches(shop, [productId]);
   }
 
   const bundles = await findActiveBundlesForProduct(shop, productId);
-  const validBundles = await filterBundlesToExistingProducts(shop, productId, bundles);
+  const validBundles = await filterBundlesToExistingProducts(
+    shop,
+    productId,
+    bundles,
+  );
 
   await setJsonCache(key, validBundles, 3600); // Cache 1 hour
-  return filterBundlesToAllowedProducts(validBundles, options.excludeProductIds || []);
+  return filterBundlesToAllowedProducts(
+    validBundles,
+    options.excludeProductIds || [],
+  );
 }
 
-export async function saveBundle(shop: string, id: string | null, input: BundleInput) {
-  const sanitizedInput = sanitizeBundleInput(input);
+export async function saveBundle(
+  shop: string,
+  id: string | null,
+  input: BundleInput,
+) {
+  const sanitizedInput = await normalizeBundleProductIds(
+    shop,
+    sanitizeBundleInput(input),
+  );
   await assertBundleProductsExist(shop, sanitizedInput);
   const data = toBundleData(sanitizedInput);
 
@@ -95,9 +117,10 @@ export async function saveBundle(shop: string, id: string | null, input: BundleI
     });
 
     // Invalidate cache for all affected products
-    for (const productId of unique([...existing.triggerProductIds, ...data.triggerProductIds])) {
-      await redis.del(`bundles:${shop}:${productId}`);
-    }
+    await invalidateBundleCaches(shop, [
+      ...existing.triggerProductIds,
+      ...data.triggerProductIds,
+    ]);
 
     return result;
   }
@@ -112,14 +135,16 @@ export async function saveBundle(shop: string, id: string | null, input: BundleI
   });
 
   // Invalidate cache for all products in trigger
-  for (const productId of data.triggerProductIds) {
-    await redis.del(`bundles:${shop}:${productId}`);
-  }
+  await invalidateBundleCaches(shop, data.triggerProductIds);
 
   return result;
 }
 
-export async function toggleBundle(shop: string, id: string, isActive: boolean) {
+export async function toggleBundle(
+  shop: string,
+  id: string,
+  isActive: boolean,
+) {
   const bundle = await getBundle(shop, id);
   const result = await prisma.bundle.updateMany({
     where: { shop, id },
@@ -127,9 +152,7 @@ export async function toggleBundle(shop: string, id: string, isActive: boolean) 
   });
 
   if (bundle) {
-    for (const productId of bundle.triggerProductIds) {
-      await redis.del(`bundles:${shop}:${productId}`);
-    }
+    await invalidateBundleCaches(shop, bundle.triggerProductIds);
   }
 
   return result;
@@ -142,9 +165,7 @@ export async function deleteBundle(shop: string, id: string) {
   });
 
   if (bundle) {
-    for (const productId of bundle.triggerProductIds) {
-      await redis.del(`bundles:${shop}:${productId}`);
-    }
+    await invalidateBundleCaches(shop, bundle.triggerProductIds);
   }
 
   return result;
@@ -171,33 +192,43 @@ async function filterBundlesToExistingProducts(
 
   const productIds = unique(
     bundles.flatMap((bundle) => [
-      ...bundle.triggerProductIds,
-      ...bundle.items.map((item) => item.productId),
-      ...bundle.items.map((item) => item.product?.id || ""),
+      ...bundle.triggerProductIds.flatMap(toProductLookupKeys),
+      ...bundle.items.flatMap((item) => toProductLookupKeys(item.productId)),
+      ...bundle.items.flatMap((item) => toProductLookupKeys(item.product?.id)),
+      ...toProductLookupKeys(currentProductId),
     ]),
   );
   const products = await prisma.product.findMany({
     where: { shop, id: { in: productIds } },
     select: { id: true },
   });
-  const existingIds = new Set(products.map((product) => product.id));
+  const existingIds = new Set(
+    products.flatMap((product) => toProductLookupKeys(product.id)),
+  );
 
   return bundles.filter((bundle) => {
-    const currentProductExists = existingIds.has(currentProductId);
+    const currentProductExists = toProductLookupKeys(currentProductId).some(
+      (id) => existingIds.has(id),
+    );
+    const triggerMatches = bundle.triggerProductIds.some((productId) =>
+      productIdsMatch(productId, currentProductId),
+    );
     const allItemsExist =
       bundle.items.length > 0 &&
-      bundle.items.every(
-        (item) =>
-          existingIds.has(item.productId) &&
-          Boolean(item.product) &&
-          item.product.shop === shop,
-      );
+      bundle.items.every((item) => {
+        const itemIds = unique([
+          ...toProductLookupKeys(item.productId),
+          ...toProductLookupKeys(item.product?.id),
+        ]);
 
-    return (
-      currentProductExists &&
-      bundle.triggerProductIds.includes(currentProductId) &&
-      allItemsExist
-    );
+        return (
+          itemIds.some((id) => existingIds.has(id)) &&
+          Boolean(item.product) &&
+          item.product.shop === shop
+        );
+      });
+
+    return currentProductExists && triggerMatches && allItemsExist;
   });
 }
 
@@ -207,30 +238,45 @@ function filterBundlesToAllowedProducts<T extends ActiveBundle>(
 ) {
   if (excludedProductIds.length === 0) return bundles;
 
-  const excluded = new Set(excludedProductIds);
+  const excluded = new Set(excludedProductIds.flatMap(toProductLookupKeys));
   return bundles.filter(
     (bundle) =>
-      !bundle.triggerProductIds.some((productId) => excluded.has(productId)) &&
-      bundle.items.every((item) => !excluded.has(item.productId)),
+      !bundle.triggerProductIds.some((productId) =>
+        toProductLookupKeys(productId).some((id) => excluded.has(id)),
+      ) &&
+      bundle.items.every(
+        (item) =>
+          !toProductLookupKeys(item.productId).some((id) => excluded.has(id)),
+      ),
   );
 }
 
 async function assertBundleProductsExist(shop: string, input: BundleInput) {
   if (input.triggerProductIds.length === 0 || input.items.length === 0) {
-    throw new Error("Bundle must include trigger products and bundle items from this store.");
+    throw new Error(
+      "Bundle must include trigger products and bundle items from this store.",
+    );
   }
 
   const requestedProductIds = unique([
     ...input.triggerProductIds,
     ...input.items.map((item) => item.productId),
   ]);
+  const lookupProductIds = unique(
+    requestedProductIds.flatMap(toProductLookupKeys),
+  );
 
   const products = await prisma.product.findMany({
-    where: { shop, id: { in: requestedProductIds } },
+    where: { shop, id: { in: lookupProductIds } },
     select: { id: true },
   });
-  const existingIds = new Set(products.map((product) => product.id));
-  const missingIds = requestedProductIds.filter((productId) => !existingIds.has(productId));
+  const existingIds = new Set(
+    products.flatMap((product) => toProductLookupKeys(product.id)),
+  );
+  const missingIds = requestedProductIds.filter(
+    (productId) =>
+      !toProductLookupKeys(productId).some((id) => existingIds.has(id)),
+  );
 
   if (missingIds.length > 0) {
     throw new Error(
@@ -250,6 +296,86 @@ function sanitizeBundleInput(input: BundleInput): BundleInput {
         quantity: Math.max(1, Number(item.quantity || 1)),
       })),
   };
+}
+
+async function normalizeBundleProductIds(
+  shop: string,
+  input: BundleInput,
+): Promise<BundleInput> {
+  const requestedProductIds = unique([
+    ...input.triggerProductIds,
+    ...input.items.map((item) => item.productId),
+  ]);
+  const lookupProductIds = unique(
+    requestedProductIds.flatMap(toProductLookupKeys),
+  );
+  if (lookupProductIds.length === 0) return input;
+
+  const products = await prisma.product.findMany({
+    where: { shop, id: { in: lookupProductIds } },
+    select: { id: true },
+  });
+  const canonicalByLookupId = new Map<string, string>();
+  for (const product of products) {
+    for (const lookupId of toProductLookupKeys(product.id)) {
+      canonicalByLookupId.set(lookupId, product.id);
+    }
+  }
+  const normalizeProductId = (productId: string) =>
+    toProductLookupKeys(productId)
+      .map((lookupId) => canonicalByLookupId.get(lookupId))
+      .find(Boolean) || productId;
+
+  return {
+    ...input,
+    triggerProductIds: unique(input.triggerProductIds.map(normalizeProductId)),
+    items: input.items.map((item) => ({
+      ...item,
+      productId: normalizeProductId(item.productId),
+    })),
+  };
+}
+
+async function invalidateBundleCaches(shop: string, productIds: string[]) {
+  const keys = unique(
+    productIds.flatMap((productId) => bundleCacheKeys(shop, productId)),
+  );
+  await Promise.all(keys.map((key) => redis.del(key)));
+}
+
+function bundleCacheKey(shop: string, productId: string) {
+  return `bundles:v3:${shop}:${toProductLookupKeys(productId).sort().join("|")}`;
+}
+
+function bundleCacheKeys(shop: string, productId: string) {
+  return unique([
+    bundleCacheKey(shop, productId),
+    ...toProductLookupKeys(productId).flatMap((id) => [
+      `bundles:${shop}:${id}`,
+      `bundles:v2:${shop}:${id}`,
+      bundleCacheKey(shop, id),
+    ]),
+  ]);
+}
+
+function productIdsMatch(left: unknown, right: unknown) {
+  const rightIds = new Set(toProductLookupKeys(right));
+  return toProductLookupKeys(left).some((id) => rightIds.has(id));
+}
+
+function toProductLookupKeys(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+
+  const withoutQuery = text.split("?")[0];
+  const lastSegment =
+    withoutQuery.split("/").filter(Boolean).pop() || withoutQuery;
+  return unique([
+    text,
+    withoutQuery,
+    lastSegment,
+    `gid://shopify/Product/${lastSegment}`,
+  ]);
 }
 
 function unique(values: string[]) {

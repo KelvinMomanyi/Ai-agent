@@ -92,10 +92,11 @@ export class OfferPoller {
         return this.mountLocalFallback(trigger, triggerPayload);
       }
       const currency = getStorefrontCurrency();
+      const currentProductId = await getCurrentProductId();
 
       const body = {
         ...auth,
-        currentProductId: getCurrentProductId(),
+        currentProductId,
         currentPageType: getCurrentPageType(),
         cartProductIds,
         cartVariantIds,
@@ -382,18 +383,28 @@ function getCurrentPageType() {
   return "other";
 }
 
-function getCurrentProductId() {
+async function getCurrentProductId() {
   const product =
     (window as any).Shopify?.product ||
     (window as any).ShopifyAnalytics?.meta?.product ||
     null;
-  if (!product) return undefined;
+  const id = String(product?.gid || product?.id || "");
+  if (id) return toProductGid(id);
 
-  const id = String(product.gid || product.id || "");
-  if (!id) return undefined;
-  return id.startsWith("gid://shopify/Product/")
-    ? id
-    : `gid://shopify/Product/${id}`;
+  const handle = window.location.pathname.match(/\/products\/([^/?#]+)/)?.[1];
+  if (!handle) return undefined;
+
+  try {
+    const response = await fetch(`/products/${handle}.js`, {
+      headers: { Accept: "application/json" },
+      keepalive: true,
+    });
+    if (!response.ok) return undefined;
+    const storefrontProduct = await response.json();
+    return toProductGid(storefrontProduct.id);
+  } catch {
+    return undefined;
+  }
 }
 
 async function readCart() {

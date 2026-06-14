@@ -21,11 +21,23 @@ export type OfferDecision = {
 
 const DISMISSED_KEY = "aovboost_dismissed_widgets";
 const DISMISS_TTL_MS = 30 * 60 * 1000;
+const INLINE_WIDGET_TYPES = new Set([
+  "bundle",
+  "rec_strip",
+  "inline_alert",
+  "social_proof",
+]);
+
+type MountedWidget = {
+  key: string;
+  widget: BaseWidget;
+};
 
 export class WidgetManager {
   private activeWidget: BaseWidget | null = null;
   private activeKey = "";
   private activeWidgetType = "";
+  private inlineWidgets = new Map<string, MountedWidget>();
 
   mountDecision(decision: OfferDecision): void {
     if (!decision.widgetType) return;
@@ -33,13 +45,32 @@ export class WidgetManager {
 
     const payload = decision.payload || {};
     const offerId = String(payload.offerId || "");
-    const nextKey = `${decision.widgetType}:${offerId}`;
+    const nextKey = `${decision.widgetType}:${getWidgetIdentity(
+      decision.widgetType,
+      payload,
+      offerId,
+    )}`;
+
+    if (INLINE_WIDGET_TYPES.has(decision.widgetType)) {
+      const mounted = this.inlineWidgets.get(decision.widgetType);
+      if (mounted?.key === nextKey) return;
+
+      const widget = createWidget(decision.widgetType, payload);
+      if (!widget) return;
+
+      mounted?.widget.destroy();
+      const target = this.resolveTarget(decision.widgetType);
+      widget.mount(target);
+      this.inlineWidgets.set(decision.widgetType, { key: nextKey, widget });
+      return;
+    }
+
     if (decision.widgetType === "chat" && this.activeWidgetType === "chat") {
       return;
     }
     if (nextKey === this.activeKey) return;
 
-    this.destroyActive();
+    this.destroyFloatingWidget();
 
     const widget = createWidget(decision.widgetType, payload);
     if (!widget) return;
@@ -52,6 +83,12 @@ export class WidgetManager {
   }
 
   destroyActive(): void {
+    this.destroyFloatingWidget();
+    this.inlineWidgets.forEach((mounted) => mounted.widget.destroy());
+    this.inlineWidgets.clear();
+  }
+
+  private destroyFloatingWidget(): void {
     this.activeWidget?.destroy();
     this.activeWidget = null;
     this.activeKey = "";
@@ -66,11 +103,15 @@ export class WidgetManager {
       const now = Date.now();
       const active = parsed
         .filter((entry) => entry && typeof entry === "object")
-        .filter((entry: any) => now - Number(entry.dismissedAt || 0) < DISMISS_TTL_MS);
+        .filter(
+          (entry: any) => now - Number(entry.dismissedAt || 0) < DISMISS_TTL_MS,
+        );
       if (active.length !== parsed.length) {
         localStorage.setItem(DISMISSED_KEY, JSON.stringify(active));
       }
-      return active.map((entry: any) => String(entry.widgetType || "")).filter(Boolean);
+      return active
+        .map((entry: any) => String(entry.widgetType || ""))
+        .filter(Boolean);
     } catch {
       return [];
     }
@@ -82,7 +123,9 @@ export class WidgetManager {
     }
 
     if (widgetType === "rec_strip") {
-      return createMountAfter(".product__description, [data-product-description]");
+      return createMountAfter(
+        ".product__description, [data-product-description]",
+      );
     }
 
     if (widgetType === "social_proof") {
@@ -90,11 +133,28 @@ export class WidgetManager {
     }
 
     if (widgetType === "inline_alert") {
-      return createMountAfter("[data-price], .product__price, .price, .product-form, [data-product-form]");
+      return createMountAfter(
+        "[data-price], .product__price, .price, .product-form, [data-product-form]",
+      );
     }
 
     return document.body;
   }
+}
+
+function getWidgetIdentity(
+  widgetType: string,
+  payload: WidgetPayload,
+  offerId: string,
+) {
+  if (widgetType === "bundle") {
+    const bundle = payload.bundle as Record<string, unknown> | undefined;
+    return String(
+      bundle?.id || payload.currentProductId || offerId || "product-bundle",
+    );
+  }
+
+  return offerId || widgetType;
 }
 
 function createWidget(widgetType: string, payload: WidgetPayload) {

@@ -254,7 +254,10 @@ function sanitizeProductItem(
   };
 }
 
-function hasRenderableProducts(widgetType: string, payload: Record<string, unknown>) {
+function hasRenderableProducts(
+  widgetType: string,
+  payload: Record<string, unknown>,
+) {
   if (widgetType === "bundle") {
     const bundle = asRecord(payload.bundle);
     return Array.isArray(bundle.items) && bundle.items.length > 0;
@@ -268,20 +271,31 @@ function buildCatalogIndex(
   catalog: CatalogProduct[],
   excludedProductIds: string[],
 ): CatalogIndex {
-  const excluded = new Set(excludedProductIds);
+  const excluded = new Set(excludedProductIds.flatMap(toProductLookupKeys));
   const byId = new Map<string, CatalogProduct>();
   const byHandle = new Map<string, CatalogProduct>();
 
   for (const product of catalog) {
-    if (excluded.has(product.id)) continue;
-    byId.set(product.id, product);
+    if (
+      toProductLookupKeys(product.id).some((productId) =>
+        excluded.has(productId),
+      )
+    ) {
+      continue;
+    }
+    for (const productId of toProductLookupKeys(product.id)) {
+      byId.set(productId, product);
+    }
     if (product.handle) byHandle.set(product.handle, product);
   }
 
   return { byId, byHandle };
 }
 
-function shouldReplyWithCatalogProducts(userMessage: string, messageIntent: string) {
+function shouldReplyWithCatalogProducts(
+  userMessage: string,
+  messageIntent: string,
+) {
   if (messageIntent !== "general") return true;
   return /\b(recommend|suggest|show|find|buy|bundle|upsell|cross-sell|alternative|similar|cheaper|compare|pair|go with|add-on|accessor)/i.test(
     userMessage,
@@ -294,12 +308,31 @@ function getDefaultVariantId(metafields: unknown) {
     record.defaultVariantId,
     record.variantId,
     record["aovboost.defaultVariantId"],
+    record["aovboost.variantId"],
     asRecord(record.defaultVariantId).value,
     asRecord(record.variantId).value,
     asRecord(record["aovboost.defaultVariantId"]).value,
+    asRecord(record["aovboost.variantId"]).value,
   ];
 
-  return String(candidates.find((value) => typeof value === "string" && value) || "");
+  return String(
+    candidates.find((value) => typeof value === "string" && value) || "",
+  );
+}
+
+function toProductLookupKeys(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+
+  const withoutQuery = text.split("?")[0];
+  const lastSegment =
+    withoutQuery.split("/").filter(Boolean).pop() || withoutQuery;
+  return [
+    text,
+    withoutQuery,
+    lastSegment,
+    `gid://shopify/Product/${lastSegment}`,
+  ].filter((id, index, ids) => id && ids.indexOf(id) === index);
 }
 
 function omitUnsafeProductFields(record: Record<string, unknown>) {

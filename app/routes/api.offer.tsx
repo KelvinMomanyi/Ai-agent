@@ -93,6 +93,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const cacheKey = cacheKeys.offer(
       sessionId,
       [
+        "v2",
         body.currentProductId || "none",
         body.trigger || "manual",
         requestCartProductIds.join(",") ||

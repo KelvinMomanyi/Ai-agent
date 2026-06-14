@@ -228,8 +228,9 @@ function normalizeDecision(
 
 function shouldAskAi(
   _triggerType: string | undefined,
-  _fallbackDecision: OfferDecision,
+  fallbackDecision: OfferDecision,
 ) {
+  if (fallbackDecision.widgetType === "bundle") return false;
   return process.env.AOVBOOST_DISABLE_AI !== "true";
 }
 
@@ -462,6 +463,21 @@ function heuristicFallback(
   }
 
   if (
+    input.currentPageType === "product" &&
+    input.settings.bundlesEnabled &&
+    activeBundleCount > 0 &&
+    isProductPageBundleTrigger(triggerType)
+  ) {
+    return {
+      widgetType: "bundle",
+      payload: { currentProductId: input.currentProductId },
+      reasoning: "Product page has an active triggered bundle.",
+      confidence: 0.72,
+      aiProvider: "heuristic",
+    };
+  }
+
+  if (
     input.settings.upsellEnabled &&
     cartHasItems &&
     !isRecoveryOrThresholdTrigger(triggerType) &&
@@ -532,24 +548,6 @@ function heuristicFallback(
       },
       reasoning: "Saved-item intent should use an ephemeral toast.",
       confidence: 0.58,
-      aiProvider: "heuristic",
-    };
-  }
-
-  if (
-    input.currentPageType === "product" &&
-    input.settings.bundlesEnabled &&
-    activeBundleCount > 0 &&
-    (triggerType === "repeated_product_view" ||
-      triggerType === "initial" ||
-      triggerType === "manual" ||
-      !triggerType)
-  ) {
-    return {
-      widgetType: "bundle",
-      payload: { currentProductId: input.currentProductId },
-      reasoning: "Product page has an active triggered bundle.",
-      confidence: 0.72,
       aiProvider: "heuristic",
     };
   }
@@ -628,6 +626,16 @@ function isRecoveryOrThresholdTrigger(triggerType: string) {
     "cart_value_threshold",
     "payment_failure",
   ].includes(triggerType);
+}
+
+function isProductPageBundleTrigger(triggerType: string) {
+  return (
+    triggerType === "repeated_product_view" ||
+    triggerType === "initial" ||
+    triggerType === "manual" ||
+    triggerType === "navigation" ||
+    !triggerType
+  );
 }
 
 function enrichPayload(
