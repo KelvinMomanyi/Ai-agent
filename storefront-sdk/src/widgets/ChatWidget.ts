@@ -5,7 +5,19 @@ import {
   type WidgetPayload,
 } from "./BaseWidget";
 
-type Message = { role: "user" | "assistant"; content: string };
+type ProductCard = {
+  productId?: string;
+  title?: string;
+  handle?: string;
+  imageUrl?: string | null;
+  price?: string;
+};
+
+type Message = {
+  role: "user" | "assistant";
+  content: string;
+  productCards?: ProductCard[];
+};
 
 export class ChatWidget extends BaseWidget {
   private messages: Message[] = [];
@@ -55,7 +67,29 @@ export class ChatWidget extends BaseWidget {
         .dots span { animation: dots 1.2s infinite; }
         .dots span:nth-child(2) { animation-delay: .15s; }
         .dots span:nth-child(3) { animation-delay: .3s; }
-        .inline-product { margin-top: 6px; border: 1px solid var(--aovboost-line); border-radius: 8px; padding: 8px; }
+        .inline-products { display: grid; gap: 8px; margin-top: 8px; }
+        .inline-product {
+          display: grid;
+          grid-template-columns: 48px minmax(0, 1fr);
+          align-items: center;
+          gap: 8px;
+          margin-top: 6px;
+          border: 1px solid var(--aovboost-line);
+          border-radius: 8px;
+          padding: 8px;
+          color: inherit;
+          text-decoration: none;
+          background: #fff;
+        }
+        .inline-product img, .image-placeholder {
+          width: 48px;
+          height: 48px;
+          border-radius: 6px;
+          object-fit: cover;
+          background: #f8fafc;
+        }
+        .product-copy { display: grid; gap: 3px; min-width: 0; }
+        .price { color: var(--aovboost-muted); font-size: 12px; font-weight: 700; }
       </style>
       <aside class="wrap card" aria-label="AOVBoost Assistant">
         <div class="head">
@@ -112,9 +146,53 @@ export class ChatWidget extends BaseWidget {
   private renderMessage(message: Message) {
     return `
       <div class="bubble ${message.role}">
-        ${text(message.content)}
-        ${this.renderProductLinks(message.content)}
+        ${this.renderMessageContent(message)}
       </div>
+    `;
+  }
+
+  private renderMessageContent(message: Message) {
+    return `
+      ${text(message.content)}
+      ${
+        message.productCards?.length
+          ? this.renderProductCards(message.productCards)
+          : this.renderProductLinks(message.content)
+      }
+    `;
+  }
+
+  private renderProductCards(products: ProductCard[]) {
+    const cards = products
+      .filter((product) => product.handle || product.title)
+      .slice(0, 4);
+    if (cards.length === 0) return "";
+
+    return `
+      <div class="inline-products">
+        ${cards.map((product) => this.renderProductCard(product)).join("")}
+      </div>
+    `;
+  }
+
+  private renderProductCard(product: ProductCard) {
+    const handle = String(product.handle || "");
+    const title = String(
+      product.title || handle.replace(/-/g, " ") || "Recommended product",
+    );
+    const href = handle ? `/products/${text(handle)}` : "#";
+    return `
+      <a class="inline-product" href="${href}">
+        ${
+          product.imageUrl
+            ? `<img src="${text(product.imageUrl)}" alt="${text(title)}" loading="lazy">`
+            : `<span class="image-placeholder" aria-hidden="true"></span>`
+        }
+        <span class="product-copy">
+          <span class="product-name">${text(title)}</span>
+          ${product.price ? `<span class="price">${text(product.price)}</span>` : ""}
+        </span>
+      </a>
     `;
   }
 
@@ -135,7 +213,7 @@ export class ChatWidget extends BaseWidget {
     if (!container) throw new Error("Messages container not found");
     const el = document.createElement("div");
     el.className = `bubble ${message.role}`;
-    el.textContent = message.content;
+    el.innerHTML = this.renderMessageContent(message);
     container.appendChild(el);
     this.scrollToBottom();
     return el;
@@ -210,10 +288,12 @@ export class ChatWidget extends BaseWidget {
                 started = true;
               }
               this.messages[assistantIndex].content += parsed.delta;
-              assistantEl.textContent = this.messages[assistantIndex].content;
-              this.updateProductLink(
-                this.messages[assistantIndex].content,
-                assistantEl,
+              if (Array.isArray(parsed.productCards)) {
+                this.messages[assistantIndex].productCards =
+                  parsed.productCards;
+              }
+              assistantEl.innerHTML = this.renderMessageContent(
+                this.messages[assistantIndex],
               );
               this.scrollToBottom();
             }
@@ -228,7 +308,9 @@ export class ChatWidget extends BaseWidget {
         if (!this.messages[assistantIndex].content) {
           this.messages[assistantIndex].content =
             "I can help you compare products and find the right add-ons.";
-          assistantEl.textContent = this.messages[assistantIndex].content;
+          assistantEl.innerHTML = this.renderMessageContent(
+            this.messages[assistantIndex],
+          );
         }
       }
     } catch {
@@ -236,7 +318,9 @@ export class ChatWidget extends BaseWidget {
       this.messages[assistantIndex].content =
         this.messages[assistantIndex].content ||
         "I had trouble connecting. Please try again in a moment.";
-      assistantEl.textContent = this.messages[assistantIndex].content;
+      assistantEl.innerHTML = this.renderMessageContent(
+        this.messages[assistantIndex],
+      );
     } finally {
       this.sending = false;
       if (button) button.disabled = false;
@@ -300,21 +384,6 @@ export class ChatWidget extends BaseWidget {
   private removeTyping() {
     const el = this.root.querySelector("[data-typing]");
     if (el) el.remove();
-  }
-
-  private updateProductLink(content: string, container: HTMLElement) {
-    const match = content.match(/\/products\/([a-z0-9-]+)/i);
-    const existing = container.querySelector(".inline-product");
-    if (existing) existing.remove();
-    if (!match) return;
-    const handle = match[1];
-    const div = document.createElement("div");
-    div.className = "inline-product";
-    div.innerHTML = `
-      <p class="product-name">${text(handle.replace(/-/g, " "))}</p>
-      <a href="/products/${text(handle)}">View product</a>
-    `;
-    container.appendChild(div);
   }
 
   private scrollToBottom() {

@@ -58,6 +58,14 @@ type BundleSummary = {
   }>;
 };
 
+type ChatProductCard = {
+  productId: string;
+  title: string;
+  handle: string;
+  imageUrl: string | null;
+  price: string;
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (request.method === "OPTIONS") return optionsResponse();
   return json({ ok: true }, { headers: withCors() });
@@ -334,7 +342,14 @@ ${brandVoiceSection}`;
           fallback: fallbackReply,
         });
         finalReply = enforceReplyCurrency(finalReply, fallbackReply, currency);
-        send({ delta: finalReply });
+        send({
+          delta: finalReply,
+          productCards: getReplyProductCards(
+            finalReply,
+            catalogProducts,
+            currency,
+          ),
+        });
 
         await persistAssistantMessage(shop, session.id, finalReply, provider);
         done();
@@ -444,6 +459,53 @@ function buildCatalogFallbackReply(
     : "";
 
   return `${intro} ${recommendations}.${bundle}`;
+}
+
+function getReplyProductCards(
+  reply: string,
+  catalogProducts: CatalogProduct[],
+  currency: CurrencyInfo,
+): ChatProductCard[] {
+  const byHandle = new Map(
+    catalogProducts
+      .filter((product) => product.handle)
+      .map((product) => [product.handle.toLowerCase(), product]),
+  );
+  const replyText = normalizeComparableText(reply);
+  const linkedHandles = Array.from(
+    reply.matchAll(/\/products\/([a-z0-9][a-z0-9-]*)/gi),
+  ).map((match) => match[1].toLowerCase());
+  const linkedProducts = linkedHandles
+    .map((handle) => byHandle.get(handle))
+    .filter((product): product is CatalogProduct => Boolean(product));
+  const namedProducts = catalogProducts.filter((product) => {
+    const title = normalizeComparableText(product.title);
+    return title.length >= 3 && replyText.includes(title);
+  });
+  const seen = new Set<string>();
+
+  return [...linkedProducts, ...namedProducts]
+    .filter((product) => {
+      if (seen.has(product.id)) return false;
+      seen.add(product.id);
+      return true;
+    })
+    .slice(0, 4)
+    .map((product) => ({
+      productId: product.id,
+      title: product.title,
+      handle: product.handle,
+      imageUrl: product.imageUrl || product.image || null,
+      price: formatPrice(product.price, currency),
+    }));
+}
+
+function normalizeComparableText(value: unknown) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function scoreProduct(product: CatalogProduct, queryTokens: string[]) {
