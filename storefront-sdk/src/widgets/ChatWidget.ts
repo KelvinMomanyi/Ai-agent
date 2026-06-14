@@ -1,5 +1,6 @@
 import {
   BaseWidget,
+  addVariantToCart,
   getStorefrontCurrency,
   text,
   type WidgetPayload,
@@ -9,8 +10,16 @@ type ProductCard = {
   productId?: string;
   title?: string;
   handle?: string;
+  variantId?: string;
   imageUrl?: string | null;
   price?: string;
+};
+
+type CartAction = {
+  type?: string;
+  productTitle?: string;
+  variantId?: string;
+  quantity?: number;
 };
 
 type Message = {
@@ -26,6 +35,7 @@ export class ChatWidget extends BaseWidget {
 
   constructor(payload: WidgetPayload) {
     super(payload);
+    this.root.addEventListener("click", this.handleProductCardClick);
     const copy = payload.copy as Record<string, unknown> | undefined;
     this.messages.push({
       role: "assistant",
@@ -39,6 +49,11 @@ export class ChatWidget extends BaseWidget {
 
   getWidgetType(): string {
     return "chat";
+  }
+
+  destroy(): void {
+    this.root.removeEventListener("click", this.handleProductCardClick);
+    super.destroy();
   }
 
   render(): void {
@@ -81,6 +96,20 @@ export class ChatWidget extends BaseWidget {
           text-decoration: none;
           background: #fff;
         }
+        .inline-product a { color: var(--aovboost-ink); font-size: 12px; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+        .inline-product button {
+          width: fit-content;
+          border: 0;
+          border-radius: 6px;
+          background: var(--aovboost-action);
+          color: var(--aovboost-action-text);
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 700;
+          min-height: 28px;
+          padding: 5px 8px;
+        }
+        .inline-product button:disabled { cursor: default; opacity: .65; }
         .inline-product img, .image-placeholder {
           width: 48px;
           height: 48px;
@@ -89,6 +118,7 @@ export class ChatWidget extends BaseWidget {
           background: #f8fafc;
         }
         .product-copy { display: grid; gap: 3px; min-width: 0; }
+        .product-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .price { color: var(--aovboost-muted); font-size: 12px; font-weight: 700; }
       </style>
       <aside class="wrap card" aria-label="AOVBoost Assistant">
@@ -128,6 +158,7 @@ export class ChatWidget extends BaseWidget {
         this.sendMessage();
       }
     });
+    this.hydrateProductCards(this.root);
     this.scrollToBottom();
   }
 
@@ -180,19 +211,27 @@ export class ChatWidget extends BaseWidget {
     const title = String(
       product.title || handle.replace(/-/g, " ") || "Recommended product",
     );
-    const href = handle ? `/products/${text(handle)}` : "#";
+    const href = handle ? `/products/${text(handle)}` : "";
     return `
-      <a class="inline-product" href="${href}">
+      <article class="inline-product" data-product-card data-handle="${text(handle)}">
         ${
           product.imageUrl
-            ? `<img src="${text(product.imageUrl)}" alt="${text(title)}" loading="lazy">`
+            ? `<img data-product-image src="${text(product.imageUrl)}" alt="${text(title)}" loading="lazy">`
             : `<span class="image-placeholder" aria-hidden="true"></span>`
         }
         <span class="product-copy">
           <span class="product-name">${text(title)}</span>
           ${product.price ? `<span class="price">${text(product.price)}</span>` : ""}
+          <span class="product-actions">
+            ${href ? `<a href="${href}">View product</a>` : ""}
+            ${
+              product.variantId
+                ? `<button type="button" data-chat-add="${text(product.variantId)}">Add to cart</button>`
+                : ""
+            }
+          </span>
         </span>
-      </a>
+      </article>
     `;
   }
 
@@ -200,12 +239,9 @@ export class ChatWidget extends BaseWidget {
     const match = content.match(/\/products\/([a-z0-9-]+)/i);
     if (!match) return "";
     const handle = match[1];
-    return `
-      <div class="inline-product">
-        <p class="product-name">${text(handle.replace(/-/g, " "))}</p>
-        <a href="/products/${text(handle)}">View product</a>
-      </div>
-    `;
+    return this.renderProductCards([
+      { handle, title: handle.replace(/-/g, " ") },
+    ]);
   }
 
   private appendMessage(message: Message): HTMLDivElement {
@@ -215,8 +251,80 @@ export class ChatWidget extends BaseWidget {
     el.className = `bubble ${message.role}`;
     el.innerHTML = this.renderMessageContent(message);
     container.appendChild(el);
+    this.hydrateProductCards(el);
     this.scrollToBottom();
     return el;
+  }
+
+  private handleProductCardClick = async (event: Event) => {
+    const target = event.target as Element | null;
+    const button = target?.closest?.(
+      "[data-chat-add]",
+    ) as HTMLButtonElement | null;
+    if (!button) return;
+
+    event.preventDefault();
+    const variantId = button.dataset.chatAdd;
+    if (!variantId || button.disabled) return;
+
+    button.disabled = true;
+    button.textContent = "Adding";
+    try {
+      const result = await addVariantToCart(variantId);
+      if (!result) throw new Error("Cart add failed");
+      button.textContent = "Added";
+      document.dispatchEvent(
+        new CustomEvent("add-to-cart", {
+          detail: { source: "chat_widget", variantId },
+        }),
+      );
+    } catch {
+      button.disabled = false;
+      button.textContent = "Try again";
+    }
+  };
+
+  private async hydrateProductCards(root: ParentNode) {
+    const cards = Array.from(
+      root.querySelectorAll("[data-product-card][data-handle]"),
+    ) as HTMLElement[];
+    await Promise.all(
+      cards.map(async (card) => {
+        if (card.dataset.hydrated === "true") return;
+        const handle = card.dataset.handle;
+        if (!handle) return;
+        const hasImage = Boolean(card.querySelector("img[data-product-image]"));
+        if (hasImage) {
+          card.dataset.hydrated = "true";
+          return;
+        }
+
+        try {
+          const response = await fetch(`/products/${handle}.js`, {
+            headers: { Accept: "application/json" },
+          });
+          if (!response.ok)
+            throw new Error(`Product read failed: ${response.status}`);
+          const product = await response.json();
+          const imageUrl =
+            product.featured_image ||
+            product.images?.[0] ||
+            product.media?.[0]?.src ||
+            "";
+          if (!imageUrl) return;
+
+          const image = document.createElement("img");
+          image.dataset.productImage = "true";
+          image.src = imageUrl;
+          image.alt = String(product.title || handle.replace(/-/g, " "));
+          image.loading = "lazy";
+          card.querySelector(".image-placeholder")?.replaceWith(image);
+          card.dataset.hydrated = "true";
+        } catch {
+          card.dataset.hydrated = "true";
+        }
+      }),
+    );
   }
 
   private async sendMessage() {
@@ -269,6 +377,7 @@ export class ChatWidget extends BaseWidget {
       const decoder = new TextDecoder();
       let buffer = "";
       let started = false;
+      let cartActionHandled = false;
 
       while (true) {
         const { done, value: chunk } = await reader.read();
@@ -295,6 +404,15 @@ export class ChatWidget extends BaseWidget {
               assistantEl.innerHTML = this.renderMessageContent(
                 this.messages[assistantIndex],
               );
+              this.hydrateProductCards(assistantEl);
+              if (parsed.cartAction && !cartActionHandled) {
+                cartActionHandled = true;
+                await this.handleCartAction(
+                  parsed.cartAction,
+                  assistantIndex,
+                  assistantEl,
+                );
+              }
               this.scrollToBottom();
             }
           } catch {
@@ -355,6 +473,44 @@ export class ChatWidget extends BaseWidget {
         locale: currency.locale,
       }),
     });
+  }
+
+  private async handleCartAction(
+    action: CartAction,
+    assistantIndex: number,
+    assistantEl: HTMLElement,
+  ) {
+    if (action.type !== "add_to_cart" || !action.variantId) return;
+
+    try {
+      const result = await addVariantToCart(
+        action.variantId,
+        Number(action.quantity || 1),
+      );
+      if (!result) throw new Error("Cart add failed");
+      this.messages[assistantIndex].content =
+        `Added **${action.productTitle || "that product"}** to your cart.`;
+      assistantEl.innerHTML = this.renderMessageContent(
+        this.messages[assistantIndex],
+      );
+      this.hydrateProductCards(assistantEl);
+      document.dispatchEvent(
+        new CustomEvent("add-to-cart", {
+          detail: {
+            source: "chat_widget",
+            variantId: action.variantId,
+            quantity: Number(action.quantity || 1),
+          },
+        }),
+      );
+    } catch {
+      this.messages[assistantIndex].content =
+        `I couldn't add **${action.productTitle || "that product"}** to your cart. Please use the product card button or open the product page.`;
+      assistantEl.innerHTML = this.renderMessageContent(
+        this.messages[assistantIndex],
+      );
+      this.hydrateProductCards(assistantEl);
+    }
   }
 
   private async applyRecoverySession(response: Response) {

@@ -62,8 +62,17 @@ type ChatProductCard = {
   productId: string;
   title: string;
   handle: string;
+  variantId: string;
   imageUrl: string | null;
   price: string;
+};
+
+type ChatCartAction = {
+  type: "add_to_cart";
+  productId: string;
+  productTitle: string;
+  variantId: string;
+  quantity: number;
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -209,6 +218,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const cartProducts = safeRecommendationProducts.filter((product) =>
     cartProductIds.has(product.id),
   );
+  const requestedCartProduct = findRequestedCartProduct(
+    userMessage,
+    body.messageHistory || [],
+    safeRecommendationProducts,
+  );
 
   const cartInfo =
     cartProducts.length > 0
@@ -313,6 +327,41 @@ ${brandVoiceSection}`;
           messageIntent,
           currency,
         );
+        if (requestedCartProduct) {
+          const variantId = getCatalogProductVariantId(requestedCartProduct);
+          const productCards = getReplyProductCards(
+            `${requestedCartProduct.title} /products/${requestedCartProduct.handle}`,
+            safeRecommendationProducts,
+            currency,
+          );
+          const deterministicReply = variantId
+            ? `Adding **${requestedCartProduct.title}** to your cart.`
+            : `I found **${requestedCartProduct.title}**, but I need you to choose an option on the product page before adding it to cart: /products/${requestedCartProduct.handle}`;
+          const cartAction: ChatCartAction | undefined = variantId
+            ? {
+                type: "add_to_cart",
+                productId: requestedCartProduct.id,
+                productTitle: requestedCartProduct.title,
+                variantId,
+                quantity: 1,
+              }
+            : undefined;
+
+          send({
+            delta: deterministicReply,
+            productCards,
+            cartAction,
+          });
+          await persistAssistantMessage(
+            shop,
+            session.id,
+            deterministicReply,
+            "heuristic",
+          );
+          done();
+          return;
+        }
+
         const aiResult = await callAI({
           triggerName:
             messageIntent === "price_sensitive"
@@ -346,7 +395,7 @@ ${brandVoiceSection}`;
           delta: finalReply,
           productCards: getReplyProductCards(
             finalReply,
-            catalogProducts,
+            safeRecommendationProducts,
             currency,
           ),
         });
@@ -495,9 +544,94 @@ function getReplyProductCards(
       productId: product.id,
       title: product.title,
       handle: product.handle,
+      variantId: getCatalogProductVariantId(product),
       imageUrl: product.imageUrl || product.image || null,
       price: formatPrice(product.price, currency),
     }));
+}
+
+function findRequestedCartProduct(
+  userMessage: string,
+  history: ChatBody["messageHistory"],
+  catalogProducts: CatalogProduct[],
+) {
+  const recentAssistantMessages = (history || [])
+    .filter((message) => message.role === "assistant")
+    .slice(-3)
+    .map((message) => message.content);
+  const lastAssistantMessage = recentAssistantMessages.at(-1) || "";
+  const explicitAddRequest =
+    /\b(add|buy|purchase|get|take)\b.*\b(cart|it|this|one|product|bag|item)\b/i.test(
+      userMessage,
+    ) || /\badd to cart\b/i.test(userMessage);
+  const affirmativeAddRequest =
+    /^(yes|yes please|yep|yeah|sure|ok|okay|please|do it|go ahead|add it|add this)\s*[.!?]*$/i.test(
+      userMessage.trim(),
+    ) &&
+    /\b(would you like to add|want to add|should i add|add (it|this|.+) to your cart|add (it|this|.+) to cart)\b/i.test(
+      lastAssistantMessage,
+    );
+
+  if (!explicitAddRequest && !affirmativeAddRequest) return null;
+
+  return findProductMention(
+    [userMessage, ...recentAssistantMessages.reverse()].join("\n"),
+    catalogProducts,
+  );
+}
+
+function findProductMention(
+  textValue: string,
+  catalogProducts: CatalogProduct[],
+) {
+  const byHandle = new Map(
+    catalogProducts
+      .filter((product) => product.handle)
+      .map((product) => [product.handle.toLowerCase(), product]),
+  );
+  const linkedHandle = Array.from(
+    textValue.matchAll(/\/products\/([a-z0-9][a-z0-9-]*)/gi),
+  )
+    .map((match) => match[1].toLowerCase())
+    .find((handle) => byHandle.has(handle));
+  if (linkedHandle) return byHandle.get(linkedHandle) || null;
+
+  const normalized = normalizeComparableText(textValue);
+  return (
+    catalogProducts
+      .filter((product) => {
+        const title = normalizeComparableText(product.title);
+        return title.length >= 3 && normalized.includes(title);
+      })
+      .sort((left, right) => right.title.length - left.title.length)[0] || null
+  );
+}
+
+function getCatalogProductVariantId(product: CatalogProduct) {
+  const variantId = product.variants?.find((variant) => variant.id)?.id;
+  if (variantId) return variantId;
+
+  const metafields = asRecord(product.metafields);
+  const candidates = [
+    metafields.defaultVariantId,
+    metafields.variantId,
+    metafields["aovboost.defaultVariantId"],
+    metafields["aovboost.variantId"],
+    asRecord(metafields.defaultVariantId).value,
+    asRecord(metafields.variantId).value,
+    asRecord(metafields["aovboost.defaultVariantId"]).value,
+    asRecord(metafields["aovboost.variantId"]).value,
+  ];
+
+  return String(
+    candidates.find((value) => typeof value === "string" && value) || "",
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function normalizeComparableText(value: unknown) {
