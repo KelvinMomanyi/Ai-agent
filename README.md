@@ -89,6 +89,10 @@ Deploy Shopify-managed configuration and extensions separately:
 npm run deploy
 ```
 
+For Vercel, keep the Framework Preset set to **React Router**. The committed
+`vercel.json` overrides any older Remix selection, while
+`react-router.config.ts` generates the Vercel Function output.
+
 After deployment, update the app installation so the configured scopes and
 webhooks are active. The merchant must also select AOVBoost as the post-purchase
 app in Shopify Checkout settings and the app must have post-purchase access.

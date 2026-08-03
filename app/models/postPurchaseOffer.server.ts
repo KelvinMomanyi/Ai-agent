@@ -1,10 +1,15 @@
 import type { Prisma } from "@prisma/client";
 import crypto from "node:crypto";
-import { sign } from "jsonwebtoken";
+// jsonwebtoken is CommonJS; Node exposes its module.exports object as default.
+// eslint-disable-next-line import/default
+import jsonwebtoken from "jsonwebtoken";
 import prisma from "../db.server";
 import { catalogProductToWidgetProduct } from "./catalogGuard.server";
 import { getAppSettings } from "./settings.server";
 import { markOfferConversion } from "./offer.server";
+
+// eslint-disable-next-line import/no-named-as-default-member
+const { sign: signJwt } = jsonwebtoken;
 
 type AddVariantChange = {
   type: "add_variant";
@@ -126,7 +131,7 @@ export async function signPostPurchaseChangeset(input: {
   if (!apiKey || !secret) throw new Error("Missing Shopify app credentials");
 
   await prisma.offer.update({ where: { id: offer.id }, data: { clicked: true } });
-  return sign(
+  return signJwt(
     {
       iss: apiKey,
       jti: crypto.randomUUID(),
