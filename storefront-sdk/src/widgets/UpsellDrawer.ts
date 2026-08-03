@@ -85,7 +85,11 @@ export class UpsellDrawer extends BaseWidget {
     this.root.querySelectorAll("[data-add]").forEach((button) => {
       button.addEventListener("click", async () => {
         this.trackClick("add_upsell");
-        await addVariantToCart((button as HTMLElement).dataset.add);
+        await addVariantToCart(
+          (button as HTMLElement).dataset.add,
+          1,
+          this.payload.offerId,
+        );
       });
     });
 

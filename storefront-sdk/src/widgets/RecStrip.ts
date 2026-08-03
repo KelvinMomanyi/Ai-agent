@@ -59,7 +59,11 @@ export class RecStrip extends BaseWidget {
     this.root.querySelectorAll("[data-add]").forEach((button) => {
       button.addEventListener("click", async () => {
         this.trackClick("add_recommendation");
-        await addVariantToCart((button as HTMLElement).dataset.add);
+        await addVariantToCart(
+          (button as HTMLElement).dataset.add,
+          1,
+          this.payload.offerId,
+        );
       });
     });
   }

@@ -4,7 +4,8 @@ import type { SessionStorage } from "@shopify/shopify-app-session-storage";
 import prisma from "./db.server";
 
 const SESSION_KEY_PREFIX = "shopify:session:";
-const SHOP_SESSIONS_KEY = "shopify:shop-sessions";
+const LEGACY_SHOP_SESSIONS_KEY = "shopify:shop-sessions";
+const shopSessionsKey = (shop: string) => `shopify:shop-sessions:${shop}`;
 
 export class UpstashSessionStorage implements SessionStorage {
   private redis: Redis | null;
@@ -30,7 +31,7 @@ export class UpstashSessionStorage implements SessionStorage {
         return value;
       });
       await this.redis.set(key, serialized);
-      await (this.redis.sadd as any)(SHOP_SESSIONS_KEY, session.id);
+      await (this.redis.sadd as any)(shopSessionsKey(session.shop), session.id);
       return true;
     } catch {
       return this.storeSessionInPrisma(session);
@@ -63,11 +64,13 @@ export class UpstashSessionStorage implements SessionStorage {
   async deleteSession(id: string): Promise<boolean> {
     try {
       if (this.redis) {
+        const session = await this.loadSession(id);
         const key = SESSION_KEY_PREFIX + id;
-        await Promise.all([
-          this.redis.del(key),
-          (this.redis.srem as any)(SHOP_SESSIONS_KEY, id),
-        ]);
+        await this.redis.del(key);
+        if (session?.shop) {
+          await (this.redis.srem as any)(shopSessionsKey(session.shop), id);
+        }
+        await (this.redis.srem as any)(LEGACY_SHOP_SESSIONS_KEY, id);
       }
       await prisma.session.deleteMany({ where: { id } });
       return true;
@@ -79,11 +82,22 @@ export class UpstashSessionStorage implements SessionStorage {
   async deleteSessions(ids: string[]): Promise<boolean> {
     try {
       if (this.redis) {
+        const sessions = await Promise.all(ids.map((id) => this.loadSession(id)));
         const pipeline = ids.map((id) => {
           const key = SESSION_KEY_PREFIX + id;
           return this.redis!.del(key);
         });
-        pipeline.push((this.redis.srem as any)(SHOP_SESSIONS_KEY, ...ids));
+        const idsByShop = new Map<string, string[]>();
+        sessions.forEach((session, index) => {
+          if (!session?.shop) return;
+          const shopIds = idsByShop.get(session.shop) || [];
+          shopIds.push(ids[index]);
+          idsByShop.set(session.shop, shopIds);
+        });
+        idsByShop.forEach((shopIds, shop) => {
+          pipeline.push((this.redis!.srem as any)(shopSessionsKey(shop), ...shopIds));
+        });
+        pipeline.push((this.redis.srem as any)(LEGACY_SHOP_SESSIONS_KEY, ...ids));
         await Promise.all(pipeline);
       }
       await prisma.session.deleteMany({ where: { id: { in: ids } } });
@@ -97,7 +111,10 @@ export class UpstashSessionStorage implements SessionStorage {
     try {
       if (!this.redis) return this.findSessionsByShopFromPrisma(shop);
 
-      const ids = await (this.redis.smembers as any)(SHOP_SESSIONS_KEY);
+      let ids = await (this.redis.smembers as any)(shopSessionsKey(shop));
+      if (!Array.isArray(ids) || ids.length === 0) {
+        ids = await (this.redis.smembers as any)(LEGACY_SHOP_SESSIONS_KEY);
+      }
       if (!Array.isArray(ids) || ids.length === 0) return [];
 
       const sessions = await Promise.all(
@@ -106,6 +123,12 @@ export class UpstashSessionStorage implements SessionStorage {
       const filtered = sessions.filter(
         (s): s is Session => s !== undefined && s.shop === shop,
       );
+      if (filtered.length > 0) {
+        await (this.redis.sadd as any)(
+          shopSessionsKey(shop),
+          ...filtered.map(({ id }) => id),
+        );
+      }
       return filtered;
     } catch {
       return this.findSessionsByShopFromPrisma(shop);

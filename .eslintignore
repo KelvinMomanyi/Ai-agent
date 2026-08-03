@@ -5,3 +5,4 @@ shopify-app-remix
 */*.yml
 .shopify
 extensions/*/dist
+extensions/*/assets/aovboost-sdk.js

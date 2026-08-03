@@ -25,13 +25,6 @@ export class BundleWidget extends BaseWidget {
         sum + Number(product.price || 0) * Number(product.quantity || 1),
       0,
     );
-    const discountValue = Number(bundle.discountValue || 0);
-    const discounted =
-      bundle.discountType === "percentage"
-        ? total * (1 - discountValue / 100)
-        : bundle.discountType === "fixed"
-          ? Math.max(total - discountValue, 0)
-          : total;
 
     this.html(`
       <style>
@@ -39,7 +32,6 @@ export class BundleWidget extends BaseWidget {
         .tiles { display: flex; gap: 10px; overflow-x: auto; padding: 4px 0; }
         .tile { flex: 0 0 128px; border: 1px solid var(--aovboost-line); border-radius: 8px; padding: 8px; }
         .totals { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-        .strike { color: var(--aovboost-muted); text-decoration: line-through; }
       </style>
       <section class="bundle card">
         <div class="stack">
@@ -61,8 +53,7 @@ export class BundleWidget extends BaseWidget {
               .join("")}
           </div>
           <div class="totals">
-            ${total > discounted ? `<span class="strike">${money(total)}</span>` : ""}
-            <strong>${money(discounted)}</strong>
+            <strong>${money(total)}</strong>
           </div>
           <div class="actions">
             ${
@@ -86,6 +77,7 @@ export class BundleWidget extends BaseWidget {
             variantId: product.variantId,
             quantity: Number(product.quantity || 1),
           })),
+          this.payload.offerId,
         );
         document.dispatchEvent(
           new CustomEvent("add-to-cart", {

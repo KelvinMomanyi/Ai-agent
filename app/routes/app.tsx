@@ -1,7 +1,7 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { Link, Outlet, useLoaderData, useRouteError } from "@remix-run/react";
-import { boundary } from "@shopify/shopify-app-remix/server";
-import { AppProvider } from "@shopify/shopify-app-remix/react";
+import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { Link, Outlet, useLoaderData, useRouteError } from "react-router";
+import { boundary } from "@shopify/shopify-app-react-router/server";
+import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { NavMenu } from "@shopify/app-bridge-react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import prisma, { withRetry } from "../db.server";
@@ -22,9 +22,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           id
           title
           handle
-          featuredImage {
-            originalSrc
-            altText
+          featuredMedia {
+            preview {
+              image {
+                url
+                altText
+              }
+            }
           }
         }
         cursor
@@ -37,14 +41,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   `;
 
   const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
-  const result = await response.json();
+  const result: any = await response.json();
 
-  const productCatalog = result.data.products.edges.map(({ node }: any) => ({
+  if (Array.isArray(result.errors) && result.errors.length > 0) {
+    throw new Response("Shopify product catalog is unavailable", { status: 502 });
+  }
+
+  const productCatalog = (result.data?.products?.edges || []).map(({ node }: any) => ({
     id: node.id,
     title: node.title,
     image: {
-      src: node.featuredImage?.originalSrc || 'https://via.placeholder.com/40',
-      alt: node.featuredImage?.altText || node.title,
+      src: node.featuredMedia?.preview?.image?.url || 'https://via.placeholder.com/40',
+      alt: node.featuredMedia?.preview?.image?.altText || node.title,
     },
   }));
 
@@ -96,7 +104,7 @@ export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
 
   return (
-    <AppProvider isEmbeddedApp apiKey={apiKey}>
+    <AppProvider embedded apiKey={apiKey}>
       <NavMenu>
         <Link to="/app" rel="home">
           Home
@@ -109,7 +117,7 @@ export default function App() {
   );
 }
 
-// Shopify needs Remix to catch some thrown responses, so that their headers are included in the response.
+// Shopify needs React Router to catch thrown responses so auth headers are preserved.
 export function ErrorBoundary() {
   return boundary.error(useRouteError());
 }

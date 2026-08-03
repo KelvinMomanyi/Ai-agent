@@ -33,11 +33,23 @@ type StoredStorefrontSession = {
   sessionId: string;
   sessionToken: string;
   expiresAt: number;
+  settings?: StorefrontSettings;
+};
+
+export type StorefrontSettings = {
+  chatEnabled?: boolean;
+  bundlesEnabled?: boolean;
+  upsellEnabled?: boolean;
+  discountNudgeEnabled?: boolean;
+  discountThreshold?: number;
+  exitIntentEnabled?: boolean;
+  postPurchaseEnabled?: boolean;
 };
 
 export class SessionManager {
   anonymousId = "";
   private sessionToken = "";
+  private settings: StorefrontSettings = {};
   private journeyStage: JourneyStage = "discovering";
   private viewedProductIds = new Set<string>();
   private productViewCounts = new Map<string, number>();
@@ -63,6 +75,8 @@ export class SessionManager {
     const authenticated = await this.ensureAuthenticated();
     if (!authenticated) {
       this.bootstrapLocalSession();
+    } else {
+      await this.loadSettings();
     }
     this.syncTimer = window.setInterval(() => this.sync(), 30000);
     window.addEventListener("pagehide", () => this.sync());
@@ -216,6 +230,10 @@ export class SessionManager {
     };
   }
 
+  getSettings(): StorefrontSettings {
+    return { ...this.settings };
+  }
+
   async getSignedAuthPayload(): Promise<{
     sessionId: string;
     sessionToken: string;
@@ -282,6 +300,7 @@ export class SessionManager {
 
     this.anonymousId = session.sessionId;
     this.sessionToken = session.sessionToken;
+    if (session.settings) this.settings = session.settings;
     this.storeStorefrontSession(session);
     this.syncGlobalSdkAuth();
     return true;
@@ -399,6 +418,22 @@ export class SessionManager {
     }
   }
 
+  private async loadSettings(): Promise<void> {
+    try {
+      const response = await fetch(this.endpoint("/config"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(this.getAuthPayload()),
+      });
+      if (!response.ok) return;
+      const body = asRecord(await response.json());
+      const settings = asRecord(body?.settings);
+      if (settings) this.settings = settings as StorefrontSettings;
+    } catch {
+      // Keep the most recently loaded settings when the network is unavailable.
+    }
+  }
+
   private getStoredStorefrontSession(): StoredStorefrontSession | null {
     try {
       const parsed = JSON.parse(
@@ -464,6 +499,7 @@ function asStorefrontSession(value: unknown): StoredStorefrontSession | null {
     sessionId: String(record.sessionId || ""),
     sessionToken: String(record.sessionToken || ""),
     expiresAt: Number(record.expiresAt || 0),
+    settings: asRecord(record.settings) as StorefrontSettings | undefined,
   };
 }
 

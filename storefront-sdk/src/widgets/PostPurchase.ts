@@ -46,7 +46,7 @@ export class PostPurchase extends BaseWidget {
         this.trackClick("add_post_purchase");
         const variantId = (product as any).variantId;
         if (variantId) {
-          await addVariantToCart(variantId);
+          await addVariantToCart(variantId, 1, this.payload.offerId);
           return;
         }
         const handle = (product as any).handle;

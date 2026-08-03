@@ -7,9 +7,10 @@ type RevenuePoint = {
 
 type RevenueChartProps = {
   data: RevenuePoint[];
+  currencyCode: string;
 };
 
-export function RevenueChart({ data }: RevenueChartProps) {
+export function RevenueChart({ data, currencyCode }: RevenueChartProps) {
   const points = normalizeSeries(data);
   const maxRevenue = Math.max(...points.map((point) => point.revenue), 1);
   const width = 720;
@@ -69,7 +70,7 @@ export function RevenueChart({ data }: RevenueChartProps) {
         return <circle key={point.date} cx={x} cy={y} r="4" fill="#008060" />;
       })}
       <text x={padding} y={20} fill="#6d7175" fontSize="12">
-        {formatCurrency(maxRevenue)}
+        {formatCurrency(maxRevenue, currencyCode)}
       </text>
       <text x={padding} y={height - 8} fill="#6d7175" fontSize="12">
         {points[0]?.date}
@@ -85,10 +86,10 @@ function normalizeSeries(data: RevenuePoint[]) {
   return data.length > 0 ? data : [{ date: "", revenue: 0 }];
 }
 
-function formatCurrency(value: number) {
+function formatCurrency(value: number, currency: string) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency,
     notation: "compact",
   }).format(value);
 }

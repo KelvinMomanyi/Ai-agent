@@ -1,5 +1,6 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { data as json, type LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
+import { getPublicAppSettings } from "../models/settings.server";
 import {
   isStorefrontAuthError,
   issueStorefrontSession,
@@ -17,7 +18,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return json({ error: "Invalid shop" }, { status: 401, headers: withCors() });
     }
 
-    return json(issueStorefrontSession(shop), {
+    const [storefrontSession, settings] = await Promise.all([
+      Promise.resolve(issueStorefrontSession(shop)),
+      getPublicAppSettings(shop),
+    ]);
+    return json({ ...storefrontSession, settings }, {
       headers: withCors({ "Cache-Control": "no-store" }),
     });
   } catch (error) {

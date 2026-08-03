@@ -294,25 +294,35 @@ export function getProducts(payload: WidgetPayload): any[] {
   });
 }
 
-export async function addVariantToCart(variantId: unknown, quantity = 1) {
+export async function addVariantToCart(
+  variantId: unknown,
+  quantity = 1,
+  offerId?: unknown,
+) {
   if (!variantId) return null;
   const numericId = String(variantId).split("/").pop();
   const response = await fetch("/cart/add.js", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: numericId, quantity }),
+    body: JSON.stringify({
+      id: numericId,
+      quantity,
+      properties: offerLineProperties(offerId),
+    }),
   });
   return response.ok ? response.json() : null;
 }
 
 export async function addManyToCart(
   items: Array<{ variantId: unknown; quantity: number }>,
+  offerId?: unknown,
 ) {
   const cartItems = items
     .filter((item) => item.variantId)
     .map((item) => ({
       id: String(item.variantId).split("/").pop(),
       quantity: item.quantity || 1,
+      properties: offerLineProperties(offerId),
     }));
   if (cartItems.length === 0) return null;
 
@@ -322,6 +332,11 @@ export async function addManyToCart(
     body: JSON.stringify({ items: cartItems }),
   });
   return response.ok ? response.json() : null;
+}
+
+function offerLineProperties(offerId: unknown) {
+  const value = String(offerId || "").trim();
+  return value ? { _aovboost_offer_id: value } : undefined;
 }
 
 function escapeHtml(value: unknown) {

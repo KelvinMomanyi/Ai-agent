@@ -15,8 +15,6 @@ type AovBoostConfig = {
   cartToken?: string;
   apiBase?: string;
   settings?: {
-    chatEnabled?: boolean;
-    tone?: string;
     trackingConsentRequired?: boolean;
   };
 };
@@ -71,8 +69,9 @@ async function start(): Promise<void> {
 
     const apiBase = normalizeProxyApiBase(config.apiBase);
     const sessionManager = new SessionManager(shop, apiBase);
+    await sessionManager.init();
+    const widgetManager = new WidgetManager(sessionManager.getSettings());
     const eventBus = new EventBus({ shop, sessionManager, apiBase });
-    const widgetManager = new WidgetManager();
     const offerPoller = new OfferPoller({
       shop,
       apiBase,
@@ -86,7 +85,6 @@ async function start(): Promise<void> {
       sessionManager,
     });
 
-    await sessionManager.init();
     window.AOVBoostSDK = {
       shop,
       sessionId: sessionManager.anonymousId,

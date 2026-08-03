@@ -111,7 +111,9 @@ export async function saveBundle(
       where: { id },
       data: {
         ...data,
-        items: { create: sanitizedInput.items },
+        items: {
+          create: sanitizedInput.items.map((item) => ({ ...item, shop })),
+        },
       },
       include: { items: true },
     });
@@ -129,7 +131,9 @@ export async function saveBundle(
     data: {
       shop,
       ...data,
-      items: { create: sanitizedInput.items },
+      items: {
+        create: sanitizedInput.items.map((item) => ({ ...item, shop })),
+      },
     },
     include: { items: true },
   });
@@ -288,6 +292,10 @@ async function assertBundleProductsExist(shop: string, input: BundleInput) {
 function sanitizeBundleInput(input: BundleInput): BundleInput {
   return {
     ...input,
+    // Bundle pricing stays authoritative in Shopify. A discount must never be
+    // displayed unless a Shopify discount function or changeset applies it.
+    discountType: "none",
+    discountValue: 0,
     triggerProductIds: unique(input.triggerProductIds),
     items: input.items
       .filter((item) => item.productId)

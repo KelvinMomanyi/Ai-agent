@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DATABASE_DIRECT_URL")
 }
 
@@ -29,7 +29,7 @@ model Session {
 }
 
 model Product {
-  id              String            @id
+  id              String
   shop            String
   title           String
   handle          String
@@ -48,7 +48,7 @@ model Product {
   affinityTargets ProductAffinity[] @relation("TargetProduct")
   orderStats      ProductOrderStat?
 
-  @@unique([shop, id])
+  @@id([shop, id])
   @@index([shop])
 }
 
@@ -60,8 +60,8 @@ model ProductAffinity {
   score      Float
   reason     String?
   orderCount Int     @default(0)
-  source     Product @relation("SourceProduct", fields: [sourceId], references: [id], onDelete: Cascade)
-  target     Product @relation("TargetProduct", fields: [targetId], references: [id], onDelete: Cascade)
+  source     Product @relation("SourceProduct", fields: [shop, sourceId], references: [shop, id], onDelete: Cascade)
+  target     Product @relation("TargetProduct", fields: [shop, targetId], references: [shop, id], onDelete: Cascade)
 
   @@unique([shop, sourceId, targetId])
   @@index([shop, sourceId, score(sort: Desc)])
@@ -70,9 +70,9 @@ model ProductAffinity {
 model ProductOrderStat {
   id         String  @id @default(cuid())
   shop       String
-  productId  String  @unique
+  productId  String
   orderCount Int     @default(0)
-  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product    Product @relation(fields: [shop, productId], references: [shop, id], onDelete: Cascade)
 
   @@unique([shop, productId])
   @@index([shop])
@@ -98,30 +98,33 @@ model Bundle {
 model BundleItem {
   id        String  @id @default(cuid())
   bundleId  String
+  shop      String
   productId String
   quantity  Int     @default(1)
   bundle    Bundle  @relation(fields: [bundleId], references: [id], onDelete: Cascade)
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [shop, productId], references: [shop, id], onDelete: Cascade)
+
+  @@index([shop, productId])
 }
 
 model ShopperSession {
-  id                String         @id @default(cuid())
-  shop              String
-  anonymousId       String
-  journeyStage      String         @default("discovering")
-  intentScore       Float          @default(0)
-  hesitationScore   Float          @default(0)
-  viewedProductIds  String[]       @default([])
-  cartProductIds    String[]       @default([])
-  chatEngaged       Boolean        @default(false)
-  totalPageViews    Int            @default(0)
-  sessionDuration   Int            @default(0)
-  context           Json           @default("{}")
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
-  events            ShopperEvent[]
-  offers            Offer[]
-  chatMessages      ChatMessage[]
+  id               String         @id @default(cuid())
+  shop             String
+  anonymousId      String
+  journeyStage     String         @default("discovering")
+  intentScore      Float          @default(0)
+  hesitationScore  Float          @default(0)
+  viewedProductIds String[]       @default([])
+  cartProductIds   String[]       @default([])
+  chatEngaged      Boolean        @default(false)
+  totalPageViews   Int            @default(0)
+  sessionDuration  Int            @default(0)
+  context          Json           @default("{}")
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  events           ShopperEvent[]
+  offers           Offer[]
+  chatMessages     ChatMessage[]
 
   @@unique([shop, anonymousId])
   @@index([shop, updatedAt])
@@ -206,6 +209,24 @@ model AppSettings {
   brandVoice           String?
   blockedProductIds    String[] @default([])
   updatedAt            DateTime @updatedAt
+}
+
+model CatalogSyncJob {
+  id               String    @id @default(cuid())
+  shop             String    @unique
+  phase            String    @default("fetching")
+  cursor           String?
+  syncedProductIds String[]  @default([])
+  syncedCount      Int       @default(0)
+  affinityOffset   Int       @default(0)
+  affinityTotal    Int       @default(0)
+  error            String?
+  leaseToken       String?
+  leaseUntil       DateTime?
+  startedAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([phase, updatedAt])
 }
 
 model ShopConfig {

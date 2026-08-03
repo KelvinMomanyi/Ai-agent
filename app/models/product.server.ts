@@ -292,136 +292,179 @@ export async function recomputeAffinities(
 export async function incrementOrderAffinities(
   shop: string,
   productIds: string[],
+  orderId: string,
 ) {
   const uniqueProductIds = Array.from(new Set(productIds.filter(Boolean)));
-  if (uniqueProductIds.length < 1) return;
+  if (uniqueProductIds.length < 1 || !orderId) return;
 
-  for (const productId of uniqueProductIds) {
-    await prisma.productOrderStat.upsert({
-      where: { shop_productId: { shop, productId } },
-      update: { orderCount: { increment: 1 } },
-      create: { shop, productId, orderCount: 1 },
-    });
-  }
-
-  for (let index = 0; index < uniqueProductIds.length; index += 1) {
-    for (let targetIndex = 0; targetIndex < uniqueProductIds.length; targetIndex += 1) {
-      if (index === targetIndex) continue;
-      const sourceId = uniqueProductIds[index];
-      const targetId = uniqueProductIds[targetIndex];
-      await prisma.productAffinity.upsert({
+  let knownProductIds: string[];
+  try {
+    knownProductIds = await prisma.$transaction(async (tx) => {
+      const marker = await tx.event.findUnique({
         where: {
-          shop_sourceId_targetId: {
-            shop,
-            sourceId,
-            targetId,
+          event_orderId_storeId: {
+            event: "order_affinities_processed",
+            orderId,
+            storeId: shop,
           },
         },
-        update: { orderCount: { increment: 1 } },
-        create: {
-          shop,
-          sourceId,
-          targetId,
-          score: 0.5,
-          reason: "frequently bought together",
-          orderCount: 1,
+        select: { id: true },
+      });
+      if (marker) return [];
+
+      const products = await tx.product.findMany({
+        where: { shop, id: { in: uniqueProductIds } },
+        select: { id: true },
+      });
+      const knownIds = products.map(({ id }) => id);
+
+      await tx.event.create({
+        data: {
+          event: "order_affinities_processed",
+          orderId,
+          storeId: shop,
+          timestamp: new Date(),
+          data: { productIds: knownIds },
         },
       });
-      await recomputeAffinities(shop, sourceId);
-    }
+
+      for (const productId of knownIds) {
+        await tx.productOrderStat.upsert({
+          where: { shop_productId: { shop, productId } },
+          update: { orderCount: { increment: 1 } },
+          create: { shop, productId, orderCount: 1 },
+        });
+      }
+
+      for (const sourceId of knownIds) {
+        for (const targetId of knownIds) {
+          if (sourceId === targetId) continue;
+          await tx.productAffinity.upsert({
+            where: { shop_sourceId_targetId: { shop, sourceId, targetId } },
+            update: { orderCount: { increment: 1 } },
+            create: {
+              shop,
+              sourceId,
+              targetId,
+              score: 0.5,
+              reason: "frequently bought together",
+              orderCount: 1,
+            },
+          });
+        }
+      }
+
+      return knownIds;
+    });
+  } catch (error) {
+    // A concurrent delivery can race between the marker lookup and insert.
+    // The unique marker makes the transaction exactly-once for this order.
+    if ((error as { code?: string })?.code === "P2002") return;
+    throw error;
+  }
+
+  for (let index = 0; index < knownProductIds.length; index += 4) {
+    const batch = knownProductIds.slice(index, index + 4);
+    await Promise.all(batch.map((productId) => recomputeAffinities(shop, productId)));
   }
 }
 
-export async function syncProductsFromAdmin(
+export async function syncProductsPageFromAdmin(
   shop: string,
   admin: ShopifyAdminGraphql,
-  onProgress?: (progress: { total?: number; done: number; status: string }) => Promise<void>,
+  cursor: string | null,
 ) {
-  let cursor: string | null = null;
-  let hasNextPage = true;
-  let synced = 0;
-  const syncedProductIds = new Set<string>();
-  await onProgress?.({ done: 0, status: "fetching" });
-
-  while (hasNextPage) {
-    const response = await admin.graphql(
-      `#graphql
-      query AOVBoostProducts($cursor: String) {
-        products(first: 250, after: $cursor) {
-          edges {
-            cursor
-            node {
-              id
-              title
-              handle
-              vendor
-              productType
-              tags
-              featuredImage { url }
-              collections(first: 50) { edges { node { id } } }
-              variants(first: 1) {
-                edges { node { id price compareAtPrice } }
-              }
-              metafields(first: 20) {
-                edges { node { namespace key value type } }
-              }
+  const response = await admin.graphql(
+    `#graphql
+    query AOVBoostProducts($cursor: String) {
+      products(first: 250, after: $cursor) {
+        edges {
+          node {
+            id
+            title
+            handle
+            vendor
+            productType
+            tags
+            featuredMedia { preview { image { url } } }
+            collections(first: 50) { edges { node { id } } }
+            variants(first: 1) { edges { node { id price compareAtPrice } } }
+            metafields(first: 20) {
+              edges { node { namespace key value type } }
             }
           }
-          pageInfo { hasNextPage endCursor }
         }
-      }`,
-      { variables: { cursor } },
+        pageInfo { hasNextPage endCursor }
+      }
+    }`,
+    { variables: { cursor } },
+  );
+  const result = await response.json();
+  if (Array.isArray(result.errors) && result.errors.length > 0) {
+    throw new Error(
+      `Shopify product sync failed: ${result.errors
+        .map((error: any) => String(error.message || "Unknown GraphQL error"))
+        .join("; ")}`,
     );
-    const result = await response.json();
-    const edges = result.data?.products?.edges || [];
-
-    for (const edge of edges) {
-      await upsertProduct(shop, mapGraphqlProduct(edge.node));
-      if (edge.node?.id) syncedProductIds.add(edge.node.id);
-      synced += 1;
-    }
-    await onProgress?.({
-      done: synced,
-      status: hasNextPage ? "fetching" : "building_affinities",
-    });
-
-    cursor = result.data?.products?.pageInfo?.endCursor || null;
-    hasNextPage = Boolean(result.data?.products?.pageInfo?.hasNextPage);
+  }
+  const connection = result.data?.products;
+  if (!connection || !Array.isArray(connection.edges)) {
+    throw new Error("Shopify product sync returned an invalid response");
   }
 
-  await onProgress?.({ done: synced, status: "pruning_deleted" });
-  const deleted = syncedProductIds.size
-    ? await prisma.product.deleteMany({
-        where: {
-          shop,
-          id: { notIn: Array.from(syncedProductIds) },
-        },
-      })
-    : await prisma.product.deleteMany({ where: { shop } });
+  await upsertProductBatch(
+    shop,
+    connection.edges.map((edge: any) => mapGraphqlProduct(edge.node)),
+  );
+  const productIds: string[] = connection.edges
+    .map((edge: any) => String(edge.node?.id || ""))
+    .filter((id: string) => Boolean(id));
+  const nextCursor = connection.pageInfo?.endCursor || null;
+  const hasNextPage = Boolean(connection.pageInfo?.hasNextPage);
+  if (hasNextPage && (!nextCursor || nextCursor === cursor)) {
+    throw new Error("Shopify product sync pagination did not advance");
+  }
+  return { productIds, cursor: nextCursor, hasNextPage };
+}
 
+export async function pruneDeletedProducts(shop: string, productIds: string[]) {
+  return productIds.length
+    ? prisma.product.deleteMany({ where: { shop, id: { notIn: productIds } } })
+    : prisma.product.deleteMany({ where: { shop } });
+}
+
+export async function recomputeInitialAffinityBatch(
+  shop: string,
+  offset: number,
+  batchSize = 20,
+) {
   const products = await prisma.product.findMany({
     where: { shop },
     include: { orderStats: true },
     orderBy: [{ updatedAt: "desc" }],
     take: INITIAL_AFFINITY_PRODUCT_LIMIT,
   });
-  let affinityDone = 0;
-  await onProgress?.({
-    total: products.length,
-    done: affinityDone,
-    status: "building_affinities",
-  });
-  for (const product of products) {
-    await recomputeInitialAffinities(shop, product, products);
-    affinityDone += 1;
-    await onProgress?.({
-      total: products.length,
-      done: affinityDone,
-      status: "building_affinities",
-    });
-  }
+  const batch = products.slice(offset, offset + batchSize);
+  await Promise.all(
+    batch.map((product) => recomputeInitialAffinities(shop, product, products)),
+  );
+  const done = Math.min(offset + batch.length, products.length);
+  return { total: products.length, done, complete: done >= products.length };
+}
 
-  return { synced, deleted: deleted.count };
+async function upsertProductBatch(shop: string, products: ShopifyProductInput[]) {
+  for (let index = 0; index < products.length; index += 50) {
+    const batch = products.slice(index, index + 50);
+    await prisma.$transaction(
+      batch.map((product) =>
+        prisma.product.upsert({
+          where: { shop_id: { shop, id: product.id } },
+          update: toProductData(shop, product),
+          create: toProductData(shop, product),
+        }),
+      ),
+    );
+  }
 }
 
 type ProductWithOptionalStats = Product & {
@@ -528,7 +571,7 @@ function mapGraphqlProduct(node: any): ShopifyProductInput {
     tags: node.tags || [],
     price: variant?.price || 0,
     compareAtPrice: variant?.compareAtPrice || null,
-    imageUrl: node.featuredImage?.url || null,
+    imageUrl: node.featuredMedia?.preview?.image?.url || null,
     collectionIds: (node.collections?.edges || []).map((edge: any) => edge.node.id),
     metafields,
   };

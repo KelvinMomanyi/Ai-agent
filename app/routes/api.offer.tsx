@@ -1,8 +1,8 @@
 import {
-  json,
+  data as json,
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
-} from "@remix-run/node";
+} from "react-router";
 import type { AppSettings, Experiment } from "@prisma/client";
 import prisma from "../db.server";
 import { getOfferDecision } from "../ai/decisionEngine.server";

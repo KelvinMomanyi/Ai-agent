@@ -1,55 +1,25 @@
-import "@shopify/shopify-app-remix/adapters/node";
+import "@shopify/shopify-app-react-router/adapters/node";
 import {
   ApiVersion,
   AppDistribution,
-  DeliveryMethod,
   shopifyApp,
-} from "@shopify/shopify-app-remix/server";
-import { restResources } from "@shopify/shopify-api/rest/admin/2023-10";
+} from "@shopify/shopify-app-react-router/server";
 import prisma from "./db.server";
 import { UpstashSessionStorage } from "./upstash-session-storage.server";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
-  apiVersion: ApiVersion.January25,
+  apiVersion: ApiVersion.July26,
   scopes: process.env.SCOPES?.split(","),
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
   sessionStorage: new UpstashSessionStorage(),
   distribution: AppDistribution.AppStore,
-  restResources,
-  webhooks: {
-    APP_UNINSTALLED: {
-      deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/api/webhooks",
-    },
-    PRODUCTS_CREATE: {
-      deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/api/webhooks",
-    },
-    PRODUCTS_UPDATE: {
-      deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/api/webhooks",
-    },
-    PRODUCTS_DELETE: {
-      deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/api/webhooks",
-    },
-    ORDERS_CREATE: {
-      deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/api/webhooks",
-    },
-  },
   hooks: {
     afterAuth: async ({ session }) => {
-      shopify.registerWebhooks({ session });
       await persistShopToPrisma(session);
     },
-  },
-  future: {
-    unstable_newEmbeddedAuthStrategy: true,
-    removeRest: true,
   },
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
@@ -100,10 +70,9 @@ async function persistShopToPrisma(session: { id: string; shop: string; state: s
 }
 
 export default shopify;
-export const apiVersion = ApiVersion.January25;
+export const apiVersion = ApiVersion.July26;
 export const addDocumentResponseHeaders = shopify.addDocumentResponseHeaders;
 export const authenticate = shopify.authenticate;
 export const unauthenticated = shopify.unauthenticated;
 export const login = shopify.login;
-export const registerWebhooks = shopify.registerWebhooks;
 export const sessionStorage = shopify.sessionStorage;

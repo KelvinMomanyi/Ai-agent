@@ -609,7 +609,7 @@ function heuristicFallback(
       widgetType: "discount_nudge",
       payload: { threshold: threshold.toString(), cartValue },
       reasoning:
-        "Cart value is within 20% of the configured discount threshold.",
+        "Cart value is within 20% of the configured cart-value goal.",
       confidence: 0.55,
       aiProvider: "heuristic",
     };

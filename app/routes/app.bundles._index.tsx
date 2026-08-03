@@ -1,10 +1,10 @@
 import {
-  json,
+  data as json,
   redirect,
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
-} from "@remix-run/node";
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+} from "react-router";
+import { Form, useLoaderData, useNavigation } from "react-router";
 import {
   Badge,
   BlockStack,

@@ -187,8 +187,8 @@ function buildFallbackCopy(
       };
     case "discount_nudge":
       return {
-        progressLabel: "You are close to a reward",
-        rewardDescription: "Add one more item to unlock the offer.",
+        progressLabel: "You are close to your cart goal",
+        rewardDescription: "Your cart goal has been reached.",
         ctaText: "View picks",
       };
     case "toast":

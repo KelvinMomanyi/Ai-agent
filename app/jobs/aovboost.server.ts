@@ -1,116 +1,151 @@
+import crypto from "node:crypto";
 import prisma from "../db.server";
-import { cacheKeys, createWorker, queues, redis } from "../redis.server";
-import { getOfferDecision } from "../ai/decisionEngine.server";
-import { buildOfferCandidates, createOfferRecord } from "../models/offer.server";
 import { refreshCatalogCache } from "../models/catalogCache.server";
-import { syncProductsFromAdmin } from "../models/product.server";
-import { getShopperSession, toShopperSessionSnapshot } from "../models/session.server";
+import {
+  pruneDeletedProducts,
+  recomputeInitialAffinityBatch,
+  syncProductsPageFromAdmin,
+} from "../models/product.server";
+import { cacheKeys, redis } from "../redis.server";
 import { unauthenticated } from "../shopify.server";
 
-let workersRegistered = false;
+const LEASE_SECONDS = 90;
 
-export function registerAovboostWorkers() {
-  if (workersRegistered || process.env.AOVBOOST_DISABLE_WORKERS === "true") return;
-  workersRegistered = true;
-
-  createWorker<{ sessionId: string; shop: string; trigger: string }>(
-    "generate-offer",
-    async (job) => {
-      await generateOfferJob(job.data);
+export async function startCatalogSync(shop: string) {
+  const job = await prisma.catalogSyncJob.upsert({
+    where: { shop },
+    update: {
+      phase: "fetching",
+      cursor: null,
+      syncedProductIds: [],
+      syncedCount: 0,
+      affinityOffset: 0,
+      affinityTotal: 0,
+      error: null,
+      leaseToken: null,
+      leaseUntil: null,
+      startedAt: new Date(),
     },
-  );
-
-  createWorker<{ shop: string }>("sync-products", async (job) => {
-    await syncProductsJob(job.data.shop);
+    create: { shop },
   });
+  await publishProgress(job);
+  return job;
+}
 
-  createWorker<{ shop: string; productId: string }>(
-    "recompute-affinity",
-    async (job) => {
-      const { recomputeAffinities } = await import("../models/product.server");
-      await recomputeAffinities(job.data.shop, job.data.productId);
+export async function processCatalogSyncChunk(shop: string) {
+  let job = await prisma.catalogSyncJob.findUnique({ where: { shop } });
+  if (!job) job = await startCatalogSync(shop);
+  if (job.phase === "complete" || job.phase === "failed") {
+    return toProgress(job);
+  }
+
+  const leaseToken = crypto.randomUUID();
+  const claimed = await prisma.catalogSyncJob.updateMany({
+    where: {
+      shop,
+      OR: [{ leaseUntil: null }, { leaseUntil: { lt: new Date() } }],
     },
-  );
-}
-
-export async function enqueueProductSync(shop: string) {
-  return queues.syncProductsQueue.add("sync-products", { shop });
-}
-
-export async function syncProductsJob(shop: string) {
-  await redis.set(
-    cacheKeys.syncProgress(shop),
-    JSON.stringify({ total: 0, done: 0, status: "starting" }),
-    "EX",
-    600,
-  );
-  const { admin } = await unauthenticated.admin(shop);
-  const result = await syncProductsFromAdmin(shop, admin, async (progress) => {
-    await redis.set(
-      cacheKeys.syncProgress(shop),
-      JSON.stringify({
-        total: progress.total ?? 0,
-        done: progress.done,
-        status: progress.status,
-      }),
-      "EX",
-      600,
-    );
+    data: {
+      leaseToken,
+      leaseUntil: new Date(Date.now() + LEASE_SECONDS * 1000),
+    },
   });
-  await redis.set(
-    cacheKeys.syncProgress(shop),
-    JSON.stringify({ total: result.synced, done: result.synced, status: "catalog_refreshing" }),
-    "EX",
-    600,
-  );
-  await refreshCatalogCache(shop);
-  await redis.set(
-    cacheKeys.syncProgress(shop),
-    JSON.stringify({ total: result.synced, done: result.synced, status: "complete" }),
-    "EX",
-    600,
-  );
-  return result;
+  if (claimed.count === 0) return { ...toProgress(job), busy: true };
+
+  try {
+    job = (await prisma.catalogSyncJob.findUnique({ where: { shop } }))!;
+    if (job.phase === "fetching") {
+      const { admin } = await unauthenticated.admin(shop);
+      const page = await syncProductsPageFromAdmin(shop, admin, job.cursor);
+      const syncedProductIds = Array.from(
+        new Set([...job.syncedProductIds, ...page.productIds]),
+      );
+      job = await prisma.catalogSyncJob.update({
+        where: { shop },
+        data: {
+          cursor: page.cursor,
+          syncedProductIds,
+          syncedCount: syncedProductIds.length,
+          phase: page.hasNextPage ? "fetching" : "pruning_deleted",
+        },
+      });
+    } else if (job.phase === "pruning_deleted") {
+      await pruneDeletedProducts(shop, job.syncedProductIds);
+      job = await prisma.catalogSyncJob.update({
+        where: { shop },
+        data: { phase: "building_affinities", affinityOffset: 0 },
+      });
+    } else if (job.phase === "building_affinities") {
+      const result = await recomputeInitialAffinityBatch(
+        shop,
+        job.affinityOffset,
+      );
+      job = await prisma.catalogSyncJob.update({
+        where: { shop },
+        data: {
+          affinityOffset: result.done,
+          affinityTotal: result.total,
+          phase: result.complete ? "catalog_refreshing" : "building_affinities",
+        },
+      });
+    } else if (job.phase === "catalog_refreshing") {
+      await refreshCatalogCache(shop);
+      job = await prisma.catalogSyncJob.update({
+        where: { shop },
+        data: { phase: "complete" },
+      });
+    }
+
+    await publishProgress(job);
+    return toProgress(job);
+  } catch (error) {
+    job = await prisma.catalogSyncJob.update({
+      where: { shop },
+      data: {
+        phase: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
+    await publishProgress(job);
+    throw error;
+  } finally {
+    await prisma.catalogSyncJob.updateMany({
+      where: { shop, leaseToken },
+      data: { leaseToken: null, leaseUntil: null },
+    });
+  }
 }
 
-export async function generateOfferJob(input: {
-  sessionId: string;
-  shop: string;
-  trigger: string;
+export async function getCatalogSyncProgress(shop: string) {
+  const job = await prisma.catalogSyncJob.findUnique({ where: { shop } });
+  return job ? toProgress(job) : null;
+}
+
+function toProgress(job: {
+  phase: string;
+  syncedCount: number;
+  affinityOffset: number;
+  affinityTotal: number;
+  error: string | null;
 }) {
-  const session = await getShopperSession(input.shop, input.sessionId);
-  if (!session) return null;
+  const buildingAffinities = job.phase === "building_affinities";
+  return {
+    status: job.phase,
+    done: buildingAffinities ? job.affinityOffset : job.syncedCount,
+    total: buildingAffinities ? job.affinityTotal : job.syncedCount,
+    error: job.error || undefined,
+    complete: job.phase === "complete",
+    failed: job.phase === "failed",
+  };
+}
 
-  const settings = await prisma.appSettings.upsert({
-    where: { shop: input.shop },
-    update: {},
-    create: { shop: input.shop },
-  });
-  const snapshot = toShopperSessionSnapshot(session);
-  const currentProductId = session.viewedProductIds.at(-1);
-  const candidates = await buildOfferCandidates({
-    shop: input.shop,
-    session: snapshot,
-    currentProductId,
-  });
-  const decision = await getOfferDecision({
-    shop: input.shop,
-    session: snapshot,
-    currentProductId,
-    currentPageType: currentProductId ? "product" : "other",
-    cartProductIds: session.cartProductIds,
-    recentlyDismissedWidgets: [],
-    settings,
-    candidates,
-    trigger: {
-      type: input.trigger,
-    },
-  });
-
-  return createOfferRecord({
-    shop: input.shop,
-    sessionId: session.id,
-    decision,
-    triggerContext: { trigger: input.trigger, session: snapshot },
-  });
+async function publishProgress(
+  job: Parameters<typeof toProgress>[0] & { shop: string },
+) {
+  await redis.set(
+    cacheKeys.syncProgress(job.shop),
+    JSON.stringify(toProgress(job)),
+    "EX",
+    3600,
+  );
 }

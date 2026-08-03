@@ -10,9 +10,10 @@ type WidgetRow = {
 
 type WidgetPerformanceTableProps = {
   rows: WidgetRow[];
+  currencyCode: string;
 };
 
-export function WidgetPerformanceTable({ rows }: WidgetPerformanceTableProps) {
+export function WidgetPerformanceTable({ rows, currencyCode }: WidgetPerformanceTableProps) {
   if (rows.length === 0) {
     return (
       <Text as="p" tone="subdued">
@@ -30,7 +31,7 @@ export function WidgetPerformanceTable({ rows }: WidgetPerformanceTableProps) {
         row.impressions.toLocaleString(),
         row.clicks.toLocaleString(),
         row.conversions.toLocaleString(),
-        formatCurrency(row.revenue),
+        formatCurrency(row.revenue, currencyCode),
       ])}
     />
   );
@@ -43,10 +44,10 @@ function formatWidget(value: string) {
     .join(" ");
 }
 
-function formatCurrency(value: number) {
+function formatCurrency(value: number, currency: string) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency,
     notation: value >= 1000 ? "compact" : "standard",
   }).format(value);
 }

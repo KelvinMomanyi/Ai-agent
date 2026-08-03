@@ -1,11 +1,5 @@
 import { Redis } from "@upstash/redis";
 
-/**
- * Upstash REST-based Redis client.
- *
- * Uses HTTP per request — no persistent TCP sockets — so it works on
- * Vercel serverless where ioredis/node-redis cause ECONNRESET / ETIMEDOUT.
- */
 const upstash =
   process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
     ? new Redis({
@@ -16,83 +10,9 @@ const upstash =
 
 const memoryStore = new Map<string, { value: unknown; expiresAt?: number }>();
 
-// ---------------------------------------------------------------------------
-// Lightweight job queue over Upstash REST (replaces BullMQ)
-//
-// On Vercel serverless BullMQ cannot work because:
-//   1. ioredis TCP connections die across freeze/thaw cycles
-//   2. Workers need a long-running process (no workers on serverless)
-//
-// Instead we run jobs **inline** within the request that enqueues them.
-// The "queue" API is kept so call-sites don't need to change.
-// ---------------------------------------------------------------------------
-
-type JobProcessor<T = unknown> = (data: T) => Promise<void>;
-
-const processors = new Map<string, JobProcessor<any>>();
-
-class SimpleQueue<T = unknown> {
-  constructor(public readonly name: string) {}
-
-  async add(_jobName: string, data: T): Promise<void> {
-    const processor = processors.get(this.name);
-    if (processor) {
-      try {
-        await processor(data);
-      } catch (error) {
-        console.error(
-          `[queue:${this.name}] Job failed:`,
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-    } else {
-      // No processor registered — log and skip.
-      // This is expected on Vercel serverless where workers are not started.
-      console.log(`[queue:${this.name}] No processor registered, skipping job`);
-    }
-  }
-}
-
-declare global {
-  var aovboostQueues:
-    | {
-        generateOfferQueue: SimpleQueue;
-        syncProductsQueue: SimpleQueue;
-        recomputeAffinityQueue: SimpleQueue;
-      }
-    | undefined;
-}
-
-export const queues = global.aovboostQueues ?? {
-  generateOfferQueue: new SimpleQueue("generate-offer"),
-  syncProductsQueue: new SimpleQueue("sync-products"),
-  recomputeAffinityQueue: new SimpleQueue("recompute-affinity"),
-};
-
-if (process.env.NODE_ENV !== "production") {
-  global.aovboostQueues = queues;
-}
-
 /**
- * Register a processor for a named queue.
- * On Vercel serverless, jobs are executed inline when `.add()` is called.
- */
-export function createWorker<Data>(
-  queueName: string,
-  processor: (job: { data: Data }) => Promise<void>,
-) {
-  processors.set(queueName, async (data: Data) => {
-    await processor({ data });
-  });
-}
-
-// ---------------------------------------------------------------------------
-// REST-based cache / rate-limit helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Thin wrapper that exposes `.del()`, `.get()`, `.set()`, `.incr()`, `.expire()`
- * matching the old ioredis API surface used throughout the app.
+ * Upstash's HTTP client works in serverless runtimes. The memory fallback keeps
+ * local development usable, but is intentionally treated as a best-effort cache.
  */
 export const redis = {
   async del(key: string) {
@@ -112,7 +32,6 @@ export const redis = {
     );
   },
   async set(key: string, value: string, ...args: any[]) {
-    // Support: redis.set(key, value, "EX", ttl)
     await withRedis(
       async (client) => {
         if (args[0] === "EX" && typeof args[1] === "number") {
@@ -121,9 +40,7 @@ export const redis = {
           await client.set(key, value);
         }
       },
-      () => {
-        setMemoryValue(key, value, args[0] === "EX" ? args[1] : undefined);
-      },
+      () => setMemoryValue(key, value, args[0] === "EX" ? args[1] : undefined),
     );
   },
   async incr(key: string) {
@@ -213,9 +130,7 @@ export async function incrementRateLimit(
   ttlSeconds: number,
 ): Promise<number> {
   const count = await redis.incr(key);
-  if (count === 1) {
-    await redis.expire(key, ttlSeconds);
-  }
+  if (count === 1) await redis.expire(key, ttlSeconds);
   return count;
 }
 
@@ -229,6 +144,7 @@ export const cacheKeys = {
     `affinity:${shop}:${productId}`,
   offerRateLimit: (sessionId: string) => `rate:offer:${sessionId}`,
   chatRateLimit: (sessionId: string) => `rate:chat:${sessionId}`,
+  eventsRateLimit: (sessionId: string) => `rate:events:${sessionId}`,
 };
 
 async function withRedis<T>(

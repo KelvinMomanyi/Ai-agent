@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Form } from "@remix-run/react";
+import { Form } from "react-router";
 import {
   BlockStack,
   Button,
@@ -8,7 +8,6 @@ import {
   FormLayout,
   InlineStack,
   RangeSlider,
-  Select,
   Text,
   TextField,
 } from "@shopify/polaris";
@@ -70,6 +69,8 @@ export function BundleForm({ bundle, products, errors = {} }: BundleFormProps) {
       <input type="hidden" name="items" value={JSON.stringify(formState.items)} />
       <input type="hidden" name="isActive" value={String(formState.isActive)} />
       <input type="hidden" name="priority" value={String(formState.priority)} />
+      <input type="hidden" name="discountType" value="none" />
+      <input type="hidden" name="discountValue" value="0" />
 
       <Card>
         <BlockStack gap="500">
@@ -142,32 +143,6 @@ export function BundleForm({ bundle, products, errors = {} }: BundleFormProps) {
           ) : null}
 
           <FormLayout>
-            <Select
-              label="Discount type"
-              name="discountType"
-              options={[
-                { label: "None", value: "none" },
-                { label: "Percentage", value: "percentage" },
-                { label: "Fixed", value: "fixed" },
-              ]}
-              value={formState.discountType}
-              onChange={(discountType) =>
-                setFormState({
-                  ...formState,
-                  discountType: discountType as BundleFormValue["discountType"],
-                })
-              }
-            />
-            <TextField
-              label="Discount value"
-              name="discountValue"
-              type="number"
-              value={formState.discountValue}
-              onChange={(discountValue) =>
-                setFormState({ ...formState, discountValue })
-              }
-              autoComplete="off"
-            />
             <RangeSlider
               label="Priority"
               min={0}
@@ -183,6 +158,11 @@ export function BundleForm({ bundle, products, errors = {} }: BundleFormProps) {
               onChange={(isActive) => setFormState({ ...formState, isActive })}
             />
           </FormLayout>
+
+          <Text as="p" tone="subdued">
+            Bundles group products at their Shopify prices. This app does not
+            advertise a bundle discount unless Shopify can apply it at checkout.
+          </Text>
 
           <InlineStack gap="300">
             <Button submit variant="primary">

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { json, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
+import { data as json, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
+import { useLoaderData, useNavigation, useSubmit } from "react-router";
 import {
   Badge,
   BlockStack,

@@ -1,5 +1,5 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { useFetcher, useLoaderData } from "@remix-run/react";
+import { data as json, type LoaderFunctionArgs, useFetcher, useLoaderData } from "react-router";
+import { useEffect } from "react";
 import { Badge, BlockStack, Card, InlineStack, Layout, Page, Text } from "@shopify/polaris";
 import { AovMetricCard } from "../components/dashboard/AovMetricCard";
 import { RevenueChart } from "../components/dashboard/RevenueChart";
@@ -13,26 +13,34 @@ type SyncProgress = {
   total?: number;
   done?: number;
   status?: string;
+  error?: string;
 } | null;
 
 type SyncResponse = {
   ok?: boolean;
+  continue?: boolean;
   progress?: SyncProgress;
   productCount?: number;
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const [metrics, productCount, syncProgress] = await Promise.all([
+  const { session, admin } = await authenticate.admin(request);
+  const [metrics, productCount, syncProgress, currencyResponse] = await Promise.all([
     getDashboardMetrics(session.shop),
     prisma.product.count({ where: { shop: session.shop } }),
     getJsonCache<SyncProgress>(cacheKeys.syncProgress(session.shop)),
+    admin.graphql(`#graphql\nquery AOVBoostShopCurrency { shop { currencyCode } }`),
   ]);
+  const currencyResult: any = await currencyResponse.json();
+  const currencyCode = /^[A-Z]{3}$/.test(currencyResult.data?.shop?.currencyCode)
+    ? currencyResult.data.shop.currencyCode
+    : "USD";
 
   return json({
     metrics,
     productCount,
     syncProgress,
+    currencyCode,
     providers: {
       gemini: Boolean(process.env.GOOGLE_API_KEY),
       groq: Boolean(process.env.GROQ_API_KEY),
@@ -41,13 +49,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function AovBoostDashboard() {
-  const { metrics, providers, productCount, syncProgress } =
+  const { metrics, providers, productCount, syncProgress, currencyCode } =
     useLoaderData<typeof loader>();
   const syncFetcher = useFetcher<SyncResponse>();
   const currentProgress = syncFetcher.data?.progress ?? syncProgress;
   const currentProductCount = syncFetcher.data?.productCount ?? productCount;
-  const syncIsSubmitting = syncFetcher.state !== "idle";
-  const syncFailed = syncFetcher.data?.ok === false;
+  const syncShouldContinue = Boolean(
+    currentProgress?.status &&
+      currentProgress.status !== "complete" &&
+      currentProgress.status !== "failed",
+  );
+  const syncIsSubmitting = syncFetcher.state !== "idle" || syncShouldContinue;
+  const syncFailed =
+    syncFetcher.data?.ok === false || currentProgress?.status === "failed";
+
+  useEffect(() => {
+    if (syncFetcher.state !== "idle" || !syncShouldContinue) return;
+    syncFetcher.submit(
+      { intent: "continue" },
+      { method: "post", action: "/api/sync" },
+    );
+  }, [syncFetcher, syncShouldContinue]);
 
   return (
     <Page
@@ -62,7 +84,10 @@ export default function AovBoostDashboard() {
         loading: syncIsSubmitting,
         disabled: syncIsSubmitting,
         onAction: () =>
-          syncFetcher.submit({}, { method: "post", action: "/api/sync" }),
+          syncFetcher.submit(
+            { intent: "restart" },
+            { method: "post", action: "/api/sync" },
+          ),
       }}
       secondaryActions={[
         { content: "Bundles", url: "/app/bundles" },
@@ -78,7 +103,10 @@ export default function AovBoostDashboard() {
               gap: "12px",
             }}
           >
-            <AovMetricCard label="Avg AOV" value={formatCurrency(metrics.avgAov)} />
+            <AovMetricCard
+              label="Avg AOV"
+              value={formatCurrency(metrics.avgAov, currencyCode)}
+            />
             <AovMetricCard label="AOV Lift" value={formatPercent(metrics.aovLift)} />
             <AovMetricCard label="Widget CTR" value={formatPercent(metrics.widgetCtr)} />
             <AovMetricCard
@@ -94,7 +122,7 @@ export default function AovBoostDashboard() {
               <Text as="h2" variant="headingMd">
                 Revenue attributed to AOVBoost
               </Text>
-              <RevenueChart data={metrics.revenueSeries} />
+              <RevenueChart data={metrics.revenueSeries} currencyCode={currencyCode} />
             </BlockStack>
           </Card>
         </Layout.Section>
@@ -105,7 +133,7 @@ export default function AovBoostDashboard() {
               <Text as="h2" variant="headingMd">
                 Widget performance
               </Text>
-              <WidgetPerformanceTable rows={metrics.widgetRows} />
+              <WidgetPerformanceTable rows={metrics.widgetRows} currencyCode={currencyCode} />
             </BlockStack>
           </Card>
         </Layout.Section>
@@ -165,7 +193,9 @@ function getCatalogStatusText(
   progress: SyncProgress,
   failed: boolean,
 ) {
-  if (failed) return "Product sync failed. Check the app logs and Shopify product scopes.";
+  if (failed) {
+    return progress?.error || "Product sync failed. Check the app logs and Shopify product scopes.";
+  }
   if (progress?.status && progress.status !== "complete") {
     const done = Number(progress.done || 0);
     const total = Number(progress.total || 0);
@@ -182,10 +212,10 @@ function formatStatus(status: string) {
   return status.replace(/_/g, " ");
 }
 
-function formatCurrency(value: number) {
+function formatCurrency(value: number, currency: string) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency,
   }).format(value);
 }
 

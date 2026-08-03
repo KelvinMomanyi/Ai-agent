@@ -33,7 +33,10 @@ export function verifyAppProxyRequest(request: Request) {
   const timestamp = Number(url.searchParams.get("timestamp") || 0);
   const customerId = url.searchParams.get("logged_in_customer_id") || null;
 
-  if (process.env.AOVBOOST_ALLOW_UNSIGNED_PROXY === "true") {
+  if (
+    process.env.AOVBOOST_ALLOW_UNSIGNED_PROXY === "true" &&
+    process.env.NODE_ENV !== "production"
+  ) {
     return { shop, customerId };
   }
 

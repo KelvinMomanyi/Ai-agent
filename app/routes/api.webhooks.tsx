@@ -1,20 +1,23 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs } from "react-router";
+import type { Prisma } from "@prisma/client";
 import prisma from "../db.server";
-import { queues } from "../redis.server";
-import { authenticate } from "../shopify.server";
+import { authenticate, sessionStorage } from "../shopify.server";
+import { extractOrderAttribution } from "../models/attribution.server";
+import { markOfferConversion } from "../models/offer.server";
 import {
   deleteProduct,
   incrementOrderAffinities,
   upsertProduct,
 } from "../models/product.server";
+import type { ShopifyProductInput } from "../models/product.server";
 import { refreshCatalogCache } from "../models/catalogCache.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic, payload, session } = await authenticate.webhook(request);
+  const { shop, topic, payload } = await authenticate.webhook(request);
 
   try {
     if (topic === "APP_UNINSTALLED") {
-      await deleteShopData(shop, Boolean(session));
+      await purgeShopData(shop);
       return new Response("OK");
     }
 
@@ -25,9 +28,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           topic === "PRODUCTS_UPDATE"
             ? await prisma.product.findFirst({
                 where: { shop, id: product.id },
-                select: { price: true },
+                select: { price: true, collectionIds: true, metafields: true },
               })
             : null;
+        if (existing) {
+          product.collectionIds = existing.collectionIds;
+          product.metafields = {
+            ...asRecord(existing.metafields),
+            ...asRecord(product.metafields),
+          } as Prisma.InputJsonObject;
+        }
         await upsertProduct(shop, product);
         await recordProductSystemEvents({
           shop,
@@ -36,10 +46,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           payload,
         });
         await refreshCatalogCacheSafely(shop);
-        await queues.recomputeAffinityQueue.add("recompute-affinity", {
-          shop,
-          productId: product.id,
-        });
       }
       return new Response("OK");
     }
@@ -54,14 +60,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     if (topic === "ORDERS_CREATE") {
-      const productIds = ((payload as any).line_items || [])
-        .map((item: any) =>
-          toProductGid(item.product_id || item.admin_graphql_api_id || item.product?.id),
-        )
-        .filter(Boolean);
-      await incrementOrderAffinities(shop, productIds);
+      const attribution = extractOrderAttribution(payload);
+      const orderId = String(
+        (payload as any).admin_graphql_api_id || (payload as any).id || "",
+      );
+      await incrementOrderAffinities(shop, attribution.productIds, orderId);
 
-      const orderId = String((payload as any).admin_graphql_api_id || (payload as any).id || "");
+      const knownOffers = attribution.offerIds.length
+        ? await prisma.offer.findMany({
+            where: { shop, id: { in: attribution.offerIds } },
+            select: { id: true },
+          })
+        : [];
+      const knownOfferIds = new Set(knownOffers.map(({ id }) => id));
+      const attributedOffers = attribution.attributedOffers.filter(({ offerId }) =>
+        knownOfferIds.has(offerId),
+      );
+      await Promise.all(
+        attributedOffers.map(({ offerId, revenue }) =>
+          markOfferConversion(shop, offerId, revenue),
+        ),
+      );
+
       await prisma.event.upsert({
         where: {
           event_orderId_storeId: {
@@ -73,8 +93,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         update: {
           timestamp: new Date((payload as any).created_at || Date.now()),
           data: {
-            line_items: productIds.map((productId: string) => ({ product_id: productId })),
+            line_items: attribution.lineItems,
+            offerIds: attributedOffers.map(({ offerId }) => offerId),
             total_price: (payload as any).total_price,
+            currency: (payload as any).currency,
           },
         },
         create: {
@@ -83,12 +105,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           storeId: shop,
           timestamp: new Date((payload as any).created_at || Date.now()),
           data: {
-            line_items: productIds.map((productId: string) => ({ product_id: productId })),
+            line_items: attribution.lineItems,
+            offerIds: attributedOffers.map(({ offerId }) => offerId),
             total_price: (payload as any).total_price,
+            currency: (payload as any).currency,
           },
         },
       });
 
+      return new Response("OK");
+    }
+
+    if (topic === "SHOP_REDACT") {
+      await purgeShopData(shop);
+      return new Response("OK");
+    }
+
+    if (topic === "CUSTOMERS_DATA_REQUEST" || topic === "CUSTOMERS_REDACT") {
+      // AOVBoost stores anonymous behavioral sessions and no Shopify customer IDs.
+      return new Response("OK");
+    }
+
+    if (topic === "APP_SCOPES_UPDATE") {
+      const scopes = Array.isArray((payload as any).current)
+        ? (payload as any).current.join(",")
+        : String((payload as any).current || "");
+      await Promise.all([
+        prisma.session.updateMany({ where: { shop }, data: { scope: scopes } }),
+        prisma.shop.updateMany({ where: { shopDomain: shop }, data: { scope: scopes } }),
+      ]);
       return new Response("OK");
     }
 
@@ -123,6 +168,7 @@ async function deleteShopData(shop: string, deleteSessions: boolean) {
     prisma.product.deleteMany({ where: { shop } }),
     prisma.experiment.deleteMany({ where: { shop } }),
     prisma.appSettings.deleteMany({ where: { shop } }),
+    prisma.catalogSyncJob.deleteMany({ where: { shop } }),
     prisma.shopConfig.deleteMany({ where: { shopDomain: shop } }),
     prisma.shop.deleteMany({ where: { shopDomain: shop } }),
     prisma.event.deleteMany({ where: { storeId: shop } }),
@@ -131,7 +177,15 @@ async function deleteShopData(shop: string, deleteSessions: boolean) {
   ]);
 }
 
-function mapProductWebhook(payload: unknown) {
+async function purgeShopData(shop: string) {
+  const sessions = await sessionStorage.findSessionsByShop(shop);
+  if (sessions.length > 0) {
+    await sessionStorage.deleteSessions(sessions.map(({ id }) => id));
+  }
+  await deleteShopData(shop, true);
+}
+
+function mapProductWebhook(payload: unknown): ShopifyProductInput {
   const product = payload as any;
   const variant = product.variants?.[0] || {};
 
@@ -228,4 +282,10 @@ function toVariantGid(value: unknown) {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }

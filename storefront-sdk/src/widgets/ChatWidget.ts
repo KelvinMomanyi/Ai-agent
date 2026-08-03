@@ -270,7 +270,11 @@ export class ChatWidget extends BaseWidget {
     button.disabled = true;
     button.textContent = "Adding";
     try {
-      const result = await addVariantToCart(variantId);
+      const result = await addVariantToCart(
+        variantId,
+        1,
+        this.payload.offerId,
+      );
       if (!result) throw new Error("Cart add failed");
       button.textContent = "Added";
       document.dispatchEvent(
@@ -379,7 +383,7 @@ export class ChatWidget extends BaseWidget {
       let started = false;
       let cartActionHandled = false;
 
-      while (true) {
+      for (;;) {
         const { done, value: chunk } = await reader.read();
         if (done) break;
         buffer += decoder.decode(chunk, { stream: true });
@@ -486,6 +490,7 @@ export class ChatWidget extends BaseWidget {
       const result = await addVariantToCart(
         action.variantId,
         Number(action.quantity || 1),
+        this.payload.offerId,
       );
       if (!result) throw new Error("Cart add failed");
       this.messages[assistantIndex].content =

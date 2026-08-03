@@ -1,12 +1,13 @@
 import { useState } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
 import {
+  data as json,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
   useActionData,
   useLoaderData,
   useNavigation,
   useSubmit,
-} from "@remix-run/react";
+} from "react-router";
 import {
   Page,
   Layout,
@@ -239,7 +240,7 @@ export default function Settings() {
                     }
                   />
                   <Checkbox
-                    label="Discount Nudges"
+                    label="Cart-value Progress Nudges"
                     checked={formState.discountNudgeEnabled}
                     onChange={(checked) =>
                       setFormState({ ...formState, discountNudgeEnabled: checked })
@@ -315,7 +316,7 @@ export default function Settings() {
 
               <FormLayout>
                 <TextField
-                  label="Discount Threshold"
+                  label="Cart-value Goal"
                   type="number"
                   value={formState.discountThreshold}
                   onChange={(value) =>
@@ -323,7 +324,7 @@ export default function Settings() {
                   }
                   prefix="$"
                   autoComplete="off"
-                  helpText="Minimum cart value required before sweetening discounts are offered to customers."
+                  helpText="Shows progress toward this cart value. It does not create or promise a Shopify discount."
                 />
 
                 <TextField

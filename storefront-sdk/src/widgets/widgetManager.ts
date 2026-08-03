@@ -10,6 +10,7 @@ import { SocialProof } from "./SocialProof";
 import { ToastNudge } from "./ToastNudge";
 import { UpsellDrawer } from "./UpsellDrawer";
 import type { BaseWidget, WidgetPayload } from "./BaseWidget";
+import type { StorefrontSettings } from "../sessionManager";
 
 export type OfferDecision = {
   widgetType: string | null;
@@ -39,8 +40,11 @@ export class WidgetManager {
   private activeWidgetType = "";
   private inlineWidgets = new Map<string, MountedWidget>();
 
+  constructor(private settings: StorefrontSettings = {}) {}
+
   mountDecision(decision: OfferDecision): void {
     if (!decision.widgetType) return;
+    if (!isWidgetEnabled(decision.widgetType, this.settings)) return;
     if (this.getDismissedWidgets().includes(decision.widgetType)) return;
 
     const payload = decision.payload || {};
@@ -140,6 +144,23 @@ export class WidgetManager {
 
     return document.body;
   }
+}
+
+export function isWidgetEnabled(
+  widgetType: string,
+  settings: StorefrontSettings,
+) {
+  if (widgetType === "chat") return settings.chatEnabled !== false;
+  if (widgetType === "bundle") return settings.bundlesEnabled !== false;
+  if (widgetType === "upsell_drawer" || widgetType === "rec_strip") {
+    return settings.upsellEnabled !== false;
+  }
+  if (widgetType === "discount_nudge" || widgetType === "countdown_banner") {
+    return settings.discountNudgeEnabled !== false;
+  }
+  if (widgetType === "exit_intent") return settings.exitIntentEnabled !== false;
+  if (widgetType === "post_purchase") return settings.postPurchaseEnabled !== false;
+  return true;
 }
 
 function getWidgetIdentity(

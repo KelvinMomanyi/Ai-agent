@@ -41,9 +41,9 @@ export class DiscountNudge extends BaseWidget {
             remaining > 0
               ? text(
                   copy.progressLabel ||
-                    `You're ${money(remaining)} away from your reward`,
+                    `You're ${money(remaining)} away from your cart goal`,
                 )
-              : text(copy.rewardDescription || "Reward unlocked")
+              : text(copy.rewardDescription || "Cart goal reached")
           }</span>
           <button type="button" class="icon" data-dismiss aria-label="Close">x</button>
         </div>

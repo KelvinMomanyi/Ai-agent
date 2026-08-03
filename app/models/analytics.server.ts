@@ -42,7 +42,7 @@ export async function getDashboardMetrics(
   let attributedRevenue = 0;
   let impressions = 0;
   let clicks = 0;
-  let conversions = 0;
+  const offerRevenue = new Map<string, number>();
 
   for (const offer of offers) {
     const row =
@@ -65,41 +65,53 @@ export async function getDashboardMetrics(
     }
     if (offer.converted) {
       row.conversions += 1;
-      conversions += 1;
     }
 
     const revenue = Number(offer.revenueImpact || 0);
     row.revenue += revenue;
     attributedRevenue += revenue;
-    const date = offer.createdAt.toISOString().slice(0, 10);
-    series.set(date, (series.get(date) || 0) + revenue);
+    offerRevenue.set(offer.id, revenue);
     byWidget.set(offer.widgetType, row);
   }
 
-  const avgAov = conversions > 0 ? attributedRevenue / conversions : 0;
-
-  let totalOrderCount = conversionEvents.length;
-  let totalOrderRevenue = 0;
+  let attributedOrderCount = 0;
+  let attributedOrderRevenue = 0;
+  let baselineOrderCount = 0;
+  let baselineOrderRevenue = 0;
+  const offersSeenInOrders = new Set<string>();
   for (const event of conversionEvents) {
     const data = event.data as Record<string, any> | null;
-    totalOrderRevenue += Number(data?.total_price || data?.totalPrice || 0);
+    const total = Number(data?.total_price || data?.totalPrice || 0);
+    const eventOfferIds = Array.isArray(data?.offerIds)
+      ? data.offerIds.map(String).filter(Boolean)
+      : [];
+    if (eventOfferIds.length > 0) {
+      attributedOrderCount += 1;
+      attributedOrderRevenue += total;
+      const revenue = eventOfferIds.reduce((sum, id) => {
+        offersSeenInOrders.add(id);
+        return sum + (offerRevenue.get(id) || 0);
+      }, 0);
+      const date = event.timestamp.toISOString().slice(0, 10);
+      series.set(date, (series.get(date) || 0) + revenue);
+    } else {
+      baselineOrderCount += 1;
+      baselineOrderRevenue += total;
+    }
   }
 
-  let aovLift = 0;
-  if (conversions > 0 && totalOrderCount > conversions) {
-    const nonAttributedRevenue = Math.max(0, totalOrderRevenue - attributedRevenue);
-    const nonAttributedCount = Math.max(1, totalOrderCount - conversions);
-    const baselineAov = nonAttributedRevenue / nonAttributedCount;
-    if (baselineAov > 0) {
-      aovLift = (avgAov - baselineAov) / baselineAov;
-    }
-  } else if (conversions > 0 && totalOrderCount > 0) {
-    // Fallback if numbers are skewed or event tracking lags: compare to total overall order AOV
-    const overallAov = totalOrderRevenue / totalOrderCount;
-    if (overallAov > 0) {
-      aovLift = (avgAov - overallAov) / overallAov;
-    }
+  for (const offer of offers) {
+    if (!offer.converted || offersSeenInOrders.has(offer.id)) continue;
+    const date = offer.createdAt.toISOString().slice(0, 10);
+    series.set(date, (series.get(date) || 0) + Number(offer.revenueImpact || 0));
   }
+
+  const avgAov =
+    attributedOrderCount > 0 ? attributedOrderRevenue / attributedOrderCount : 0;
+  const baselineAov =
+    baselineOrderCount > 0 ? baselineOrderRevenue / baselineOrderCount : 0;
+
+  const aovLift = baselineAov > 0 ? (avgAov - baselineAov) / baselineAov : 0;
 
   return {
     avgAov,
@@ -110,10 +122,9 @@ export async function getDashboardMetrics(
     widgetRows: Array.from(byWidget.values()).sort(
       (left, right) => right.revenue - left.revenue,
     ),
-    revenueSeries: Array.from(series.entries()).map(([date, revenue]) => ({
-      date,
-      revenue,
-    })),
+    revenueSeries: Array.from(series.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([date, revenue]) => ({ date, revenue })),
   };
 }
 

@@ -1,7 +1,11 @@
-import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
+import { data as json, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
-import { syncProductsJob } from "../jobs/aovboost.server";
-import { cacheKeys, getJsonCache, setJsonCache } from "../redis.server";
+import {
+  getCatalogSyncProgress,
+  processCatalogSyncChunk,
+  startCatalogSync,
+} from "../jobs/aovboost.server";
+import { cacheKeys, getJsonCache } from "../redis.server";
 import { authenticate } from "../shopify.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
 
@@ -16,24 +20,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method === "OPTIONS") return optionsResponse();
 
   const { session } = await authenticate.admin(request);
-  await setJsonCache(
-    cacheKeys.syncProgress(session.shop),
-    { total: 0, done: 0, status: "queued" },
-    600,
-  );
+  const formData = await request.formData();
+  if (formData.get("intent") === "restart") {
+    await startCatalogSync(session.shop);
+  }
 
   try {
-    await syncProductsJob(session.shop);
+    const progress = await processCatalogSyncChunk(session.shop);
     return json(
-      { ok: true, ...(await getCatalogSyncStatus(session.shop)) },
+      {
+        ok: true,
+        ...(await getCatalogSyncStatus(session.shop)),
+        continue: !progress.complete && !progress.failed,
+      },
       { headers: withCors() },
     );
   } catch (error) {
-    await setJsonCache(
-      cacheKeys.syncProgress(session.shop),
-      { total: 0, done: 0, status: "failed" },
-      600,
-    );
     console.error(
       "AOVBoost product sync failed:",
       error instanceof Error ? error.message : String(error),
@@ -46,13 +48,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 async function getCatalogSyncStatus(shop: string) {
-  const [progress, productCount] = await Promise.all([
+  const [durableProgress, cachedProgress, productCount] = await Promise.all([
+    getCatalogSyncProgress(shop),
     getJsonCache(cacheKeys.syncProgress(shop)),
     prisma.product.count({ where: { shop } }),
   ]);
 
   return {
-    progress,
+    progress: durableProgress || cachedProgress,
     productCount,
     progressKey: cacheKeys.syncProgress(shop),
   };

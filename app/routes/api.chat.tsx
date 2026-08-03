@@ -1,8 +1,8 @@
 import {
-  json,
+  data as json,
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
-} from "@remix-run/node";
+} from "react-router";
 import { callAI } from "../ai/client.server";
 import prisma from "../db.server";
 import { getActiveBundlesForProduct } from "../models/bundle.server";
@@ -119,7 +119,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const { shop, sessionId } = auth;
   const userMessage =
-    typeof body.message === "string" ? body.message.trim() : "";
+    typeof body.message === "string" ? body.message.trim().slice(0, 1000) : "";
+  const messageHistory = sanitizeMessageHistory(body.messageHistory);
   const messageIntent = classifyMessageIntent(userMessage);
 
   if (!shop || !sessionId || !userMessage) {
@@ -220,7 +221,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   );
   const requestedCartProduct = findRequestedCartProduct(
     userMessage,
-    body.messageHistory || [],
+    messageHistory,
     safeRecommendationProducts,
   );
 
@@ -242,9 +243,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             const items = b.items
               .map((i) => `  - ${i.product?.title || i.productId}`)
               .join("\n");
-            const discount =
-              b.discountType === "none" ? "" : ` (${b.discountValue}% off)`;
-            return `- "${b.name}"${discount}\n${items}`;
+            return `- "${b.name}"\n${items}`;
           })
           .join("\n")
       : "No active bundles right now.";
@@ -284,7 +283,7 @@ Detected shopper intent:
 - ${messageIntent}
 
 Store settings:
-- Discount threshold: ${formatPrice(settings.discountThreshold, currency)}
+- Cart-value goal: ${formatPrice(settings.discountThreshold, currency)}
 - Active currency code: ${currency.code}
 - Blocked product GIDs: ${settings.blockedProductIds.join(", ") || "none"}
 - Shopper journey stage: ${session.journeyStage}
@@ -294,8 +293,7 @@ Guidelines:
 - Use the shopper's browsing context to make hyper-relevant suggestions
 - When recommending products, explain WHY they go together and include the /products/ link
 - Reference active bundles when they match what the shopper is looking at
-- If the cart qualifies for a discount (above threshold), mention it
-- If intent is price_sensitive, do not invent discount codes; suggest real lower-priced alternatives from the catalog and mention the configured threshold only when relevant
+- Never invent or promise discount codes; suggest real lower-priced alternatives when the shopper is price-sensitive
 - Use the active store currency exactly as shown in the catalog and threshold above. Do not use $, dollars, or USD unless the active currency code is USD.
 - Tone: ${settings.aiTone}
 - Keep responses under 3 sentences unless the shopper asks for detail
@@ -370,7 +368,7 @@ ${brandVoiceSection}`;
           systemPrompt,
           userPrompt: JSON.stringify({
             message: userMessage,
-            recentHistory: (body.messageHistory || []).slice(-12),
+            recentHistory: messageHistory,
             activeCurrency: currency,
           }),
           schemaType: "text",
@@ -444,6 +442,23 @@ async function persistAssistantMessage(
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function sanitizeMessageHistory(value: ChatBody["messageHistory"]) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (message) =>
+        message &&
+        (message.role === "user" || message.role === "assistant") &&
+        typeof message.content === "string",
+    )
+    .slice(-12)
+    .map((message) => ({
+      role: message.role,
+      content: message.content.trim().slice(0, 1000),
+    }))
+    .filter((message) => message.content.length > 0);
 }
 
 async function isInstalledShop(shop: string) {
