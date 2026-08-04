@@ -40,16 +40,27 @@ describe("Shopify catalog safety mapping", () => {
     expect(getSafeDefaultVariantId(product?.metafields)).toBe("");
   });
 
-  it("rejects products that are hidden or have no sellable variants", () => {
+  it("accepts products without onlineStoreUrl", () => {
     expect(
       mapAdminCatalogProductNode(adminProduct({ onlineStoreUrl: null })),
-    ).toBeNull();
+    ).not.toBeNull();
+  });
+
+  it("keeps zero-sellable products but marks them unavailable", () => {
+    const product = mapAdminCatalogProductNode(
+      adminProduct({
+        variants: [adminVariant({ sellableOnlineQuantity: 0 })],
+      }),
+    );
+    expect(product).not.toBeNull();
+    expect(product?.metafields).toMatchObject({
+      "aovboost.availableForSale": { value: "false" },
+    });
+  });
+
+  it("rejects products with no variants at all", () => {
     expect(
-      mapAdminCatalogProductNode(
-        adminProduct({
-          variants: [adminVariant({ sellableOnlineQuantity: 0 })],
-        }),
-      ),
+      mapAdminCatalogProductNode(adminProduct({ variants: [] })),
     ).toBeNull();
   });
 

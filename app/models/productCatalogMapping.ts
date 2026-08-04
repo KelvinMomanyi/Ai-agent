@@ -25,15 +25,18 @@ type AdminVariant = {
 export function mapAdminCatalogProductNode(
   node: any,
 ): ShopifyProductInput | null {
-  if (!node?.id || !node?.handle || !node?.onlineStoreUrl) return null;
+  if (!node?.id || !node?.handle) return null;
 
   const variants = (node.variants?.edges || node.variants?.nodes || [])
     .map((entry: any) => entry?.node || entry)
     .filter((variant: AdminVariant) => Boolean(variant?.id));
-  const sellableVariants = variants.filter(isAdminVariantSellable);
-  if (sellableVariants.length === 0) return null;
+  if (variants.length === 0) return null;
 
-  const pricedVariant = sellableVariants
+  const sellableVariants = variants.filter(isAdminVariantSellable);
+  const selectedVariants = sellableVariants.length > 0 ? sellableVariants : variants;
+  const isAvailableForSale = sellableVariants.length > 0;
+
+  const pricedVariant = selectedVariants
     .slice()
     .sort(
       (left: AdminVariant, right: AdminVariant) =>
@@ -52,12 +55,12 @@ export function mapAdminCatalogProductNode(
   );
   const hasOnlyDefaultVariant = node.hasOnlyDefaultVariant === true;
 
-  metafields["aovboost.availableForSale"] = booleanMetafield(true);
+  metafields["aovboost.availableForSale"] = booleanMetafield(isAvailableForSale);
   metafields["aovboost.hasOnlyDefaultVariant"] = booleanMetafield(
     hasOnlyDefaultVariant,
   );
   metafields["aovboost.sellableOnlineQuantity"] = numberMetafield(
-    sellableVariants.reduce(
+    variants.reduce(
       (total: number, variant: AdminVariant) =>
         total + Math.max(0, Number(variant.sellableOnlineQuantity || 0)),
       0,
@@ -78,7 +81,7 @@ export function mapAdminCatalogProductNode(
     tags: Array.isArray(node.tags) ? node.tags : [],
     price: String(pricedVariant?.price || "0"),
     compareAtPrice: pricedVariant?.compareAtPrice || null,
-    imageUrl: node.featuredMedia?.preview?.image?.url || null,
+    imageUrl: node.featuredMedia?.preview?.image?.url || node.images?.edges?.[0]?.node?.url || null,
     collectionIds: (node.collections?.edges || node.collections?.nodes || [])
       .map((entry: any) => entry?.node?.id || entry?.id)
       .filter(Boolean),

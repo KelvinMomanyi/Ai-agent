@@ -19,14 +19,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method === "OPTIONS") return optionsResponse();
 
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const formData = await request.formData();
   if (formData.get("intent") === "restart") {
     await startCatalogSync(session.shop);
   }
 
   try {
-    const progress = await processCatalogSyncChunk(session.shop);
+    const progress = await processCatalogSyncChunk(session.shop, admin);
     return json(
       {
         ok: true,

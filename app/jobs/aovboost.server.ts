@@ -32,7 +32,7 @@ export async function startCatalogSync(shop: string) {
   return job;
 }
 
-export async function processCatalogSyncChunk(shop: string) {
+export async function processCatalogSyncChunk(shop: string, adminClient?: any) {
   let job = await prisma.catalogSyncJob.findUnique({ where: { shop } });
   if (!job) job = await startCatalogSync(shop);
   if (job.phase === "complete" || job.phase === "failed") {
@@ -55,7 +55,11 @@ export async function processCatalogSyncChunk(shop: string) {
   try {
     job = (await prisma.catalogSyncJob.findUnique({ where: { shop } }))!;
     if (job.phase === "fetching") {
-      const { admin } = await unauthenticated.admin(shop);
+      let admin = adminClient;
+      if (!admin) {
+        const auth = await unauthenticated.admin(shop);
+        admin = auth.admin;
+      }
       const page = await syncProductsPageFromAdmin(shop, admin, job.cursor);
       const syncedProductIds = Array.from(
         new Set([...job.syncedProductIds, ...page.productIds]),
