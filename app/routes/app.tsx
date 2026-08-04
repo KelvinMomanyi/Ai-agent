@@ -2,7 +2,9 @@ import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Link, Outlet, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
+import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
 import { NavMenu } from "@shopify/app-bridge-react";
+import polarisTranslations from "@shopify/polaris/locales/en.json";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import prisma, { withRetry } from "../db.server";
 import { authenticate } from "../shopify.server";
@@ -119,9 +121,14 @@ export default function App() {
 
 // Shopify needs React Router to catch thrown responses so auth headers are preserved.
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  return (
+    <PolarisAppProvider i18n={polarisTranslations}>
+      {boundary.error(useRouteError())}
+    </PolarisAppProvider>
+  );
 }
 
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
 };
+
