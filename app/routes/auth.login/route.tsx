@@ -37,10 +37,10 @@ export default function Auth() {
   const loaderData = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const [shop, setShop] = useState("");
-  const { errors } = actionData || loaderData;
+  const { errors } = actionData || loaderData || {};
 
   return (
-    <PolarisAppProvider i18n={loaderData.polarisTranslations}>
+    <PolarisAppProvider i18n={polarisTranslations}>
       <Page>
         <Card>
           <Form method="post">
@@ -56,7 +56,7 @@ export default function Auth() {
                 value={shop}
                 onChange={setShop}
                 autoComplete="on"
-                error={errors.shop}
+                error={errors?.shop}
               />
               <Button submit>Log in</Button>
             </FormLayout>
