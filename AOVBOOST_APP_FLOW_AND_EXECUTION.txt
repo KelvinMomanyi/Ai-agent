@@ -1,0 +1,2372 @@
+AOVBOOST APPLICATION: COMPLETE FLOW AND EXECUTION GUIDE
+=======================================================
+
+Document date: 2026-08-04
+Application: AOVBoost
+Repository: Ai-agent
+
+
+1. PURPOSE AND SCOPE
+--------------------
+
+AOVBoost is an embedded Shopify application designed to increase average order
+value through contextual product recommendations, bundles, cart nudges, an AI
+shopping assistant, and a Shopify post-purchase extension.
+
+The application has four major runtime surfaces:
+
+1. The embedded merchant application.
+   This is the React Router application merchants open inside Shopify Admin.
+   It provides the dashboard, catalog synchronization, settings, bundles,
+   experiments, and analytics.
+
+2. The storefront theme app extension and browser SDK.
+   The merchant enables the AOVBoost theme block. The block loads a compiled
+   browser SDK that observes storefront behavior, requests decisions from the
+   server, renders widgets, and records impressions and clicks.
+
+3. The server API.
+   React Router route actions authenticate Shopify administrators, signed app
+   proxy requests, webhooks, and checkout extension requests. Server modules
+   maintain shopper sessions, select catalog-backed offers, call optional AI
+   providers, persist attribution records, and calculate analytics.
+
+4. The Shopify checkout post-purchase extension.
+   Shopify runs this extension after an eligible purchase. It requests a real
+   product offer, asks the server to sign a Shopify changeset, applies that
+   changeset to the existing order, and reports the authenticated conversion.
+
+This document describes the code as it currently exists. It also calls out
+important implementation boundaries where a screen or data model exists but is
+not part of the authoritative execution path.
+
+
+2. HIGH-LEVEL ARCHITECTURE
+--------------------------
+
+                             SHOPIFY
+                                |
+              +-----------------+------------------+
+              |                                    |
+       Shopify Admin                        Online Store
+              |                                    |
+       Embedded app route                  Theme app block
+          /app/...                                |
+              |                            aovboost-sdk.js
+              |                                    |
+              |                             Browser events
+              |                             Trigger router
+              |                             Widget manager
+              |                                    |
+              +----------------+-------------------+
+                               |
+                       React Router server
+                               |
+       +-----------------------+------------------------+
+       |                       |                        |
+ Admin authentication   App proxy authentication   Checkout authentication
+       |                       |                        |
+ Dashboard/settings     /api/session              Post-purchase APIs
+ Bundles/experiments    /api/events                    |
+ Catalog sync           /api/offer                Signed changeset
+                       /api/chat                       |
+                               |                Existing Shopify order
+                               |
+            +------------------+------------------+
+            |                  |                  |
+        PostgreSQL          Upstash Redis      AI providers
+         (Prisma)         cache/sessions/rate   (optional)
+            |                  limits
+            |
+       Shopify webhooks
+       products/orders/
+       scopes/uninstall/
+       compliance
+
+
+3. MAIN TECHNOLOGY STACK
+------------------------
+
+Server and merchant UI:
+
+- React 18
+- React Router 7 framework mode
+- Shopify React Router application integration
+- Shopify App Bridge
+- Shopify Polaris and Polaris Viz
+- Vite
+- TypeScript
+
+Persistence:
+
+- PostgreSQL
+- Prisma Client and Prisma migrations
+- Upstash Redis when configured
+- In-memory Redis-compatible fallback for local development and best-effort
+  failure handling
+
+Shopify surfaces:
+
+- Embedded Shopify Admin application
+- Shopify app proxy at /apps/aovboost
+- Theme app extension
+- Checkout post-purchase extension
+- Shopify Admin GraphQL API version 2026-07
+- Shopify webhooks
+
+Optional AI providers, in priority order:
+
+1. Google Gemini
+2. Mistral
+3. Groq
+4. DeepSeek
+5. Deterministic heuristic fallback when no provider is available or all calls
+   fail
+
+
+4. APPLICATION ENTRY AND BUILD EXECUTION
+----------------------------------------
+
+4.1 Dependency installation
+
+The normal first step is:
+
+    npm install
+
+The repository is also an npm workspace for extensions/*.
+
+4.2 Local development
+
+The root command is:
+
+    npm run dev
+
+This executes Shopify CLI. Shopify CLI reads shopify.web.toml, generates Prisma
+Client, applies pending migrations, and starts the React Router development
+server:
+
+    npx prisma generate
+    npx prisma migrate deploy
+    npm exec react-router dev
+
+Shopify CLI also manages the development tunnel and temporarily updates the app
+URLs when automatically_update_urls_on_dev is enabled.
+
+4.3 Production application build
+
+The production build is:
+
+    npm run build
+
+It executes these stages in order:
+
+1. npm run build:sdk
+   Vite compiles storefront-sdk/src/index.ts and all imported SDK modules into
+   one minified IIFE file:
+
+       extensions/aovboost-storefront/assets/aovboost-sdk.js
+
+2. prisma generate
+   Prisma generates the database client from prisma/schema.prisma.
+
+3. react-router build
+   Vite compiles the merchant UI and server routes.
+
+For a normal Node deployment the server artifact is:
+
+    build/server/index.js
+
+For Vercel, react-router.config.ts detects VERCEL=1 and enables the
+@vercel/react-router preset. Vercel then receives its expected function bundle
+instead of the normal react-router-serve artifact.
+
+4.4 Normal Node start
+
+The production Node start command is:
+
+    npm start
+
+It runs:
+
+    react-router-serve ./build/server/index.js
+
+The server-rendering entry point is app/entry.server.tsx. It adds the Shopify
+document response headers and delegates rendering to the Vercel-compatible
+React Router request handler. The same request handler also works in the normal
+Node build.
+
+4.5 Vercel
+
+vercel.json explicitly selects the "react-router" framework and runs
+"npm run build". This prevents Vercel from selecting its deprecated Remix
+builder. Vercel does not use the repository's npm start command for its
+serverless function execution.
+
+The Vercel deployment must contain both package.json and vercel.json at the
+configured Vercel project root.
+
+4.6 Database setup
+
+The setup command is:
+
+    npm run setup
+
+It generates Prisma Client and applies migrations:
+
+    prisma generate
+    prisma migrate deploy
+
+Migrations must be applied against the production database separately from a
+Vercel build unless the deployment pipeline explicitly runs npm run setup.
+
+4.7 Shopify extension build and deployment
+
+Validation:
+
+    npx shopify app build
+
+Deployment of Shopify-managed configuration and extensions:
+
+    npm run deploy
+
+Application hosting and Shopify extension deployment are separate operations.
+Deploying to Vercel does not by itself publish the theme or checkout extension,
+and publishing extensions does not deploy the React Router server.
+
+4.8 Dockerfile behavior
+
+The Dockerfile describes a Node 20 Alpine deployment and starts with
+"npm run docker-start", which applies migrations and starts the server.
+
+Important current boundary: the Dockerfile installs with npm ci --omit=dev
+before it invokes npm run build. The build command needs development build tools
+such as Vite and Prisma. A production Docker pipeline should use a build stage
+that installs build dependencies, builds the app, and then copies/prunes the
+runtime artifacts into a smaller runtime stage.
+
+
+5. SHOPIFY APP CONFIGURATION
+----------------------------
+
+The application is configured as an embedded Shopify app.
+
+Current Shopify API version:
+
+    2026-07
+
+Current access scopes:
+
+    read_orders
+    read_products
+
+The app does not currently request product-write or discount-write scopes.
+
+Registered webhook groups:
+
+- Compliance:
+  - customers/data_request
+  - customers/redact
+  - shop/redact
+- app/scopes_update
+- app/uninstalled
+- orders/create
+- products/create
+- products/update
+- products/delete
+
+All webhooks are delivered to:
+
+    /api/webhooks
+
+The app proxy is:
+
+    Storefront public path: /apps/aovboost
+    Application target:    /api
+
+For example:
+
+    /apps/aovboost/session  ->  /api/session
+    /apps/aovboost/events   ->  /api/events
+    /apps/aovboost/offer    ->  /api/offer
+    /apps/aovboost/chat     ->  /api/chat
+
+Shopify appends and signs the app proxy query parameters on these requests.
+
+
+6. INSTALLATION AND MERCHANT AUTHENTICATION FLOW
+------------------------------------------------
+
+6.1 Initial navigation
+
+The public root route is "/".
+
+- If the URL contains a shop query parameter, the route redirects to /app with
+  the same query parameters.
+- Otherwise, it displays a Shopify shop-domain login form.
+
+6.2 OAuth and admin authentication
+
+Shopify authentication is configured in app/shopify.server.ts with:
+
+- App Store distribution
+- /auth as the authentication path prefix
+- the current API version
+- configured scopes
+- UpstashSessionStorage
+
+All embedded merchant routes call:
+
+    authenticate.admin(request)
+
+The Shopify React Router library verifies the embedded session token or starts
+the OAuth flow when required.
+
+6.3 After-auth persistence
+
+The Shopify afterAuth hook saves installation information:
+
+- Session is upserted into the Prisma Session table.
+- Shop is upserted into the Shop table.
+- Access token, scope, expiry, and associated Shopify user information are
+  retained when present.
+
+The hook logs persistence failures rather than preventing the Shopify login from
+finishing.
+
+6.4 Shopify session storage
+
+UpstashSessionStorage uses Redis when both Upstash environment variables are
+configured.
+
+Redis session keys:
+
+    shopify:session:<session-id>
+    shopify:shop-sessions:<shop-domain>
+
+The per-shop set allows uninstall and redaction handlers to locate and remove
+only the affected shop's sessions.
+
+If Redis is unavailable, the implementation falls back to the Prisma Session
+table for storing, loading, finding, and deleting Shopify sessions.
+
+6.5 Embedded app shell
+
+The /app route:
+
+1. Authenticates the administrator.
+2. Queries the first 50 Shopify products for a small legacy Shop.productCatalog
+   snapshot.
+3. Upserts that snapshot at most once every 24 hours, controlled by a Redis
+   cache key.
+4. Returns the Shopify API key to the client.
+5. Renders Shopify AppProvider, App Bridge navigation, and the nested route.
+
+The productCatalog JSON on Shop is not the recommendation catalog. The real
+recommendation catalog is the tenant-scoped Product table populated by the
+durable catalog synchronization flow.
+
+
+7. MERCHANT APPLICATION ROUTES
+------------------------------
+
+7.1 /app
+
+This is the operational dashboard.
+
+It displays:
+
+- Average AOV for attributed orders
+- AOV lift against non-attributed orders
+- Widget click-through rate
+- Number of chat-engaged shopper sessions
+- Attributed-revenue time series
+- Performance by widget type
+- Product catalog synchronization status
+- Basic Gemini and Groq key status
+
+The dashboard contains the button that starts or restarts catalog sync. While a
+sync job remains incomplete, the client repeatedly submits "continue" actions
+to /api/sync.
+
+7.2 /app/settings
+
+This route reads and writes AppSettings for the authenticated shop.
+
+Merchant-controlled fields:
+
+- Chat enabled
+- Chat greeting
+- Bundles enabled
+- Upsells enabled
+- Cart-goal nudge enabled
+- Cart-value threshold
+- Exit intent enabled
+- Post-purchase enabled
+- AI tone
+- Brand voice
+- Comma-separated blocked Shopify product IDs
+
+Saving settings invalidates the one-hour settings cache.
+
+Only a public subset of settings is returned to the browser. Brand voice, AI
+tone, and blocked IDs stay server-side and are used when making decisions.
+
+7.3 /app/bundles
+
+The bundle index lists tenant-owned bundles and allows a merchant to:
+
+- Create a bundle
+- Edit a bundle
+- Activate or deactivate a bundle
+- Delete a bundle
+
+7.4 /app/bundles/:id and /app/bundles/new
+
+The editor loads up to 250 synced products from the merchant's own Product
+table. A bundle contains:
+
+- Name and description
+- Trigger product IDs
+- One or more bundle items and quantities
+- Active flag
+- Priority
+
+The server normalizes numeric and GID product IDs, verifies that every product
+belongs to the same shop, and rejects foreign or missing products.
+
+Current pricing rule:
+
+- Bundle discountType is forced to "none".
+- Bundle discountValue is forced to zero.
+- The bundle widget displays the sum of actual Shopify catalog prices.
+- Adding a bundle adds the selected variants at Shopify's current prices.
+- No artificial bundle discount is displayed or applied.
+
+The Bundle database still contains discount columns for compatibility, but they
+are intentionally neutralized on every save.
+
+7.5 /app/experiments
+
+Merchants can create, activate, deactivate, and delete experiments per widget
+type.
+
+Experiment fields:
+
+- Name
+- Widget type
+- Treatment traffic percentage
+- Control JSON configuration
+- Treatment JSON configuration
+
+Creating an experiment disables other active experiments for the same widget
+type. Shopper assignment is deterministic:
+
+    hash(session ID + experiment ID) / 100
+
+If the bucket is below trafficSplit, the offer is marked "treatment";
+otherwise it is marked "control".
+
+Important current boundary:
+
+- The assignment is stored on Offer.abVariant and used for analytics.
+- The stored controlConfig and treatmentConfig JSON are not currently merged
+  into the widget payload or copy.
+- Offer does not store an experiment ID. Analytics for consecutive experiments
+  of the same widget type can therefore include offers from more than one
+  historical experiment.
+
+7.6 /app/analytics
+
+This is a secondary event-oriented revenue dashboard. It reads Event rows from
+the last 30 days and recognizes event names such as:
+
+- offer_generated
+- upsell_impression
+- upsell_add_to_cart
+- conversion
+
+The current storefront SDK stores browser behavior in ShopperEvent and updates
+Offer flags. It does not create offer_generated, upsell_impression, or
+upsell_add_to_cart Event rows. Therefore, the main /app dashboard is the
+authoritative current widget dashboard. /app/analytics can still read
+order-webhook conversion Event rows, but some of its older funnel panels remain
+empty unless another producer writes its legacy Event schema.
+
+
+8. DURABLE PRODUCT CATALOG SYNCHRONIZATION
+------------------------------------------
+
+8.1 Why synchronization is required
+
+The AI and heuristic systems never use arbitrary product names from a model as
+the source of truth. Products must first exist in the tenant's Product table.
+Catalog sync creates that safe product universe.
+
+8.2 Starting a sync
+
+The merchant clicks "Sync products" or "Resync products" on /app.
+
+The browser posts to /api/sync with intent=restart.
+
+/api/sync:
+
+1. Authenticates the Shopify administrator.
+2. Creates or resets a CatalogSyncJob for the shop.
+3. Calls processCatalogSyncChunk.
+4. Returns progress and a "continue" flag.
+5. The dashboard submits another request while continue is true.
+
+8.3 Durable phases
+
+The job advances through:
+
+1. fetching
+2. pruning_deleted
+3. building_affinities
+4. catalog_refreshing
+5. complete
+
+If an exception occurs, the phase becomes failed and the error string is saved.
+
+8.4 Lease and concurrency control
+
+Each chunk attempts to claim a 90-second database lease using a random token.
+If another worker owns a valid lease, the request returns a busy progress
+response instead of processing the same chunk concurrently.
+
+The lease fields are cleared in a finally block after processing.
+
+8.5 Shopify product pagination
+
+Each fetching chunk calls Shopify Admin GraphQL and requests up to 250 products.
+
+For each product it stores:
+
+- Shopify product GID
+- Title and handle
+- Vendor
+- Product type
+- Tags
+- First featured image
+- Up to 50 collection IDs
+- The first variant's ID, price, and compare-at price
+- Up to 20 metafields
+
+The first variant ID is saved under:
+
+    aovboost.defaultVariantId
+
+Products are upserted in database transactions of 50 records.
+
+Only the first variant is used by the current recommendation widgets. Products
+that require option selection may be linked to their product page rather than
+added directly when no usable default variant is present.
+
+8.6 Deletion pruning
+
+After the last Shopify page, Product rows not present in the completed list of
+Shopify product IDs are deleted for that shop.
+
+Foreign keys cascade removal into affinities, order statistics, and bundle
+items as appropriate.
+
+8.7 Initial affinities
+
+The sync considers up to 500 recently updated products. It processes source
+products in batches of 20.
+
+For each source product, up to 20 initial targets are retained when they:
+
+- share at least one collection, or
+- share at least two tags.
+
+The affinity formula is:
+
+    50% normalized order co-occurrence
+    30% tag Jaccard similarity
+    20% collection Jaccard similarity
+
+The result is clamped between zero and one.
+
+8.8 Catalog cache refresh
+
+The final phase builds:
+
+- A full catalog snapshot
+- A seven-day stale fallback snapshot
+- A hot/recent catalog snapshot
+- Category-specific snapshots on demand
+
+The snapshot indexes products by:
+
+- Product ID
+- Category
+- Lowercase tags
+
+Each catalog product contains normalized title, handle, product type, category,
+tags, price, compare-at price, image, inventory if available, default variant,
+search text, and metafields.
+
+8.9 Sync progress storage
+
+CatalogSyncJob in PostgreSQL is the durable source of truth.
+
+A copy of progress is cached in Redis for one hour under:
+
+    sync:progress:<shop>
+
+The dashboard reads durable and cached progress and also counts Product rows.
+
+
+9. PRODUCT WEBHOOK UPDATES
+--------------------------
+
+PRODUCTS_CREATE and PRODUCTS_UPDATE:
+
+1. Verify the Shopify webhook HMAC through authenticate.webhook.
+2. Convert the Shopify payload to the internal product shape.
+3. Use the first variant for price, compare-at price, and default variant ID.
+4. Preserve existing collection IDs and merge existing metafields on updates.
+5. Upsert the tenant-scoped Product row.
+6. Record a price_drop_webhook Event when the price falls.
+7. Record a low_inventory_alert Event when the lowest supplied inventory is
+   five or less.
+8. Refresh the catalog cache.
+
+PRODUCTS_DELETE:
+
+1. Normalize the product ID into a Shopify Product GID.
+2. Delete only that shop's Product row.
+3. Refresh the catalog cache.
+
+Product webhooks refresh the catalog but do not perform a complete affinity
+rebuild. Full sync and order activity are the paths that comprehensively build
+or recalculate affinity scores.
+
+The price-drop and low-inventory Event rows are historical server records. They
+are not automatically pushed into an already-open browser. A storefront or
+external integration must dispatch an aovboost:system-event if it wants the
+TriggerRouter to display an immediate inline system alert.
+
+
+10. THEME APP EXTENSION BOOTSTRAP
+---------------------------------
+
+10.1 Theme block
+
+The theme app extension block targets the body and defines window.AOVBoost with:
+
+- Permanent myshopify.com domain
+- Active cart/store currency
+- Shopify money formats
+- Locale
+- Cart token
+- App proxy base /apps/aovboost
+- Whether tracking consent is required
+
+It then loads aovboost-sdk.js with defer.
+
+10.2 Consent behavior
+
+If the block's "Require cookie consent before tracking" setting is false, the
+SDK starts immediately.
+
+If it is true, the SDK checks Shopify's customer privacy API. When analytics
+tracking is not allowed, it waits for one of these browser events:
+
+- visitorConsentCollected
+- shopify:customer_privacy:consent_collected
+- aovboost:consent-granted
+
+No session bootstrap, event tracking, or offer request occurs until startup
+continues.
+
+10.3 SDK component construction
+
+The SDK starts once per page and constructs:
+
+1. SessionManager
+2. WidgetManager
+3. EventBus
+4. OfferPoller
+5. TriggerRouter
+
+It exposes window.AOVBoostSDK for controlled custom integration:
+
+- track(type, payload)
+- trigger(type, payload)
+- requestOffer(trigger, payload)
+- refreshSession()
+- getSignedAuthPayload()
+- applySession()
+- destroy()
+
+
+11. STOREFRONT AUTHENTICATION
+-----------------------------
+
+11.1 App proxy verification
+
+The browser calls the same-origin Shopify path /apps/aovboost. Shopify forwards
+the request to the server and attaches signed query parameters.
+
+The server verifies:
+
+- signature is present
+- shop is present
+- timestamp is present
+- timestamp is within five minutes
+- HMAC-SHA256 signature matches SHOPIFY_API_SECRET
+
+Unsigned app-proxy requests can be allowed only when:
+
+    AOVBOOST_ALLOW_UNSIGNED_PROXY=true
+    NODE_ENV is not production
+
+Production never honors the unsigned bypass.
+
+11.2 Storefront session bootstrap
+
+SessionManager requests:
+
+    GET /apps/aovboost/session
+
+/api/session:
+
+1. Verifies the signed app proxy request.
+2. Confirms that the shop has an installation record.
+3. Creates a random session ID.
+4. Creates a signed storefront token valid for 12 hours.
+5. Returns the session plus public settings.
+
+The token format is:
+
+    v1.<base64url-json-payload>.<HMAC-SHA256-signature>
+
+Payload fields:
+
+- Version
+- Shop
+- Session ID
+- Issued-at time
+- Expiry time
+
+The token uses AOVBOOST_STOREFRONT_SESSION_SECRET when configured, otherwise
+SHOPIFY_API_SECRET.
+
+11.3 Browser storage
+
+The signed session is stored in localStorage under:
+
+    aovboost_storefront_session
+
+The anonymous ID is also stored under:
+
+    aovboost_anonymous_id
+
+Stored sessions are rejected when:
+
+- the shop differs
+- fields are missing
+- expiry is within 60 seconds
+
+11.4 Authentication of API calls
+
+Every events, offer, config, and chat request includes:
+
+- shop
+- sessionId
+- sessionToken
+
+The server verifies both:
+
+1. Shopify's current app-proxy signature and shop.
+2. The AOVBoost session token, shop, ID, signature, and expiry.
+
+The body cannot substitute another shop or session.
+
+11.5 Automatic recovery
+
+When events, offers, or chat receive invalid or expired session credentials,
+the server attempts recovery using the still-valid Shopify app-proxy request.
+If the shop remains installed, it returns a new storefrontSession and sets
+X-AOVBoost-Reauth.
+
+The browser applies the replacement session and retries once.
+
+11.6 Local fallback
+
+If storefront authentication cannot be established, SessionManager can create a
+local anonymous ID so local state can still be computed. Authenticated server
+events and offers remain unavailable until a signed session is obtained.
+
+
+12. BROWSER EVENT CAPTURE
+-------------------------
+
+12.1 EventBus
+
+EventBus normalizes each event with:
+
+- Event type
+- Timestamp
+- Signed session's anonymous ID
+- Shop domain
+- Current URL
+- Referrer
+- Event-specific fields
+
+Every event:
+
+1. Updates SessionManager's local state.
+2. Enters the upload queue.
+3. Dispatches a local aovboost:event DOM event for TriggerRouter.
+4. Schedules a server flush after two seconds.
+
+On pagehide, EventBus flushes immediately with keepalive.
+
+12.2 Automatically observed behavior
+
+Navigation:
+
+- Initial page load
+- history.pushState
+- history.replaceState
+- popstate
+
+Page context:
+
+- page_view
+- product_view from Shopify product metadata
+- collection_view
+- checkout_start
+
+Cart:
+
+- Shopify /cart/add requests
+- Shopify /cart/change or /cart/update requests
+- Add-to-cart forms
+- Common add buttons
+- Custom add-to-cart DOM events
+
+Engagement:
+
+- Scroll depths 25%, 50%, 75%, and 90%
+- Product card hover after 800 ms
+- Search requests
+- Predictive search input with at least two characters
+
+12.3 Upload behavior
+
+Events are posted to:
+
+    POST /apps/aovboost/events
+
+If authentication is temporarily unavailable, events are returned to the
+front of the queue.
+
+If the request fails or returns a non-authentication error, events are requeued.
+
+12.4 Periodic session synchronization
+
+Every 30 seconds and on pagehide, SessionManager sends a session_sync event with
+its full current snapshot:
+
+- Journey stage
+- Intent score
+- Hesitation score
+- Viewed product IDs
+- Cart product IDs
+- Cart variant IDs
+- Cart item count
+- Cart value
+- Page views
+- Session duration
+- Scroll and context fields
+
+
+13. SESSION SCORING AND JOURNEY STAGES
+--------------------------------------
+
+The browser computes an immediate local approximation. The server recomputes
+the durable state from received events.
+
+13.1 Journey stages
+
+- discovering:
+  Default state.
+
+- comparing:
+  At least three distinct products have been viewed.
+
+- deciding:
+  Session duration reaches 60 seconds, or the same product is viewed at least
+  twice.
+
+- buying:
+  Cart product, variant, or item count is greater than zero.
+
+13.2 Intent score
+
+Server-side intent combines:
+
+- Page views
+- Product views
+- Scroll depth
+- Up to 30 points for two minutes of session duration
+- 30 points when a cart exists
+- Additional known high-intent event signals
+
+The result is clamped to 0 through 100.
+
+13.3 Hesitation score
+
+Server-side hesitation includes:
+
+- 55 points when intent is above 40, no add-to-cart has occurred, and session
+  duration is at least 90 seconds
+- 35 points for a repeated product view without that product in cart
+- Up to 45 points from hesitation events
+
+Known hesitation signals include price hesitation, price-sensitive chat,
+coupon focus, removal, cart abandonment, exit intent, inactivity, and payment
+failure.
+
+13.4 Persistence
+
+The server upserts one ShopperSession per:
+
+    (shop, anonymousId)
+
+Every accepted event is also stored as a ShopperEvent. The session summary is
+optimized for decisions; ShopperEvent retains the event history.
+
+
+14. TRIGGER ROUTER
+------------------
+
+TriggerRouter converts raw events, timers, DOM behavior, profile events, and
+system events into business triggers.
+
+Each trigger has:
+
+- Category
+- Suggested widget
+- Optional once-per-browser-session behavior
+- Throttle interval
+- Optional request delay
+- Whether an offer request should be made
+
+Once-per-session flags are stored in sessionStorage.
+
+14.1 Browsing triggers
+
+- long_product_dwell
+  Fires after 30 seconds on a product page. Suggests chat.
+
+- repeated_product_view
+  Fires after the same product is seen twice. Suggests bundle.
+
+- scroll_depth_interest
+  Fires at 75% or deeper once per session. Suggests chat.
+
+- comparison_page_visit
+  Detects compare/comparison/versus/alternative terms in title or path.
+
+- search_query
+  Fires for a search of at least two characters. Suggests recommendations.
+
+- exit_intent
+  Fires when the pointer leaves through the top of the document. Once per
+  session.
+
+14.2 Cart and checkout triggers
+
+- cart_item_added
+- cart_item_removed
+- cart_value_threshold
+- cart_abandoned after ten minutes with cart items
+- checkout_started
+
+After add or remove activity, TriggerRouter waits briefly, fetches /cart.js,
+normalizes product and variant IDs, updates storefront currency, emits a
+cart_update, and requests a decision with the live cart.
+
+14.3 Intent triggers
+
+- price_hesitation after 1.2 seconds hovering a price element
+- price_sensitive_chat
+- wishlist_save
+- coupon_field_focus
+
+14.4 Profile and loyalty triggers
+
+- purchase_history_match
+- loyalty_tier_reached
+- subscription_renewal_due
+- first_time_visitor
+
+Profile triggers may be dispatched with the custom aovboost:profile-event DOM
+event.
+
+14.5 Time triggers
+
+- flash_sale_window
+- post_purchase_window
+- inactivity_timeout after five minutes
+- seasonal_calendar
+
+Scheduled campaign triggers read optional window.AOVBoost.campaign data.
+
+14.6 External system triggers
+
+- low_inventory_alert
+- price_drop_webhook
+- crm_segment_update
+- payment_failure
+
+External integrations can dispatch aovboost:system-event.
+
+14.7 Trigger execution
+
+When a trigger passes throttle and once-per-session checks:
+
+1. Trigger metadata is added to its payload.
+2. The trigger itself is tracked as an event.
+3. OfferPoller requests a server decision unless requestOffer is false.
+
+
+15. OFFER REQUEST AND DECISION FLOW
+-----------------------------------
+
+15.1 Initial and manual requests
+
+OfferPoller requests an "initial" offer approximately 1.2 seconds after SDK
+startup. It also requests on:
+
+- TriggerRouter triggers
+- Manual aovboost:request-offer events
+- Calls through window.AOVBoostSDK.requestOffer
+- Browser popstate navigation
+
+There is no periodic offer polling unless a poll interval is explicitly passed
+to OfferPoller; the normal SDK does not pass one.
+
+15.2 Live request context
+
+Before a request, OfferPoller:
+
+1. Reads SessionManager's snapshot.
+2. Reads /cart.js.
+3. Resolves current page type.
+4. Resolves current Shopify product ID.
+5. Includes live cart product IDs, variant IDs, item details, count, value, and
+   currency.
+6. Includes widgets dismissed in the previous 30 minutes.
+7. Includes trigger type, category, hint, and trigger-specific payload.
+
+15.3 Server validation and limits
+
+/api/offer:
+
+- Requires signed app proxy and storefront session authentication.
+- Confirms the shop is installed.
+- Allows at most 10 requests per session per 60 seconds.
+- Resolves product IDs from variant IDs if product IDs are absent.
+- Reads cached settings.
+
+15.4 Decision cache
+
+Offer responses are cached for 30 seconds. The key includes:
+
+- Session ID
+- Current product
+- Trigger
+- Current cart identity
+
+A cache hit is passed through the catalog guard again before it is returned.
+
+15.5 Shopper session
+
+The route loads the durable ShopperSession. If none exists, it creates one from
+a session_sync event containing the live cart.
+
+For decision purposes, a live cart forces journeyStage to "buying" even if the
+older durable session has not yet received its next event batch.
+
+15.6 Candidate construction
+
+Candidates come from:
+
+- Active bundles triggered by the current product
+- Tenant catalog recommendations
+
+The recommendation source is selected in this order:
+
+1. Current product
+2. First cart product
+3. Most recently viewed product
+
+Blocked product IDs, cart products, and the source product are excluded.
+
+15.7 Recommendation catalog ranking
+
+Recommendation catalog composition:
+
+- Exact source product
+- Same-category products
+- Hot products by historical order count
+- Recently updated products
+
+Catalog product scoring uses:
+
+- Text/query match
+- Relationship to source category, tags, vendor, and product type
+- Popularity/order history
+- Recency
+
+The exact catalog always remains the final product authority.
+
+15.8 Heuristic decision
+
+The deterministic fallback can select:
+
+- exit_intent for exit intent
+- countdown_banner for active campaigns
+- inline_alert for stock or price system facts
+- post_purchase for post-purchase window
+- bundle on product pages with an active triggered bundle
+- upsell_drawer for a non-empty cart or buying stage
+- toast or discount_nudge for price/recovery signals
+- toast for wishlist or renewal signals
+- rec_strip for search, removal, or repeated views
+- chat for high hesitation, dwell, comparison, first visit, inactivity, and
+  selected profile triggers
+- no widget when no deterministic rule matches
+
+The cart-value threshold nudge only activates when the cart is at least 80% of
+the configured goal and still below the goal.
+
+The cart-value threshold is a goal indicator. It does not create a Shopify
+discount.
+
+15.9 AI decision
+
+Unless AOVBOOST_DISABLE_AI=true:
+
+- Bundle fallback decisions remain deterministic and skip AI.
+- Other decisions are sent through the AI gateway.
+
+The AI receives:
+
+- Sanitized session state
+- Page and trigger context
+- Public behavior settings
+- Candidate offers
+- Up to 35 exact catalog candidates
+- Active bundles
+- Affinity context
+- A strict response schema
+- Trigger-specific safety guidance
+
+The AI may select a supported widget or no widget. Invalid JSON, an unknown
+widget type, or malformed fields cause fallback to deterministic behavior.
+
+15.10 AI gateway resilience
+
+Provider calls use zero temperature and short deadlines.
+
+Default per-provider timeouts:
+
+- Urgent: 2.5 seconds
+- Normal: 3.5 seconds
+- Relaxed: 5.8 seconds
+
+Default total gateway deadlines:
+
+- Urgent: 4.8 seconds
+- Normal: 5 seconds
+- Relaxed: 8 seconds
+
+A failing provider is placed in a 30-second in-process cooldown. The gateway
+tries the next configured provider. If every provider fails, it returns the
+supplied heuristic fallback without failing the storefront request.
+
+15.11 Copy generation
+
+After widget selection, a separate AI call may generate concise widget copy
+using:
+
+- Widget-specific schema
+- AI tone
+- Brand voice
+- Product context
+- Offer details
+
+Every widget has deterministic fallback copy. Invalid or partial model output is
+normalized field by field against that fallback.
+
+15.12 Catalog guard
+
+Before returning any product-bearing decision, the catalog guard:
+
+- Reloads the shop's exact catalog.
+- Removes blocked products.
+- Resolves product IDs and handles only against that catalog.
+- Replaces payload product fields with canonical catalog fields.
+- Removes duplicate products.
+- Rejects incomplete bundles.
+- Converts the decision to "no widget" when no renderable catalog-backed
+  product remains.
+
+This prevents an AI response or stale cache from inventing a product, price,
+handle, variant, or cross-tenant item.
+
+15.13 Experiment assignment
+
+If a widget has an active experiment, the deterministic control/treatment
+variant is calculated and stored on the Offer.
+
+15.14 Offer persistence
+
+Every non-null server decision creates an Offer containing:
+
+- Shop
+- Shopper session
+- Widget type
+- Canonical payload
+- Complete trigger context
+- AI provider
+- Experiment variant
+
+The response adds Offer.id as payload.offerId.
+
+15.15 Failure behavior
+
+The server fails closed:
+
+- Unexpected server errors return no widget with heuristic metadata.
+- An unauthorized response may include a replacement storefront session.
+
+If the network or server still fails, OfferPoller can mount a local generic
+fallback for selected triggers. Local fallbacks avoid fabricated products but
+may display generic chat, toast, exit, goal, countdown, or alert copy.
+
+
+16. WIDGET MOUNTING AND INTERACTION
+----------------------------------
+
+16.1 Widget isolation
+
+Every widget uses a Shadow DOM root. Shared widget CSS is injected into the
+shadow root, reducing conflicts with merchant themes.
+
+Mounting a widget tracks a widget_impression unless the widget has a specialized
+mount sequence such as exit intent.
+
+16.2 Inline versus floating widgets
+
+Inline widget types:
+
+- bundle
+- rec_strip
+- inline_alert
+- social_proof
+
+They mount after matching product-page theme selectors. Multiple different
+inline types can coexist.
+
+Floating widget types:
+
+- chat
+- toast
+- countdown_banner
+- upsell_drawer
+- discount_nudge
+- exit_intent
+- storefront post_purchase
+
+Only one normal floating widget is active at a time. A new floating decision
+destroys the preceding floating widget.
+
+16.3 Dismissal
+
+Dismissals are stored in localStorage under:
+
+    aovboost_dismissed_widgets
+
+The same widget type is suppressed for 30 minutes. The list is also included in
+offer requests so the server can return no widget for a recently dismissed
+type.
+
+16.4 Widget enablement
+
+WidgetManager checks public AppSettings before mounting:
+
+- Chat uses chatEnabled.
+- Bundle uses bundlesEnabled.
+- Upsell and recommendation strip use upsellEnabled.
+- Goal and countdown use discountNudgeEnabled.
+- Exit intent uses exitIntentEnabled.
+- Post-purchase uses postPurchaseEnabled.
+
+16.5 Bundle widget
+
+- Mounts after product form selectors.
+- Displays canonical products and actual prices.
+- Sums price times quantity.
+- Adds all valid variants with one Shopify Ajax Cart request.
+- Falls back to a product link when direct add is not possible.
+
+16.6 Upsell drawer
+
+- Displays up to three products.
+- Opens as an eight-second right-side drawer.
+- Adds a selected product through /cart/add.js.
+- Dismisses automatically when its timer expires.
+
+16.7 Recommendation strip
+
+- Mounts near the product description.
+- Displays catalog-backed products horizontally.
+- Lazy-loads images.
+- Adds the default variant or links to the product page.
+
+16.8 Chat
+
+- Begins collapsed with the configured greeting.
+- Expands into a conversation UI.
+- Receives server-supplied product cards.
+- Can add a card's default variant to cart.
+- Can execute a deterministic server cart action when the shopper explicitly
+  asks to add a clearly identified product.
+
+16.9 Cart-value goal nudge
+
+- Displays progress toward AppSettings.discountThreshold.
+- Uses the real storefront currency and money format.
+- Does not promise or apply a discount.
+- Removes itself shortly after the goal is reached.
+
+16.10 Toast
+
+- Displays low-disruption contextual copy.
+- Its action dispatches a chat trigger.
+- Auto-removes after nine seconds.
+
+16.11 Exit intent
+
+- Never displays on checkout or thank-you paths.
+- Is limited to once per browser session.
+- Can open immediately from TriggerRouter's exit event.
+- Does not invent a discount code; it displays one only if one exists in the
+  payload.
+
+16.12 Countdown, inline alert, and social proof
+
+- Countdown uses a real endsAt value when supplied and removes itself at zero.
+- Inline alert mounts near product price/form context.
+- Social proof uses recorded affinity order counts; otherwise it falls back to
+  the generic "Frequently bought together" statement.
+
+
+17. CART EXECUTION AND REGULAR OFFER ATTRIBUTION
+------------------------------------------------
+
+17.1 Adding products
+
+Storefront product widgets use Shopify's Ajax Cart API:
+
+    POST /cart/add.js
+
+Variant GIDs are converted to their numeric final segment.
+
+17.2 Private attribution property
+
+Every widget-added line includes:
+
+    _aovboost_offer_id: <Offer.id>
+
+The underscore makes it a private Shopify line-item property in normal theme
+presentation, while preserving it on the order webhook.
+
+Bundle lines all receive the same offer ID. A single recommendation or upsell
+line receives its own offer ID.
+
+17.3 Browser tracking
+
+Widget mount and click events update:
+
+- Offer.shown
+- Offer.clicked
+
+The browser is deliberately not allowed to mark Offer.converted or submit
+revenue. Browser conversion claims are ignored by event ingestion.
+
+17.4 Authoritative conversion
+
+The signed ORDERS_CREATE webhook is the authoritative regular-order conversion
+source.
+
+For each line item it:
+
+1. Reads the private offer property.
+2. Normalizes product and variant IDs.
+3. Calculates line revenue:
+
+       price * quantity - line discount
+
+4. Groups line revenue by offer ID.
+5. Verifies that each offer exists for the same shop.
+6. Marks only known offers converted.
+7. Stores net attributed line revenue in Offer.revenueImpact.
+
+If a line does not contain the private property, it is not attributed to an
+AOVBoost offer.
+
+17.5 Order Event record
+
+The webhook upserts one Event row for:
+
+    event = conversion
+    orderId = Shopify order ID
+    storeId = shop
+
+The unique key makes repeated webhook delivery update the same conversion
+record rather than create duplicates.
+
+The Event stores normalized line items, known attributed offer IDs, total order
+price, and currency.
+
+
+18. ORDER-BASED PRODUCT LEARNING
+--------------------------------
+
+Every ORDERS_CREATE webhook also teaches the recommendation graph.
+
+18.1 Exactly-once marker
+
+Within a database transaction, the code first checks for:
+
+    event = order_affinities_processed
+    orderId = Shopify order ID
+    storeId = shop
+
+The marker has a unique database constraint. Concurrent duplicate webhooks may
+race, but only one transaction succeeds.
+
+18.2 Order statistics
+
+Each known Product in the order increments ProductOrderStat.orderCount.
+
+18.3 Co-occurrence
+
+For every ordered source and target pair where source is not target:
+
+- ProductAffinity.orderCount increments.
+- A new pair starts with score 0.5 and reason "frequently bought together".
+
+18.4 Recalculation
+
+Affected products are recalculated in groups of four using the full affinity
+formula. Their Redis affinity cache entries are removed.
+
+This learning occurs for all Shopify orders, not only AOVBoost-attributed
+orders.
+
+
+19. CHAT REQUEST EXECUTION
+--------------------------
+
+19.1 Request
+
+ChatWidget posts to:
+
+    POST /apps/aovboost/chat
+
+It includes:
+
+- Signed storefront authentication
+- Current user message
+- Up to the recent client conversation history
+- Currency code and source
+- Shopify money formats
+- Locale
+
+19.2 Validation
+
+The server:
+
+- Rejects invalid JSON.
+- Authenticates app proxy and storefront session.
+- Trims user messages to 1,000 characters.
+- Keeps at most 12 valid history messages, each at most 1,000 characters.
+- Limits chat to 12 requests per session per minute.
+- Confirms the shop is installed.
+
+19.3 Persistence
+
+The user message is saved immediately in ChatMessage.
+
+Price-sensitive, comparison, or checkout-assistance classification may also
+create a chat_intent ShopperEvent.
+
+19.4 Context construction
+
+The chat server loads:
+
+- Shopper session
+- Merchant AppSettings
+- Current cart products
+- Recently viewed products
+- Active bundles for the current source product
+- Safe recommendation catalog
+- Blocked product IDs
+- Store currency from Shopify Admin when browser currency is only a fallback
+
+The store currency response is cached for six hours.
+
+19.5 Deterministic add-to-cart intent
+
+If the shopper clearly asks to add a mentioned catalog product:
+
+1. The server resolves the mention by product URL or exact title.
+2. It returns deterministic reply copy.
+3. It returns a cartAction only when a valid default variant exists.
+4. ChatWidget performs the Shopify Ajax Cart request.
+
+This path does not depend on an AI model understanding the add command.
+
+19.6 AI shopping reply
+
+Other messages are sent to the AI gateway with:
+
+- Exact catalog lines
+- Active bundles
+- Current cart
+- Detected intent
+- Store settings and tone
+- Brand voice
+- Exact currency rules
+
+The model is told to recommend only existing products and include product URLs.
+
+19.7 Reply safety
+
+After the model responds:
+
+- Unknown product handles cause replacement with deterministic catalog fallback.
+- A request that should contain recommendations but contains no catalog product
+  link may be replaced with fallback.
+- Unsupported USD symbols or wording in a non-USD shop cause fallback.
+- Product cards are generated only from the exact catalog.
+
+19.8 Streaming
+
+The route returns Server-Sent Events:
+
+    data: <JSON>
+    data: [DONE]
+
+The current server normally sends the completed reply as a single delta rather
+than model-token-by-model-token streaming. The browser still consumes it through
+the streaming SSE reader.
+
+19.9 Assistant persistence
+
+The final assistant reply and provider are saved in ChatMessage. The
+ShopperSession is marked chatEngaged=true.
+
+
+20. OFFICIAL CHECKOUT POST-PURCHASE FLOW
+----------------------------------------
+
+This is the authoritative path for adding a product to the already-completed
+Shopify order.
+
+20.1 Shopify ShouldRender
+
+Shopify runs Checkout::PostPurchase::ShouldRender.
+
+The extension sends the Shopify checkout token to:
+
+    POST <APP_URL>/api/post-purchase-offer
+
+The request includes:
+
+- Initial purchase reference ID
+- Purchased variant IDs
+
+The server authenticates it with:
+
+    authenticate.public.checkout(request)
+
+The shop is taken from the verified checkout session token destination, not
+from an arbitrary body field.
+
+20.2 Offer selection
+
+The server:
+
+1. Checks postPurchaseEnabled.
+2. Creates a pseudo ShopperSession keyed by:
+
+       postpurchase:<referenceId>
+
+3. Reuses an existing post-purchase offer for that checkout if one exists.
+4. Loads up to 50 non-blocked products.
+5. Sorts by product order count, then recency.
+6. Selects the first product with a usable variant that was not already bought.
+7. Reads ShopConfig.discountPercentage, clamped between 0 and 100.
+8. Builds one Shopify add_variant change.
+9. Stores the post-purchase Offer as already shown.
+
+The current ShopConfig default is a 10% post-purchase discount. There is no
+current merchant screen for editing ShopConfig; /app/settings edits AppSettings,
+which is a separate table.
+
+20.3 ShouldRender storage
+
+When an offer exists, the extension stores:
+
+- Offer
+- Purchase reference ID
+- Presentment currency
+
+It returns render=true. Any error or no candidate returns render=false.
+
+20.4 Calculation
+
+The render extension calls Shopify calculateChangeset with the proposed change.
+The displayed price prefers Shopify's calculated presentment price over the
+server's preliminary calculation.
+
+20.5 Accept
+
+When the buyer accepts:
+
+1. The extension calls /api/post-purchase-sign with checkout token, reference
+   ID, and offer ID.
+2. The server verifies that the offer belongs to the verified shop and same
+   checkout reference.
+3. The server marks the offer clicked.
+4. The server signs a JWT changeset with:
+   - issuer = Shopify API key
+   - random JWT ID
+   - issued-at value
+   - subject = checkout reference
+   - exact stored changes
+5. The extension gives the token to Shopify applyChangeset.
+6. Shopify adds the line to the existing order without requiring payment entry.
+7. The extension calls /api/post-purchase-convert.
+8. The server marks the offer converted and stores the expected discounted
+   product value as revenueImpact.
+9. The extension calls done().
+
+20.6 Decline
+
+The "No thanks" action calls done() without signing or applying a changeset.
+
+20.7 Deployment coupling
+
+The checkout extension currently contains a fixed APP_URL. If the application
+host changes, both Shopify app URLs and this extension constant must be updated
+and the extension must be rebuilt and deployed.
+
+20.8 Storefront thank-you widget distinction
+
+The browser SDK also contains a widget named post_purchase for thank-you pages.
+That browser widget uses /cart/add.js and therefore affects the storefront cart;
+it is not the same as Shopify's authenticated changeset flow and does not add to
+the completed order.
+
+The checkout post-purchase extension described above is the production path for
+modifying the existing order. The storefront thank-you widget should be treated
+as a separate lightweight recommendation surface.
+
+
+21. WEBHOOK EXECUTION
+---------------------
+
+All webhook requests first pass Shopify HMAC authentication.
+
+21.1 APP_UNINSTALLED
+
+The app:
+
+1. Finds all Shopify sessions for the shop.
+2. Deletes them from Redis and Prisma.
+3. Deletes shop-owned offers, events, chat, shopper sessions, bundles, products,
+   affinities, statistics, experiments, settings, sync job, configurations,
+   legacy events, and visitor sessions.
+
+21.2 SHOP_REDACT
+
+Performs the same tenant data purge.
+
+21.3 CUSTOMERS_DATA_REQUEST and CUSTOMERS_REDACT
+
+The handler returns OK. The behavioral storefront session is anonymous and the
+application does not persist Shopify customer IDs in its shopper models.
+
+21.4 APP_SCOPES_UPDATE
+
+The handler updates the stored scope string in Session and Shop.
+
+21.5 PRODUCTS_CREATE, PRODUCTS_UPDATE, PRODUCTS_DELETE
+
+These maintain the product catalog and cache as described in the product
+webhook section.
+
+21.6 ORDERS_CREATE
+
+This performs:
+
+- Order attribution
+- Offer conversion marking
+- Revenue calculation
+- Exactly-once affinity learning
+- Conversion Event upsert
+
+21.7 Failure semantics
+
+The route logs the error and returns HTTP 500. Shopify can then retry delivery.
+Idempotent conversion upsert and the affinity marker protect against duplicate
+order processing.
+
+
+22. ANALYTICS CALCULATION
+-------------------------
+
+22.1 Offer states
+
+Offer lifecycle fields:
+
+- shown
+- clicked
+- converted
+- revenueImpact
+
+Browser events can set shown and clicked.
+
+Only:
+
+- the signed order webhook, or
+- the authenticated post-purchase conversion endpoint
+
+can set converted and revenue.
+
+22.2 Main dashboard metrics
+
+The main dashboard reads the last 30 days by default.
+
+Attributed revenue:
+
+    Sum of Offer.revenueImpact
+
+Widget CTR:
+
+    clicked offers / shown offers
+
+Chat engaged:
+
+    Count of recently updated ShopperSession rows with chatEngaged=true
+
+Widget rows:
+
+    Impressions, clicks, conversions, and attributed revenue grouped by
+    widgetType
+
+22.3 Average AOV and lift
+
+Conversion Event rows are split into:
+
+- Attributed orders: Event.data.offerIds is non-empty.
+- Baseline orders: Event.data.offerIds is empty.
+
+Average attributed AOV:
+
+    total price of attributed orders / attributed order count
+
+Baseline AOV:
+
+    total price of baseline orders / baseline order count
+
+AOV lift:
+
+    (attributed AOV - baseline AOV) / baseline AOV
+
+This is an observational comparison, not automatically a randomized causal
+estimate.
+
+22.4 Revenue series
+
+For an attributed order, the date series adds only the sum of its recognized
+Offer.revenueImpact values, not the full order total.
+
+Authenticated post-purchase conversions that are not found in order Event rows
+are added on the Offer creation date.
+
+22.5 Experiment analytics
+
+For each control/treatment variant:
+
+- Impressions
+- Clicks
+- Conversions
+- CTR
+- Conversion rate
+- AOV from attributed offer revenue
+- Total attributed revenue
+
+Statistical significance is a two-proportion z-test on conversions per
+impression, using an absolute z score of at least 1.96.
+
+
+23. DATABASE MODEL RESPONSIBILITIES
+-----------------------------------
+
+Session
+    Shopify administrator/offline/online authentication sessions.
+
+Shop
+    Installation record, Shopify access token, scope, and a small legacy
+    productCatalog JSON snapshot.
+
+Product
+    Canonical synced Shopify product. Primary key is (shop, id), preventing
+    cross-tenant ID collisions.
+
+ProductAffinity
+    Directed source-to-target recommendation edge with score, reason, and
+    co-order count. Foreign keys include shop.
+
+ProductOrderStat
+    Number of orders containing a product for the shop.
+
+Bundle and BundleItem
+    Merchant-created contextual product sets. BundleItem references
+    (shop, productId).
+
+ShopperSession
+    Anonymous storefront behavior summary.
+
+ShopperEvent
+    Raw accepted storefront behavior events.
+
+Offer
+    One server-selected widget decision and its attribution state.
+
+ChatMessage
+    Persisted user and assistant chat transcript with provider metadata.
+
+Experiment
+    Control/treatment assignment settings per widget type.
+
+AppSettings
+    Active merchant-facing behavior and brand settings.
+
+CatalogSyncJob
+    Durable, leased catalog synchronization state.
+
+ShopConfig
+    Older revenue-engine configuration model. The active use in current code is
+    post-purchase discountPercentage.
+
+Event
+    Server/system event stream. It stores order conversions, exactly-once order
+    markers, price drops, and low-inventory records. The secondary analytics
+    route also understands older offer event types.
+
+VisitorSession and CrossStoreInsight
+    Legacy/future analytics tables. Current active code does not create or
+    update these records, except shop purge removes VisitorSession rows.
+
+
+24. REDIS AND CACHE BEHAVIOR
+----------------------------
+
+24.1 Redis-backed concerns
+
+Upstash is used for:
+
+- Shopify session storage
+- Per-shop session indexes
+- Offer response cache
+- Settings cache
+- Experiment cache
+- Catalog snapshots
+- Category and hot catalog snapshots
+- Affinity cache
+- Bundle cache
+- Shop currency cache
+- Catalog sync progress
+- Rate limits
+
+24.2 Important TTLs
+
+- Offer decision: 30 seconds
+- Settings: 1 hour
+- Experiment: 10 minutes
+- Full catalog: 1 hour
+- Stale catalog: 7 days
+- Hot catalog: 4 hours
+- Category catalog: 1 hour
+- Affinity: 1 hour
+- Bundle: 1 hour
+- Shop currency: 6 hours
+- Sync progress: 1 hour
+- Merchant app initialization marker: 24 hours
+
+24.3 In-memory fallback
+
+When Upstash is not configured or an operation fails, the general redis helper
+uses an in-memory Map.
+
+This is useful locally, but each Node process or serverless instance has its own
+memory. In production, distributed rate limits, cache consistency, and
+cross-request durability require Upstash.
+
+Shopify session storage separately falls back to PostgreSQL, so authentication
+sessions have a durable fallback even when Redis is absent.
+
+
+25. RATE LIMITS AND PAYLOAD LIMITS
+----------------------------------
+
+Storefront events:
+
+- Maximum request Content-Length: 128,000 bytes
+- Maximum serialized events: 128,000 bytes
+- Maximum events per request: 100
+- Maximum 30 event requests per session per minute
+
+Offers:
+
+- Maximum 10 requests per session per minute
+
+Chat:
+
+- Maximum 12 requests per session per minute
+- Maximum user message: 1,000 characters
+- Maximum retained history: 12 messages
+- Maximum retained history message: 1,000 characters
+
+Rate limit counters use Redis when available and expire after 60 seconds.
+
+
+26. SECURITY AND DATA INTEGRITY
+-------------------------------
+
+26.1 Tenant isolation
+
+All important product, offer, session, bundle, and analytics queries include the
+shop domain. Product relationships use composite (shop, product ID) foreign
+keys.
+
+26.2 Authentication boundaries
+
+- Admin routes use Shopify admin authentication.
+- Storefront routes require both app-proxy HMAC and AOVBoost session HMAC.
+- Webhooks use Shopify webhook HMAC authentication.
+- Checkout post-purchase routes use Shopify checkout session-token
+  authentication.
+
+26.3 Product integrity
+
+The catalog guard replaces model-supplied product data with canonical tenant
+catalog records and rejects missing products.
+
+26.4 Revenue integrity
+
+Browser requests cannot self-report conversions or revenue. Signed Shopify
+orders and authenticated checkout execution are authoritative.
+
+26.5 Exactly-once order learning
+
+A unique Event marker makes product affinity increments exactly once per order,
+including concurrent webhook delivery.
+
+26.6 Output escaping
+
+Storefront widget text and dynamic HTML values pass through HTML escaping before
+being inserted into Shadow DOM markup.
+
+26.7 CORS
+
+Storefront routes return permissive Access-Control-Allow-Origin headers because
+they are designed for storefront/extension access. CORS is not the security
+boundary; signed Shopify requests and signed AOVBoost sessions are.
+
+26.8 Blocked products
+
+Blocked IDs are excluded from recommendations, chat catalogs, bundles returned
+to shoppers, post-purchase selection, and final catalog-guard validation.
+
+
+27. API ROUTE REFERENCE
+-----------------------
+
+GET /api/session
+    Signed app-proxy bootstrap. Returns 12-hour storefront session and public
+    settings.
+
+POST /api/config
+    Authenticated storefront settings refresh.
+
+POST /api/events
+    Authenticated event batch ingestion, session recomputation, and impression/
+    click tracking.
+
+POST /api/offer
+    Authenticated catalog-backed widget decision.
+
+POST /api/chat
+    Authenticated SSE shopping-assistant reply and optional deterministic cart
+    action.
+
+GET /api/sync
+    Authenticated administrator sync status.
+
+POST /api/sync
+    Authenticated administrator sync restart/continue chunk.
+
+POST /api/webhooks
+    Shopify webhook receiver.
+
+POST /api/post-purchase-offer
+    Authenticated checkout extension offer selection.
+
+POST /api/post-purchase-sign
+    Authenticated checkout extension changeset signing.
+
+POST /api/post-purchase-convert
+    Authenticated checkout extension conversion marking.
+
+/auth/login and /auth/*
+    Shopify login and OAuth handling.
+
+Unknown routes
+    Return HTTP 404 through the catch-all route.
+
+
+28. REQUIRED AND OPTIONAL ENVIRONMENT VARIABLES
+-----------------------------------------------
+
+Required for the hosted app:
+
+SHOPIFY_API_KEY
+    Shopify app client/API key.
+
+SHOPIFY_API_SECRET
+    Shopify app secret. Used by Shopify authentication, app-proxy signature
+    validation, session token fallback signing, and post-purchase changesets.
+
+SHOPIFY_APP_URL
+    Public HTTPS application origin.
+
+DATABASE_URL
+    PostgreSQL runtime/pooled connection string.
+
+DATABASE_DIRECT_URL
+    PostgreSQL direct connection string used by Prisma migrations.
+
+SCOPES
+    Comma-separated runtime Shopify scopes when not injected by Shopify CLI.
+    It must align with shopify.app.toml.
+
+Strongly recommended in production:
+
+UPSTASH_REDIS_REST_URL
+UPSTASH_REDIS_REST_TOKEN
+    Shared serverless-safe Redis.
+
+AOVBOOST_STOREFRONT_SESSION_SECRET
+    Dedicated HMAC secret for storefront session tokens. If absent,
+    SHOPIFY_API_SECRET is used.
+
+Optional AI:
+
+GOOGLE_API_KEY
+MISTRAL_API_KEY
+GROQ_API_KEY
+DEEPSEEK_API_KEY
+
+Optional behavior:
+
+AOVBOOST_DISABLE_AI=true
+    Forces deterministic decisions and copy fallbacks.
+
+AOVBOOST_ALLOW_UNSIGNED_PROXY=true
+    Development-only unsigned proxy bypass. Ignored in production.
+
+AOVBOOST_AI_TIMEOUT_URGENT_MS
+AOVBOOST_AI_TIMEOUT_NORMAL_MS
+AOVBOOST_AI_TIMEOUT_RELAXED_MS
+AOVBOOST_AI_TOTAL_TIMEOUT_URGENT_MS
+AOVBOOST_AI_TOTAL_TIMEOUT_NORMAL_MS
+AOVBOOST_AI_TOTAL_TIMEOUT_RELAXED_MS
+    Override AI gateway time budgets.
+
+SHOP_CUSTOM_DOMAIN
+    Adds an accepted custom shop domain to Shopify authentication.
+
+PORT
+FRONTEND_PORT
+HOST
+    Development/server networking values.
+
+VERCEL
+    Set to 1 by Vercel to activate the deployment preset.
+
+
+29. COMPLETE END-TO-END EXAMPLE: REGULAR UPSELL
+-----------------------------------------------
+
+1. Merchant installs AOVBoost.
+2. OAuth completes and the Session and Shop records are saved.
+3. Merchant enables the theme app block.
+4. Merchant runs product sync from /app.
+5. Product rows, default variants, affinities, and catalog caches are built.
+6. Shopper opens the store.
+7. Theme block defines window.AOVBoost and loads the SDK.
+8. SDK obtains a Shopify-signed app-proxy session token.
+9. EventBus records page and product views.
+10. Shopper adds a product to cart.
+11. EventBus detects the Ajax Cart call and tracks add_to_cart.
+12. TriggerRouter reads /cart.js and fires cart_item_added.
+13. OfferPoller sends signed session, product, cart, and trigger context.
+14. Server validates signatures and rate limits.
+15. Server loads settings and shopper state.
+16. Server selects catalog and bundle candidates.
+17. Heuristic logic creates a safe fallback decision.
+18. Optional AI chooses among supported widgets.
+19. Catalog guard canonicalizes products.
+20. Experiment variant is assigned when active.
+21. Offer is saved.
+22. Upsell drawer mounts and records an impression.
+23. Shopper clicks "Add to cart".
+24. Widget records the click and calls /cart/add.js.
+25. The new cart line includes _aovboost_offer_id.
+26. Shopper completes checkout.
+27. Shopify sends ORDERS_CREATE.
+28. Webhook reads the private property and verifies the offer.
+29. Net line revenue marks the offer converted.
+30. The order also updates product order counts and affinities exactly once.
+31. Dashboard metrics include the impression, click, conversion, and attributed
+    revenue.
+
+
+30. COMPLETE END-TO-END EXAMPLE: CHAT ADD
+-----------------------------------------
+
+1. A behavior trigger opens chat.
+2. Shopper asks for a recommendation.
+3. Chat request is signed and rate-limited.
+4. Server loads exact catalog, cart, bundles, settings, and currency.
+5. AI or deterministic fallback returns catalog-safe copy and product cards.
+6. Shopper says "add it to cart" after a clearly identified recommendation.
+7. Server resolves the named catalog product and emits a deterministic
+   add_to_cart cartAction.
+8. ChatWidget calls /cart/add.js using the exact default variant.
+9. The line receives the initiating chat Offer ID.
+10. Order webhook later provides authoritative conversion attribution.
+
+
+31. COMPLETE END-TO-END EXAMPLE: POST-PURCHASE
+----------------------------------------------
+
+1. Shopper completes an eligible Shopify checkout.
+2. Shopify invokes the post-purchase ShouldRender extension.
+3. Extension sends checkout token, reference ID, and purchased variants.
+4. Server authenticates the checkout token and derives the shop.
+5. Server selects a non-purchased, non-blocked catalog product.
+6. Server stores one idempotent post-purchase offer.
+7. Extension asks Shopify to calculate the changeset.
+8. Buyer accepts.
+9. Server validates offer, shop, and checkout reference.
+10. Server signs exact changes with Shopify credentials.
+11. Shopify applies the change to the existing order.
+12. Authenticated conversion endpoint marks click, conversion, and revenue.
+13. Extension completes the flow.
+
+
+32. COMPLETE END-TO-END EXAMPLE: UNINSTALL
+------------------------------------------
+
+1. Shopify sends APP_UNINSTALLED.
+2. Webhook authentication identifies the shop.
+3. Session storage finds per-shop Redis or Prisma sessions.
+4. Sessions are deleted.
+5. A PostgreSQL transaction deletes all tenant-owned operational data.
+6. Subsequent storefront session bootstrap fails the installed-shop check.
+7. SDK cannot access authenticated offers for the uninstalled shop.
+
+
+33. CURRENT IMPLEMENTATION BOUNDARIES
+-------------------------------------
+
+These are important for understanding the current behavior accurately:
+
+1. Product widgets use the first synced Shopify variant as the default direct-
+   add variant.
+
+2. Bundle discount fields exist in storage/UI compatibility code, but the
+   server forces bundles to no discount. Shopify catalog price is authoritative.
+
+3. The cart threshold is a cart-value goal, not proof of a Shopify discount or
+   reward.
+
+4. Experiment control/treatment JSON is stored but not applied to the rendered
+   payload. Current experiments label offers for comparison.
+
+5. Experiment analytics can mix successive experiments of the same widget type
+   because Offer stores variant but not experiment ID.
+
+6. The main /app dashboard is based on Offer and signed conversion records.
+   /app/analytics also understands an older Event funnel that the current SDK
+   does not fully produce.
+
+7. Price-drop and low-inventory webhooks store events but do not push them to
+   open storefronts automatically.
+
+8. The checkout post-purchase extension is the authoritative existing-order
+   change path. The storefront thank-you widget is a separate Ajax Cart widget.
+
+9. ShopConfig.discountPercentage controls official post-purchase discounting,
+   but there is no current merchant UI for that model.
+
+10. Production serverless operation should configure Upstash. The memory
+    fallback is per process and not a shared distributed cache.
+
+11. The post-purchase extension application URL is fixed in its source and must
+    match the deployed app URL.
+
+12. Production database migrations must be run as an operational step; the
+    Vercel build generates Prisma Client but does not automatically deploy
+    migrations.
+
+
+34. OPERATIONAL READINESS CHECKLIST
+-----------------------------------
+
+Before a real store test:
+
+[ ] Required Shopify and database environment variables are configured.
+[ ] Production database migrations have completed.
+[ ] Upstash Redis is configured for production.
+[ ] At least one AI key is configured, or heuristic-only behavior is accepted.
+[ ] SHOPIFY_APP_URL matches the deployed HTTPS origin.
+[ ] shopify.app.toml application, redirect, proxy, and webhook URLs match it.
+[ ] Post-purchase extension APP_URL matches it.
+[ ] Latest server code is deployed.
+[ ] Shopify app configuration and extensions are deployed.
+[ ] App is reinstalled or scope changes are approved.
+[ ] Theme app block is enabled in the active theme.
+[ ] Product catalog sync reaches "complete".
+[ ] Bundles use products from that completed catalog.
+[ ] Post-purchase app access is approved and AOVBoost is selected in Shopify
+    Checkout settings.
+[ ] A test product view, cart add, widget impression, widget click, and order
+    webhook are confirmed.
+[ ] Dashboard attribution is checked against the test order's private line
+    property.
+
+
+35. IMPORTANT SOURCE FILE MAP
+-----------------------------
+
+Application configuration:
+
+- package.json
+- shopify.app.toml
+- shopify.web.toml
+- react-router.config.ts
+- vercel.json
+- vite.config.ts
+- Dockerfile
+
+Shopify/server bootstrap:
+
+- app/shopify.server.ts
+- app/entry.server.tsx
+- app/db.server.ts
+- app/upstash-session-storage.server.ts
+- app/redis.server.ts
+
+Storefront security:
+
+- app/utils/storefrontAuth.server.ts
+- app/utils/storefrontSessionRecovery.server.ts
+- app/utils/cors.server.ts
+
+Storefront APIs:
+
+- app/routes/api.session.tsx
+- app/routes/api.config.tsx
+- app/routes/api.events.tsx
+- app/routes/api.offer.tsx
+- app/routes/api.chat.tsx
+
+Admin and webhooks:
+
+- app/routes/api.sync.tsx
+- app/routes/api.webhooks.tsx
+- app/routes/app.tsx
+- app/routes/app._index.tsx
+- app/routes/app.settings.tsx
+- app/routes/app.bundles._index.tsx
+- app/routes/app.bundles.$id.tsx
+- app/routes/app.experiments.tsx
+- app/routes/app.analytics.tsx
+
+Decision and catalog:
+
+- app/ai/client.server.ts
+- app/ai/decisionEngine.server.ts
+- app/ai/copyWriter.server.ts
+- app/models/catalogCache.server.ts
+- app/models/catalogGuard.server.ts
+- app/models/product.server.ts
+- app/models/bundle.server.ts
+- app/models/session.server.ts
+- app/models/event.server.ts
+- app/models/offer.server.ts
+- app/jobs/aovboost.server.ts
+
+Attribution and analytics:
+
+- app/models/attribution.server.ts
+- app/models/analytics.server.ts
+- app/models/postPurchaseOffer.server.ts
+
+Theme extension and SDK:
+
+- extensions/aovboost-storefront/blocks/aovboost.liquid
+- storefront-sdk/src/index.ts
+- storefront-sdk/src/sessionManager.ts
+- storefront-sdk/src/eventBus.ts
+- storefront-sdk/src/triggerRouter.ts
+- storefront-sdk/src/offerPoller.ts
+- storefront-sdk/src/widgets/*
+
+Checkout post-purchase:
+
+- extensions/post-purchase-upsell/src/index.jsx
+- app/routes/api.post-purchase-offer.tsx
+- app/routes/api.post-purchase-sign.tsx
+- app/routes/api.post-purchase-convert.tsx
+
+Database:
+
+- prisma/schema.prisma
+- prisma/migrations/*
+
+
+END OF DOCUMENT
+----------------
+
+This guide follows the current code paths in the repository. If routes,
+settings, extensions, data models, or attribution rules change, this document
+should be updated in the same change so operational expectations stay aligned
+with executable behavior.

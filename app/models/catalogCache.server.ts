@@ -1,6 +1,10 @@
 import type { Product } from "@prisma/client";
 import prisma from "../db.server";
 import { getJsonCache, setJsonCache } from "../redis.server";
+import {
+  getSafeDefaultVariantId,
+  isCatalogProductAvailable,
+} from "./productCatalogMapping";
 
 export type CatalogCacheProduct = {
   id: string;
@@ -20,12 +24,14 @@ export type CatalogCacheProduct = {
   imageUrl: string | null;
   imageAlt: string;
   inventory: number | null;
+  availableForSale: boolean;
   variants: Array<{
     id: string;
     title: string;
     sku: string;
     price: string;
     quantityAvailable: number | null;
+    availableForSale: boolean;
     selectedOptions: Array<{ name: string; value: string }>;
   }>;
   searchText: string;
@@ -108,7 +114,9 @@ export async function getRecommendationCatalog(input: {
 
   const [hotCatalog, categoryCatalog] = await Promise.all([
     getHotCatalogSnapshot(input.shop),
-    category ? getCategoryCatalogSnapshot(input.shop, category) : Promise.resolve(null),
+    category
+      ? getCategoryCatalogSnapshot(input.shop, category)
+      : Promise.resolve(null),
   ]);
 
   return buildCatalogSnapshotFromCatalogProducts(
@@ -131,11 +139,13 @@ export function pickCatalogProducts(input: {
   limit?: number;
 }) {
   const limit = input.limit || 5;
-  const excluded = new Set([
-    ...(input.cartProductIds || []),
-    ...(input.excludeProductIds || []),
-    input.sourceProductId || "",
-  ].filter(Boolean));
+  const excluded = new Set(
+    [
+      ...(input.cartProductIds || []),
+      ...(input.excludeProductIds || []),
+      input.sourceProductId || "",
+    ].filter(Boolean),
+  );
   const source = input.sourceProductId
     ? input.catalog.byId[input.sourceProductId]
     : undefined;
@@ -227,7 +237,9 @@ function buildCatalogSnapshot(
 ): CatalogSnapshot {
   return buildCatalogSnapshotFromCatalogProducts(
     shop,
-    products.map(toCatalogProduct),
+    products
+      .map(toCatalogProduct)
+      .filter((product) => product.availableForSale),
     productCount,
   );
 }
@@ -277,17 +289,15 @@ function toCatalogProduct(product: ProductWithStats): CatalogCacheProduct {
     "global.description_tag",
     "aovboost.description",
   ]);
-  const variantId = getMetafieldValue(metafields, [
-    "defaultVariantId",
-    "variantId",
-    "aovboost.defaultVariantId",
-  ]);
+  const availableForSale = isCatalogProductAvailable(metafields);
+  const variantId = getSafeDefaultVariantId(metafields);
   const sku = getMetafieldValue(metafields, ["sku", "aovboost.sku"]);
   const inventory = toNullableNumber(
     getMetafieldValue(metafields, [
       "inventory",
       "quantityAvailable",
       "aovboost.quantityAvailable",
+      "aovboost.sellableOnlineQuantity",
     ]),
   );
   const price = product.price.toString();
@@ -314,6 +324,7 @@ function toCatalogProduct(product: ProductWithStats): CatalogCacheProduct {
     imageUrl: product.imageUrl,
     imageAlt: product.title,
     inventory,
+    availableForSale,
     variants: variantId
       ? [
           {
@@ -322,6 +333,7 @@ function toCatalogProduct(product: ProductWithStats): CatalogCacheProduct {
             sku,
             price,
             quantityAvailable: inventory,
+            availableForSale,
             selectedOptions: [],
           },
         ]
@@ -381,8 +393,11 @@ function scoreCatalogProduct(
   );
   if (!source) return queryScore + 0.1;
 
-  const sharedTags = product.tags.filter((tag) => source.tags.includes(tag)).length;
-  const sameCategory = product.category && product.category === source.category ? 3 : 0;
+  const sharedTags = product.tags.filter((tag) =>
+    source.tags.includes(tag),
+  ).length;
+  const sameCategory =
+    product.category && product.category === source.category ? 3 : 0;
   const sameVendor = product.vendor && product.vendor === source.vendor ? 1 : 0;
 
   return queryScore + sameCategory + sharedTags + sameVendor;
@@ -434,7 +449,10 @@ function categoryCatalogKey(shop: string, category: string) {
 }
 
 function safeCacheKey(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9:_-]+/g, "-").slice(0, 80);
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9:_-]+/g, "-")
+    .slice(0, 80);
 }
 
 function getErrorMessage(error: unknown) {

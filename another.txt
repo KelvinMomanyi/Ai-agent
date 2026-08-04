@@ -1,0 +1,533 @@
+AOVBOOST: MERCHANT AND SHOPPER EXPERIENCE GUIDE
+================================================
+
+Purpose of this document
+------------------------
+
+This guide explains the app from the viewpoint of:
+
+1. A merchant who has installed AOVBoost and wants to know what customers will experience.
+2. A shopper visiting a store where AOVBoost is active.
+3. A merchant deciding whether the app is helping customers and improving store performance.
+
+This is based on the app's current implementation. It describes what the app can do, what must be configured before customers see it, and the limitations that should be understood. The app is intended to assist shoppers and increase order value, but it cannot guarantee that every visitor will buy or spend more.
+
+
+1. THE SIMPLE CUSTOMER-FACING SUMMARY
+-------------------------------------
+
+When AOVBoost is installed and correctly enabled, it watches the anonymous shopper's journey through the storefront. It uses the current page, products viewed, cart contents, browsing behavior, store settings, and the merchant's synchronized catalog to decide whether a helpful prompt should appear.
+
+A shopper may see:
+
+- A floating shopping-assistant chat button.
+- A short recommendation or reminder notification.
+- Product recommendations related to the page or cart.
+- A bundle suggestion on a product page.
+- An upsell drawer after adding an item to the cart.
+- A cart-goal progress message.
+- A countdown banner when a real active campaign is configured.
+- An exit-intent offer before leaving the store.
+- A post-purchase offer after an eligible checkout.
+
+The shopper remains in control. They can ignore or close a prompt, continue shopping normally, or use a recommendation to visit a product page or add an eligible product to the cart.
+
+Not every shopper will see every feature. The app selects experiences according to the page, timing, cart, available catalog matches, configured widgets, previous prompts in the same session, and other eligibility rules. Sometimes showing nothing is the correct behavior.
+
+
+2. WHAT THE MERCHANT SHOULD EXPECT AFTER INSTALLATION
+-----------------------------------------------------
+
+Installation alone does not guarantee that storefront widgets will immediately appear. For the complete experience, the merchant should expect to complete the following setup:
+
+- Enable the AOVBoost theme app extension in the active Shopify theme.
+- Allow the initial product synchronization to complete.
+- Confirm that the desired widget types are enabled in app settings.
+- Set the greeting, brand voice, tone, cart-value goal, and other available options.
+- Create bundles if product-page bundle suggestions are required.
+- Exclude products that should never be promoted.
+- Verify the storefront on desktop and mobile.
+- Configure and obtain access for Shopify's checkout post-purchase extension if that feature is required.
+- Select the post-purchase extension in Shopify's checkout settings.
+
+The theme extension provides the storefront app with the shop identity, currency, money format, locale, cart information, consent setting, and app-proxy location. The browser then creates a signed storefront session through Shopify's app proxy. That signed session allows the app to request decisions and record legitimate interactions for the correct shop.
+
+If the extension is not enabled, the main storefront experience will not start. If the catalog has not synchronized, recommendation quality will be limited and catalog-backed offers may not appear. If a widget type is disabled, the app should not show that widget merely because a trigger occurred.
+
+
+3. THE SHOPPER JOURNEY, STEP BY STEP
+------------------------------------
+
+3.1 Entering the store
+
+The store should load as a normal Shopify storefront. AOVBoost is an assistance layer; it does not replace the theme, navigation, product pages, cart, checkout, or Shopify payment process.
+
+After the storefront is ready, the app initializes in the browser. Where consent is required by the store's configuration, startup waits for the relevant customer consent. When consent is not required, it begins after the page is ready.
+
+The app assigns the browser an anonymous identifier and a session token. It uses these to maintain the shopping context across page views. Its shopper session is behavioral and does not depend on the shopper being signed into a customer account.
+
+The first eligible experience may be requested shortly after startup. This does not mean a popup must appear immediately. The decision engine can determine that no message is appropriate.
+
+What the shopper may notice:
+
+- A small chat launcher in a fixed position on the page.
+- A welcome or first-visit suggestion.
+- No visible change at all until the shopper performs a relevant action.
+
+What the merchant should expect:
+
+- The store remains usable if the shopper never interacts with the app.
+- The app should avoid presenting every widget at once.
+- A dismissed widget of the same type is suppressed for a period, currently about 30 minutes.
+- Several prompts are limited to once per browsing session.
+
+
+3.2 Browsing a collection or product page
+
+As a shopper views products, the app builds a small session-level picture of interest. It can respond to signals such as:
+
+- Spending about 30 seconds on a product page.
+- Viewing a product repeatedly.
+- Scrolling through most of a page.
+- Hovering over a price for roughly 1.2 seconds.
+- Using comparison-related words or behavior.
+- Arriving through or using a search query.
+- Focusing on coupon or wishlist-related elements.
+
+These signals do not automatically mean that the shopper is shown an aggressive sales message. They tell the decision service that help may be useful. The result depends on available products, store settings, current context, throttling, and whether another widget is already active.
+
+On a product page, the shopper may see an inline bundle beneath the product form. A valid bundle is based on synchronized Shopify products. The prices shown are actual known Shopify prices. The current storefront bundle presentation does not create a separate app-controlled bundle discount; the merchant should not describe it as discounted unless Shopify or another valid pricing configuration really supplies that discount.
+
+If a recommended product has a usable default or first variant, the shopper may be able to add it directly. Where product options must be selected, the safer experience is to send the shopper to the product page to choose the correct variant.
+
+
+3.3 Asking the shopping assistant for help
+
+The shopper can expand the chat assistant and type a question. Typical useful questions include:
+
+- What goes well with this product?
+- Do you have something in a certain category or price range?
+- Which item should I add to my cart?
+- Can you recommend an alternative?
+- Add the product you just recommended to my cart.
+
+The assistant uses recent conversation context, the current cart, recently viewed items, the synchronized catalog, bundles, the shop's currency, and merchant settings. It can display product cards for exact catalog products and can help add a valid variant to the cart.
+
+The chat limits unusually long or excessive requests. A shopper message is limited to approximately 1,000 characters, recent history is bounded, and the current rate limit is about 12 messages per minute. These controls protect the store and keep the interaction focused.
+
+If an external AI provider is configured and available, it may help phrase and select the response. If no provider key is configured or the provider fails, the app can use deterministic recommendation logic. This means the basic shopping assistance does not have to disappear simply because generative AI is unavailable.
+
+Important trust protection:
+
+- Product recommendations are checked against the merchant's synchronized catalog.
+- The assistant should not invent product handles, product prices, or nonexistent catalog items.
+- The shop currency is enforced.
+- Products blocked by the merchant are excluded.
+- If no reliable catalog match exists, giving a general answer or showing no product is preferable to fabricating one.
+
+The current chat response is delivered through a streaming connection, but it may appear as a completed response rather than visibly typing one word at a time.
+
+
+3.4 Adding a product to the cart
+
+When the shopper adds an item, the app can react to the changed cart. The shopper may see an upsell drawer with up to three related catalog products. The current drawer includes a short timer of approximately eight seconds, so it is intended as a quick optional suggestion rather than a required step.
+
+Recommendations can be selected using product category, tags, vendor, product type, product popularity, products commonly ordered together, the current product, cart contents, and browsing history. The quality therefore depends heavily on accurate Shopify product data and successful synchronization.
+
+When a shopper adds an app-attributed recommendation, the cart line receives a private AOVBoost offer identifier. Shopify normally hides private line-item properties from the visible customer experience. The identifier allows a later completed order to be connected to the recommendation that contributed to it.
+
+What the shopper should experience:
+
+- The existing item is added through Shopify's normal cart behavior.
+- The suggested product is optional.
+- A valid direct-add action adds a real Shopify variant.
+- The shopper can dismiss the drawer and continue.
+- The app does not take the shopper to payment without their action.
+
+
+3.5 Progressing toward a cart-value goal
+
+If the merchant has configured a cart-value threshold and the cart is close enough to it, the shopper may see a progress message. The current decision logic generally considers a cart close when it has reached at least about 80 percent of the goal but remains below it.
+
+This is a progress nudge, not an automatic reward. For example, if it says that the shopper is close to a store goal, that message by itself does not create free shipping, a discount, or another benefit. Any promised benefit must also exist in Shopify's actual shipping or discount configuration.
+
+Merchants should phrase goal messaging carefully. It should never promise free shipping, a gift, or a discount that Shopify will not honor at checkout.
+
+
+3.6 Cart inactivity, uncertainty, or leaving the store
+
+The app can request help after a long pause, currently around five minutes for general inactivity or around ten minutes for an idle cart. It can also recognize exit intent in supported desktop browsing situations.
+
+An exit-intent popup is intended to appear no more than once per session and should not appear on checkout or thank-you pages. On mobile devices, classic mouse-based exit intent may not be available, so shoppers should not expect identical behavior across devices.
+
+The purpose is to remove uncertainty before a visitor leaves, not to trap the shopper. Closing the prompt should return full control to the normal storefront.
+
+
+3.7 Starting and completing checkout
+
+The storefront can record that checkout has started, but Shopify continues to own the checkout and payment experience. The ordinary AOVBoost storefront widgets are not intended to take over Shopify checkout.
+
+If the merchant has installed, approved, and selected the official post-purchase extension, an eligible shopper may receive a one-time offer after checkout. This is the authoritative way to add a post-purchase item to the existing order.
+
+The shopper should see:
+
+- One optional product offer.
+- The price calculated and presented through Shopify's post-purchase framework.
+- A clear accept action and a clear rejection such as "No thanks."
+- No need to re-enter payment details when Shopify permits the order change.
+
+If accepted, Shopify applies a signed changeset to the existing order. If rejected or ineligible, the original order remains complete. The app should never imply that declining will cancel or damage the purchase.
+
+The store also contains a storefront thank-you-style widget, but its add action uses Shopify's Ajax Cart. It should not be treated as equivalent to modifying the order that was just placed. Merchants who want a true one-click post-purchase order modification should rely on the official checkout post-purchase extension and verify it in Shopify's checkout configuration.
+
+
+3.8 Returning to the store
+
+The browser can retain an anonymous identifier in local storage, allowing more consistent session behavior. The app also uses session and dismissal rules to reduce repetition. However, clearing browser data, using private browsing, changing browsers, or switching devices can make the shopper appear new again.
+
+The implementation does not require a Shopify customer login to track this storefront journey. Merchants should therefore think of it as anonymous browser behavior rather than a complete cross-device customer profile.
+
+
+4. WHAT EACH CUSTOMER-FACING FEATURE IS FOR
+-------------------------------------------
+
+Chat assistant
+Purpose: Answer shopping questions and recommend real catalog products.
+Shopper value: Reduces the effort needed to search and compare products.
+Main limitation: The answer is only as useful as the synchronized catalog, product data, context, and configured AI or fallback logic.
+
+Toast or small notification
+Purpose: Deliver a short, temporary suggestion.
+Shopper value: Provides a lightweight reminder without permanently covering the page.
+Current behavior: It normally remains for about nine seconds; its action can open the assistant.
+
+Recommendation strip
+Purpose: Show related products inline.
+Shopper value: Makes complementary or alternative items easier to discover.
+Main limitation: Direct add works best for products with a safe default variant; other products may require a product-page visit.
+
+Product bundle
+Purpose: Present a group of related synchronized products on a product page.
+Shopper value: Helps assemble a complete purchase.
+Main limitation: The display does not itself create a bundle discount.
+
+Upsell drawer
+Purpose: Offer a few relevant products immediately after an add-to-cart action.
+Shopper value: Convenient discovery at the moment the cart context is clearest.
+Main limitation: It must be relevant and well timed; poor catalog metadata can weaken the result.
+
+Cart-goal progress
+Purpose: Show that the cart is approaching a merchant-defined value.
+Shopper value: Helps the shopper understand how close they are to a genuine store benefit, when such a benefit exists.
+Main limitation: It is not a discount or free-shipping engine by itself.
+
+Countdown banner
+Purpose: Display a time-bound active campaign.
+Shopper value: Communicates a real deadline clearly.
+Main limitation: It should appear only when valid campaign data exists. Merchants should avoid using artificial urgency.
+
+Social proof
+Purpose: Give useful popularity context when selected by the decision service.
+Shopper value: Can reduce uncertainty about a product.
+Current behavior: It can use an actual known order count. Without one, it uses general wording such as "Frequently bought together" rather than inventing a number.
+
+Exit-intent offer
+Purpose: Help a visitor resolve uncertainty before leaving.
+Shopper value: One last relevant suggestion without changing checkout.
+Main limitation: Desktop exit signals are more reliable than mobile signals, and it is limited to reduce repetition.
+
+Post-purchase offer
+Purpose: Let an eligible buyer add one complementary item after checkout.
+Shopper value: Convenient optional add-on without restarting payment entry when Shopify allows it.
+Main limitation: It requires Shopify post-purchase access and correct merchant checkout configuration.
+
+
+5. HOW EFFECTIVE IS THE APP FOR A SHOPPER?
+------------------------------------------
+
+The app can be effective when it saves the shopper time, reduces uncertainty, and presents a genuinely relevant product at the right moment. Its strongest customer value is not the number of messages shown; it is the usefulness of the few messages that are shown.
+
+Likely customer benefits include:
+
+- Faster discovery of related products.
+- Easier comparison through chat.
+- Fewer steps to add a straightforward product variant.
+- Suggestions based on the active product and cart rather than only generic best sellers.
+- Correct use of the store's catalog and currency.
+- The option to dismiss or ignore every suggestion.
+- A fallback recommendation system when an AI provider is unavailable.
+- Reduced visual conflict with the theme because widgets are isolated with Shadow DOM.
+
+The app is less likely to be effective when:
+
+- Product synchronization is incomplete or outdated.
+- Product titles, tags, product types, collections, or vendors are inaccurate.
+- Most products require variant selection but the merchant expects direct add-to-cart everywhere.
+- Bundles are missing or poorly chosen.
+- The cart goal promises a benefit that Shopify does not actually provide.
+- Too many widget types are enabled without testing the combined journey.
+- The active theme has unusual product-form or cart selectors, causing an inline widget to appear in a less suitable fallback position.
+- Traffic and order volume are too low to learn which prompts perform well.
+- The post-purchase extension has not been approved or selected in Shopify checkout settings.
+- Storefront consent configuration prevents startup until the required consent is received.
+- A required production service, app proxy, webhook, or session store is unavailable.
+
+The correct expectation is improvement opportunity, not guaranteed conversion. Some shoppers need help; others already know exactly what they want and may ignore every prompt. Forcing more messages onto the second group would make the experience worse, so a valid decision can be to show nothing.
+
+
+6. HOW THE MERCHANT SHOULD MEASURE EFFECTIVENESS
+------------------------------------------------
+
+The main merchant dashboard is the best current place to assess performance. It reports measures such as:
+
+- Attributed revenue from purchases linked to app offers.
+- Average order value for attributed orders.
+- Observed AOV lift compared with baseline orders.
+- Widget impressions and clicks.
+- Click-through rate.
+- Chat engagement.
+- Performance by widget type.
+
+The storefront records impressions and clicks. It does not allow the browser to declare its own revenue conversion. For catalog items added through an offer, a private offer identifier follows the line item. When Shopify sends the signed order-created webhook, the server checks the offer and attributes the relevant net line revenue, accounting for line discounts. The official post-purchase flow also has an authenticated conversion path.
+
+This is stronger than trusting an unverified browser event, but merchants should still interpret the numbers correctly:
+
+- Click-through rate answers whether shoppers are interested enough to interact.
+- Add-to-cart activity answers whether the recommendation was actionable.
+- Attributed revenue answers how much order value can be connected to app-tagged items.
+- AOV comparison shows an observed difference, not proof that the app alone caused it.
+- Low impressions can mean strict eligibility or configuration problems, not necessarily poor creative quality.
+- High impressions with low clicks can mean weak relevance, unclear copy, bad placement, or excessive triggering.
+- High clicks with low attributed purchases can indicate pricing, variant, shipping, trust, or checkout friction beyond the recommendation itself.
+
+The app includes experiment assignment, but current experiment behavior should be interpreted cautiously. Assignment can label a shopper as control or treatment, while experiment configuration is not fully applied to every delivered widget payload. Successive experiments using the same widget type can also complicate aggregated analysis. Do not describe an experiment result as causal proof until its setup, isolation, sample size, and applied variant behavior have been verified.
+
+The older event-oriented analytics page does not represent every event emitted by the current storefront SDK. For present-day results, the main app dashboard and verified order attribution should be treated as more authoritative.
+
+
+7. A PRACTICAL WAY TO JUDGE CUSTOMER VALUE
+------------------------------------------
+
+Before launch, establish a baseline period for normal store behavior. After launch, allow enough traffic and completed orders for patterns to become meaningful. Avoid deciding based on only a few visitors or one unusually large order.
+
+Review the journey in this order:
+
+1. Delivery: Are eligible widgets actually appearing on the intended pages and devices?
+2. Relevance: Do the products make sense for the current product, cart, and shopper question?
+3. Interaction: Are shoppers opening chat or clicking recommendations?
+4. Action: Do those interactions lead to valid product-page visits or cart additions?
+5. Completion: Do attributed items survive through completed orders?
+6. Value: Is attributed revenue meaningful, and is observed order value improving without harming conversion or customer experience?
+7. Quality: Are support complaints, misleading promises, layout problems, or excessive interruptions increasing?
+
+Do not optimize only for clicks. A dramatic message can earn clicks while reducing trust. The best long-term experience is accurate, restrained, relevant, and consistent with the store's actual prices, inventory, shipping, and offers.
+
+
+8. CUSTOMER PRIVACY, CONTROL, AND TRUST
+---------------------------------------
+
+The storefront app uses an anonymous browser identifier and stores session information locally. To provide context, it can process page and product views, cart activity, browsing signals, search or comparison context, referral or page information, and chat messages. Chat content and behavioral events may be stored by the app's backend for the shop.
+
+The current shopper-session design does not require a Shopify customer account identity. However, anonymous behavioral information can still be privacy-relevant. The merchant should accurately describe the app's data use in the store's privacy disclosures and configure consent behavior to match the store's markets and legal obligations. The merchant should obtain jurisdiction-specific advice where required rather than treating this guide as legal advice.
+
+Customer-control expectations:
+
+- The shopper can dismiss visible suggestions.
+- The shopper can choose not to open the assistant.
+- Recommendations do not automatically complete a purchase.
+- Checkout remains under Shopify's controls.
+- A post-purchase offer must provide an accept and reject path.
+- Declining an offer should not change the order already placed.
+
+
+9. REALISTIC SHOPPER SCENARIOS
+------------------------------
+
+Scenario A: A shopper knows exactly what they want
+
+The shopper lands on a product page, selects the correct variant, and adds it to the cart quickly. They may see an optional upsell drawer or product recommendation, but they can dismiss it and check out normally. The app should not block the direct purchase path.
+
+Expected effectiveness: Modest. A highly relevant add-on may increase convenience and order value, but the primary value is staying out of the shopper's way.
+
+
+Scenario B: A shopper is comparing products
+
+The shopper reads several product pages, scrolls deeply, revisits one product, or uses comparison language. The app may show the assistant or a recommendation. The shopper asks for an alternative and receives exact products from the synchronized store catalog.
+
+Expected effectiveness: Potentially strong. This shopper has uncertainty that relevant advice can reduce. Quality depends on product metadata and catalog coverage.
+
+
+Scenario C: A shopper has a nearly complete cart
+
+The cart is close to the merchant's configured threshold. The app displays progress and may suggest a complementary item. If the store really provides a benefit at that threshold, the prompt can make the requirement clearer.
+
+Expected effectiveness: Good when the threshold and reward are genuine and the suggested item is useful. Poor or harmful when the text promises a benefit that is not applied at checkout.
+
+
+Scenario D: A shopper needs a product with options
+
+The app recommends a product that has size, color, or another required choice. A direct default-variant addition might not reflect the customer's preference. The best experience is to open the product page so the shopper can choose.
+
+Expected effectiveness: Good for discovery, but direct-add convenience is limited. Merchants should test their most common multi-variant products carefully.
+
+
+Scenario E: The AI provider is unavailable
+
+The shopper asks for help while no external model is configured or the provider fails. Deterministic catalog rules can still return a safe recommendation or general response.
+
+Expected effectiveness: The experience remains functional but may be less conversational or nuanced. It should still avoid inventing products.
+
+
+Scenario F: No suitable recommendation exists
+
+The shopper's context does not produce a reliable candidate, or all relevant products are blocked or unavailable to the decision service. The app shows no catalog offer or gives a general response.
+
+Expected effectiveness: Showing nothing protects customer trust. A missing recommendation is better than an irrelevant or fabricated one.
+
+
+Scenario G: A completed buyer is eligible for post-purchase
+
+After payment, Shopify presents one optional item through the configured post-purchase extension. The buyer accepts and Shopify modifies the order through a signed changeset, or the buyer selects "No thanks" and the existing order remains unchanged.
+
+Expected effectiveness: Potentially strong for highly complementary, low-friction items. It depends on Shopify approval, checkout configuration, product eligibility, and the accuracy of the offer.
+
+
+10. WHAT CAN GO WRONG FROM THE SHOPPER'S VIEW
+---------------------------------------------
+
+No app interface appears
+
+Possible reasons include a disabled theme extension, consent not yet granted, disabled widgets, no eligible decision, a failed app-proxy session, or incomplete catalog data. The merchant should first distinguish a normal "no eligible offer" result from an installation failure.
+
+
+Recommendations seem unrelated
+
+Check product tags, types, collections, vendor data, bundle definitions, blocked products, and synchronization freshness. Recommendation quality cannot exceed the quality of the catalog relationships supplied to the app.
+
+
+The wrong product option is added
+
+The current synchronization and quick-add flow generally rely on the first/default variant. Products requiring customer choice should route to the product page or be excluded from quick-add-style experiences.
+
+
+An inline widget appears in an odd location
+
+The app looks for common theme anchors such as product forms. With an unusual theme, it may fall back to a more general page location. Test all active templates and adjust the theme integration if necessary.
+
+
+The shopper sees a goal but receives no reward
+
+The AOVBoost goal is messaging and progress logic. Confirm that the corresponding free-shipping rule, discount, or gift behavior really exists in Shopify before mentioning it in shopper-facing copy.
+
+
+The post-purchase offer does not appear
+
+Check Shopify post-purchase access, extension deployment, checkout selection, product eligibility, app configuration, and whether the particular order qualifies. A storefront thank-you widget is not a substitute for the official checkout extension.
+
+
+Dashboard revenue appears lower than expected
+
+Only eligible items carrying a valid offer identifier, verified through signed order or authenticated post-purchase processing, can be attributed confidently. Products merely viewed after a recommendation may not be credited. This is conservative attribution, not necessarily proof that the app had no influence.
+
+
+The shopper receives too many prompts
+
+Review enabled widgets, campaigns, proactive chat rules, and the complete page journey. The app has throttles, single-session rules, one-active-floating-widget behavior, and dismissal suppression, but the merchant must still test how all configured features feel together.
+
+
+11. MERCHANT GO-LIVE CHECKLIST
+------------------------------
+
+Storefront setup
+
+[ ] The AOVBoost theme app extension is enabled in the published theme.
+[ ] The app proxy and signed storefront session work on the live domain.
+[ ] Customer-consent behavior is configured and tested.
+[ ] Desktop and mobile storefronts load without layout or console errors.
+
+Catalog quality
+
+[ ] Product synchronization has completed.
+[ ] Titles, prices, handles, vendors, product types, tags, and collections are accurate.
+[ ] Important variants and default-variant behavior have been tested.
+[ ] Products that should not be promoted are blocked.
+[ ] Bundles contain real, compatible products.
+
+Customer experience
+
+[ ] Every enabled widget has been viewed on its intended page.
+[ ] Prompts match the store's tone and do not make unsupported claims.
+[ ] Recommendations make sense for representative products and carts.
+[ ] Dismiss, close, product-link, and add-to-cart actions work.
+[ ] The experience is usable by keyboard and on small screens.
+[ ] Unusual theme templates do not place inline widgets incorrectly.
+[ ] The normal path to cart and checkout remains unobstructed.
+
+Commercial accuracy
+
+[ ] Currency and money formatting match the storefront.
+[ ] Displayed prices match Shopify.
+[ ] Countdown campaigns have genuine active dates.
+[ ] Cart-goal text matches real Shopify shipping or discount rules.
+[ ] Bundle messaging does not claim a nonexistent discount.
+[ ] Social-proof copy does not imply an invented sales count.
+
+Checkout and attribution
+
+[ ] Shopify order webhooks are registered and being received.
+[ ] Offer-attributed cart lines retain the private offer identifier.
+[ ] Test orders appear correctly in the main dashboard.
+[ ] The post-purchase extension is deployed, approved, and selected if required.
+[ ] Accepting and rejecting the post-purchase offer have both been tested.
+
+Ongoing review
+
+[ ] Widget impressions and clicks are monitored by type.
+[ ] Attributed cart additions, completed orders, and revenue are reviewed.
+[ ] AOV comparisons are treated as observational rather than guaranteed causation.
+[ ] Low-performing or distracting widgets are adjusted or disabled.
+[ ] Catalog synchronization and product metadata remain current.
+[ ] Shopper feedback and support issues are reviewed alongside revenue metrics.
+
+
+12. WHAT THE APP DOES AND DOES NOT DO
+-------------------------------------
+
+The app does:
+
+- Observe relevant anonymous storefront behavior after initialization and consent handling.
+- Use catalog, page, cart, and session context to decide whether assistance is appropriate.
+- Recommend verified synchronized products.
+- Provide chat and multiple optional merchandising widgets.
+- Add valid products through Shopify's storefront cart where supported.
+- Attribute qualifying ordered line revenue through verified server-side processing.
+- Support an official Shopify post-purchase offer when correctly approved and configured.
+- Fall back to deterministic logic when an AI provider is unavailable.
+- Apply throttling and dismissal behavior to reduce repetition.
+
+The app does not:
+
+- Guarantee higher conversion rate or average order value.
+- Guarantee that every visitor sees a widget.
+- Replace Shopify's catalog, cart, checkout, payment, shipping, or discount systems.
+- Create a real bundle discount merely by displaying a bundle.
+- Create free shipping or another reward merely by displaying a cart goal.
+- Know every shopper across browsers and devices as one identified person.
+- Safely choose every size, color, or option for a multi-variant product.
+- Turn a storefront thank-you cart addition into a modification of an already completed order.
+- Prove that observed AOV differences were caused only by the app.
+- Compensate fully for inaccurate product data, weak offers, or poor store fundamentals.
+
+
+13. FINAL EXPECTATION FOR THE MERCHANT
+--------------------------------------
+
+A well-configured AOVBoost installation should feel like a quiet sales assistant inside the store. It notices moments of uncertainty or purchase intent, offers a small amount of relevant help, and lets the customer continue without pressure.
+
+For the shopper, the best outcome is a faster and more confident purchase: finding a compatible item, getting a useful answer, understanding a real cart benefit, or accepting a relevant post-purchase add-on. The customer should never need to understand the app's internal logic, and declining its suggestions should never prevent normal shopping.
+
+For the merchant, effectiveness should be judged through a combination of customer experience and verified commercial results. Relevant recommendations, clean interactions, healthy click and add-to-cart behavior, accurately attributed revenue, and no increase in confusion or complaints are positive signs. More popups alone are not success.
+
+The app is most effective when the theme extension is active, catalog data is clean, bundles and blocked products are intentional, customer-facing promises match Shopify's real rules, post-purchase setup is complete, and performance is reviewed over enough traffic to avoid decisions based on isolated sessions.
+
+In short: expect optional, context-aware assistance that can make shopping easier and create more opportunities for complementary purchases. Do not expect automatic or guaranteed revenue growth without careful setup, testing, honest messaging, and ongoing measurement.

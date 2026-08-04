@@ -124,7 +124,7 @@ export class ChatWidget extends BaseWidget {
       <aside class="wrap card" aria-label="AOVBoost Assistant">
         <div class="head">
           <h3 class="title">AOVBoost Assistant</h3>
-          <button type="button" class="icon" data-close aria-label="Close">x</button>
+          <button type="button" class="icon" data-close aria-label="Close">×</button>
         </div>
         ${
           this.expanded
@@ -168,7 +168,7 @@ export class ChatWidget extends BaseWidget {
         ${this.messages.map((message) => this.renderMessage(message)).join("")}
       </div>
       <div class="compose">
-        <input type="text" placeholder="Ask me anything" data-input>
+        <input type="text" placeholder="Ask me anything" aria-label="Chat message" autocomplete="off" data-input>
         <button type="button" class="primary" data-send>Send</button>
       </div>
     `;
@@ -270,11 +270,7 @@ export class ChatWidget extends BaseWidget {
     button.disabled = true;
     button.textContent = "Adding";
     try {
-      const result = await addVariantToCart(
-        variantId,
-        1,
-        this.payload.offerId,
-      );
+      const result = await addVariantToCart(variantId, 1, this.payload.offerId);
       if (!result) throw new Error("Cart add failed");
       button.textContent = "Added";
       document.dispatchEvent(
@@ -494,7 +490,7 @@ export class ChatWidget extends BaseWidget {
       );
       if (!result) throw new Error("Cart add failed");
       this.messages[assistantIndex].content =
-        `Added **${action.productTitle || "that product"}** to your cart.`;
+        `Added ${action.productTitle || "that product"} to your cart.`;
       assistantEl.innerHTML = this.renderMessageContent(
         this.messages[assistantIndex],
       );
@@ -510,7 +506,7 @@ export class ChatWidget extends BaseWidget {
       );
     } catch {
       this.messages[assistantIndex].content =
-        `I couldn't add **${action.productTitle || "that product"}** to your cart. Please use the product card button or open the product page.`;
+        `I couldn't add ${action.productTitle || "that product"} to your cart. Please use the product card button or open the product page.`;
       assistantEl.innerHTML = this.renderMessageContent(
         this.messages[assistantIndex],
       );

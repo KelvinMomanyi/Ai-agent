@@ -1,6 +1,12 @@
 import type { Prisma, Product, ProductAffinity } from "@prisma/client";
 import prisma from "../db.server";
 import { cacheKeys, getJsonCache, redis, setJsonCache } from "../redis.server";
+import {
+  mapAdminCatalogProductNode,
+  type ShopifyProductInput,
+} from "./productCatalogMapping";
+
+export type { ShopifyProductInput } from "./productCatalogMapping";
 
 export type ProductAffinityWithTarget = ProductAffinity & {
   target?: Product | null;
@@ -13,24 +19,13 @@ type ShopifyAdminGraphql = {
   ) => Promise<{ json: () => Promise<any> }>;
 };
 
-export type ShopifyProductInput = {
-  id: string;
-  title: string;
-  handle: string;
-  vendor?: string | null;
-  productType?: string | null;
-  tags?: string[];
-  price?: string | number;
-  compareAtPrice?: string | number | null;
-  imageUrl?: string | null;
-  collectionIds?: string[];
-  metafields?: Prisma.InputJsonValue;
-};
-
 const INITIAL_AFFINITY_PRODUCT_LIMIT = 500;
 const INITIAL_AFFINITY_TARGET_LIMIT = 20;
 
-export async function upsertProduct(shop: string, product: ShopifyProductInput) {
+export async function upsertProduct(
+  shop: string,
+  product: ShopifyProductInput,
+) {
   return prisma.product.upsert({
     where: {
       shop_id: {
@@ -68,7 +63,8 @@ export async function getTopAffinities(
   const cached = await getJsonCache<ProductAffinityWithTarget[]>(key);
   if (cached) {
     const validCached = await filterAffinitiesToExistingProducts(shop, cached);
-    if (validCached.length === cached.length) return validCached.slice(0, limit);
+    if (validCached.length === cached.length)
+      return validCached.slice(0, limit);
     await redis.del(key);
   }
 
@@ -84,7 +80,10 @@ export async function getTopAffinities(
     take: limit,
   });
 
-  const validAffinities = await filterAffinitiesToExistingProducts(shop, affinities);
+  const validAffinities = await filterAffinitiesToExistingProducts(
+    shop,
+    affinities,
+  );
   await setJsonCache(key, validAffinities, 3600);
   return validAffinities;
 }
@@ -166,12 +165,18 @@ async function getCatalogFallbackRecommendations(input: {
 
 function computeCatalogFallbackScore(source: Product, target: Product) {
   const sharedTags = intersection(source.tags, target.tags).length;
-  const sharedCollections = intersection(source.collectionIds, target.collectionIds).length;
+  const sharedCollections = intersection(
+    source.collectionIds,
+    target.collectionIds,
+  ).length;
   const sameProductType =
-    source.productType && target.productType && source.productType === target.productType
+    source.productType &&
+    target.productType &&
+    source.productType === target.productType
       ? 1
       : 0;
-  const sameVendor = source.vendor && target.vendor && source.vendor === target.vendor ? 1 : 0;
+  const sameVendor =
+    source.vendor && target.vendor && source.vendor === target.vendor ? 1 : 0;
 
   return clamp(
     0.2 +
@@ -189,9 +194,7 @@ function getCatalogFallbackReason(
   target: Product & { orderStats?: { orderCount: number } | null },
 ) {
   if (!source) {
-    return target.orderStats?.orderCount
-      ? "popular item"
-      : "new arrival";
+    return target.orderStats?.orderCount ? "popular item" : "new arrival";
   }
   if (intersection(source.collectionIds, target.collectionIds).length > 0) {
     return "same collection";
@@ -260,8 +263,16 @@ export async function recomputeAffinities(
           },
         },
       });
-      const score = computeAffinityScore(source, target, existing?.orderCount || 0);
-      const reason = getAffinityReason(source, target, existing?.orderCount || 0);
+      const score = computeAffinityScore(
+        source,
+        target,
+        existing?.orderCount || 0,
+      );
+      const reason = getAffinityReason(
+        source,
+        target,
+        existing?.orderCount || 0,
+      );
 
       if (score <= 0 && !existing) return;
 
@@ -365,7 +376,9 @@ export async function incrementOrderAffinities(
 
   for (let index = 0; index < knownProductIds.length; index += 4) {
     const batch = knownProductIds.slice(index, index + 4);
-    await Promise.all(batch.map((productId) => recomputeAffinities(shop, productId)));
+    await Promise.all(
+      batch.map((productId) => recomputeAffinities(shop, productId)),
+    );
   }
 }
 
@@ -377,7 +390,7 @@ export async function syncProductsPageFromAdmin(
   const response = await admin.graphql(
     `#graphql
     query AOVBoostProducts($cursor: String) {
-      products(first: 250, after: $cursor) {
+      products(first: 250, after: $cursor, query: "status:active") {
         edges {
           node {
             id
@@ -386,9 +399,20 @@ export async function syncProductsPageFromAdmin(
             vendor
             productType
             tags
-            featuredMedia { preview { image { url } } }
+            onlineStoreUrl
+            hasOnlyDefaultVariant
             collections(first: 50) { edges { node { id } } }
-            variants(first: 1) { edges { node { id price compareAtPrice } } }
+            variants(first: 50) {
+              edges {
+                node {
+                  id
+                  price
+                  compareAtPrice
+                  inventoryPolicy
+                  sellableOnlineQuantity
+                }
+              }
+            }
             metafields(first: 20) {
               edges { node { namespace key value type } }
             }
@@ -412,13 +436,14 @@ export async function syncProductsPageFromAdmin(
     throw new Error("Shopify product sync returned an invalid response");
   }
 
-  await upsertProductBatch(
-    shop,
-    connection.edges.map((edge: any) => mapGraphqlProduct(edge.node)),
-  );
-  const productIds: string[] = connection.edges
-    .map((edge: any) => String(edge.node?.id || ""))
-    .filter((id: string) => Boolean(id));
+  const products: ShopifyProductInput[] = (connection.edges as any[])
+    .map((edge: any) => mapAdminCatalogProductNode(edge.node))
+    .filter(
+      (product: ShopifyProductInput | null): product is ShopifyProductInput =>
+        Boolean(product),
+    );
+  await upsertProductBatch(shop, products);
+  const productIds = products.map((product) => product.id);
   const nextCursor = connection.pageInfo?.endCursor || null;
   const hasNextPage = Boolean(connection.pageInfo?.hasNextPage);
   if (hasNextPage && (!nextCursor || nextCursor === cursor)) {
@@ -452,7 +477,10 @@ export async function recomputeInitialAffinityBatch(
   return { total: products.length, done, complete: done >= products.length };
 }
 
-async function upsertProductBatch(shop: string, products: ShopifyProductInput[]) {
+async function upsertProductBatch(
+  shop: string,
+  products: ShopifyProductInput[],
+) {
   for (let index = 0; index < products.length; index += 50) {
     const batch = products.slice(index, index + 50);
     await prisma.$transaction(
@@ -538,43 +566,17 @@ function computeAffinityScore(
   );
 }
 
-function getAffinityReason(source: Product, target: Product, orderCount: number) {
+function getAffinityReason(
+  source: Product,
+  target: Product,
+  orderCount: number,
+) {
   if (orderCount > 0) return "frequently bought together";
   if (intersection(source.collectionIds, target.collectionIds).length > 0) {
     return "same collection";
   }
   if (intersection(source.tags, target.tags).length >= 2) return "shared tags";
   return "weak affinity";
-}
-
-function mapGraphqlProduct(node: any): ShopifyProductInput {
-  const variant = node.variants?.edges?.[0]?.node;
-  const metafields = Object.fromEntries(
-    (node.metafields?.edges || []).map((edge: any) => [
-      `${edge.node.namespace}.${edge.node.key}`,
-      { value: edge.node.value, type: edge.node.type },
-    ]),
-  );
-  if (variant?.id) {
-    metafields["aovboost.defaultVariantId"] = {
-      value: variant.id,
-      type: "single_line_text_field",
-    };
-  }
-
-  return {
-    id: node.id,
-    title: node.title,
-    handle: node.handle,
-    vendor: node.vendor,
-    productType: node.productType,
-    tags: node.tags || [],
-    price: variant?.price || 0,
-    compareAtPrice: variant?.compareAtPrice || null,
-    imageUrl: node.featuredMedia?.preview?.image?.url || null,
-    collectionIds: (node.collections?.edges || []).map((edge: any) => edge.node.id),
-    metafields,
-  };
 }
 
 function toProductData(shop: string, product: ShopifyProductInput) {

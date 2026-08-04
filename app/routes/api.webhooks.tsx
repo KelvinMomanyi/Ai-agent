@@ -9,7 +9,10 @@ import {
   incrementOrderAffinities,
   upsertProduct,
 } from "../models/product.server";
-import type { ShopifyProductInput } from "../models/product.server";
+import {
+  mapProductWebhook,
+  type ShopifyProductInput,
+} from "../models/productCatalogMapping";
 import { refreshCatalogCache } from "../models/catalogCache.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -22,8 +25,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     if (topic === "PRODUCTS_CREATE" || topic === "PRODUCTS_UPDATE") {
+      const productId = toProductGid(
+        (payload as any).admin_graphql_api_id || (payload as any).id,
+      );
       const product = mapProductWebhook(payload);
-      if (product.id) {
+      if (!product) {
+        if (productId) {
+          await deleteProduct(shop, productId);
+          await refreshCatalogCacheSafely(shop);
+        }
+      } else if (product.id) {
         const existing =
           topic === "PRODUCTS_UPDATE"
             ? await prisma.product.findFirst({
@@ -51,7 +62,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     if (topic === "PRODUCTS_DELETE") {
-      const productId = toProductGid((payload as any).admin_graphql_api_id || (payload as any).id);
+      const productId = toProductGid(
+        (payload as any).admin_graphql_api_id || (payload as any).id,
+      );
       if (productId) {
         await deleteProduct(shop, productId);
         await refreshCatalogCacheSafely(shop);
@@ -73,8 +86,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           })
         : [];
       const knownOfferIds = new Set(knownOffers.map(({ id }) => id));
-      const attributedOffers = attribution.attributedOffers.filter(({ offerId }) =>
-        knownOfferIds.has(offerId),
+      const attributedOffers = attribution.attributedOffers.filter(
+        ({ offerId }) => knownOfferIds.has(offerId),
       );
       await Promise.all(
         attributedOffers.map(({ offerId, revenue }) =>
@@ -132,7 +145,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         : String((payload as any).current || "");
       await Promise.all([
         prisma.session.updateMany({ where: { shop }, data: { scope: scopes } }),
-        prisma.shop.updateMany({ where: { shopDomain: shop }, data: { scope: scopes } }),
+        prisma.shop.updateMany({
+          where: { shopDomain: shop },
+          data: { scope: scopes },
+        }),
       ]);
       return new Response("OK");
     }
@@ -185,36 +201,9 @@ async function purgeShopData(shop: string) {
   await deleteShopData(shop, true);
 }
 
-function mapProductWebhook(payload: unknown): ShopifyProductInput {
-  const product = payload as any;
-  const variant = product.variants?.[0] || {};
-
-  return {
-    id: toProductGid(product.admin_graphql_api_id || product.id),
-    title: String(product.title || ""),
-    handle: String(product.handle || ""),
-    vendor: product.vendor || null,
-    productType: product.product_type || product.productType || null,
-    tags:
-      typeof product.tags === "string"
-        ? product.tags.split(",").map((tag: string) => tag.trim()).filter(Boolean)
-        : product.tags || [],
-    price: variant.price || "0",
-    compareAtPrice: variant.compare_at_price || null,
-    imageUrl: product.image?.src || product.image?.url || null,
-    collectionIds: [],
-    metafields: {
-      "aovboost.defaultVariantId": {
-        value: toVariantGid(variant.admin_graphql_api_id || variant.id),
-        type: "single_line_text_field",
-      },
-    },
-  };
-}
-
 async function recordProductSystemEvents(input: {
   shop: string;
-  product: ReturnType<typeof mapProductWebhook>;
+  product: ShopifyProductInput;
   previousPrice?: string;
   payload: unknown;
 }) {
@@ -270,14 +259,6 @@ function toProductGid(value: unknown) {
   return text.startsWith("gid://shopify/Product/")
     ? text
     : `gid://shopify/Product/${text}`;
-}
-
-function toVariantGid(value: unknown) {
-  const text = String(value || "");
-  if (!text) return "";
-  return text.startsWith("gid://shopify/ProductVariant/")
-    ? text
-    : `gid://shopify/ProductVariant/${text}`;
 }
 
 function getErrorMessage(error: unknown) {

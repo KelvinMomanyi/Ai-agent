@@ -1,0 +1,27 @@
+query AOVBoostChatCatalogBaseline {
+  shop {
+    currencyCode
+    currencyFormats {
+      moneyFormat
+      moneyWithCurrencyFormat
+    }
+  }
+  products(first: 25, query: "status:active", sortKey: UPDATED_AT, reverse: true) {
+    nodes {
+      id
+      title
+      handle
+      hasOnlyDefaultVariant
+      variants(first: 50) {
+        nodes {
+          id
+          title
+          price
+          inventoryQuantity
+          inventoryPolicy
+          sellableOnlineQuantity
+        }
+      }
+    }
+  }
+}

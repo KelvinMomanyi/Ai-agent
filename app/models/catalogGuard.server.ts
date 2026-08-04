@@ -3,6 +3,10 @@ import {
   getCatalogSnapshot,
   type CatalogCacheProduct,
 } from "./catalogCache.server";
+import {
+  getSafeDefaultVariantId,
+  isCatalogProductAvailable,
+} from "./productCatalogMapping";
 
 export type CatalogProduct = CatalogCacheProduct;
 
@@ -71,7 +75,7 @@ export async function enforceCatalogBackedDecision(input: {
 }
 
 export function catalogProductToWidgetProduct(product: ProductWidgetSource) {
-  const variantId = getDefaultVariantId(product.metafields);
+  const variantId = getSafeDefaultVariantId(product.metafields);
 
   return {
     id: product.id,
@@ -91,7 +95,12 @@ export function filterCatalogProducts(
   excludedProductIds: string[] = [],
 ) {
   const excluded = new Set(excludedProductIds);
-  return products.filter((product) => !excluded.has(product.id));
+  return products.filter(
+    (product) =>
+      !excluded.has(product.id) &&
+      product.availableForSale !== false &&
+      isCatalogProductAvailable(product.metafields),
+  );
 }
 
 export function filterBundlesToCatalog<T extends { items?: unknown[] }>(
@@ -299,24 +308,6 @@ function shouldReplyWithCatalogProducts(
   if (messageIntent !== "general") return true;
   return /\b(recommend|suggest|show|find|buy|bundle|upsell|cross-sell|alternative|similar|cheaper|compare|pair|go with|add-on|accessor)/i.test(
     userMessage,
-  );
-}
-
-function getDefaultVariantId(metafields: unknown) {
-  const record = asRecord(metafields);
-  const candidates = [
-    record.defaultVariantId,
-    record.variantId,
-    record["aovboost.defaultVariantId"],
-    record["aovboost.variantId"],
-    asRecord(record.defaultVariantId).value,
-    asRecord(record.variantId).value,
-    asRecord(record["aovboost.defaultVariantId"]).value,
-    asRecord(record["aovboost.variantId"]).value,
-  ];
-
-  return String(
-    candidates.find((value) => typeof value === "string" && value) || "",
   );
 }
 
