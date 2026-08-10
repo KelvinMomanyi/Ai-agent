@@ -97,6 +97,27 @@ After deployment, update the app installation so the configured scopes and
 webhooks are active. The merchant must also select AOVBoost as the post-purchase
 app in Shopify Checkout settings and the app must have post-purchase access.
 
+### Expiring offline access token rollout
+
+This app requests expiring Shopify offline access tokens and automatically
+rotates them through the official Shopify library. Deploy the Prisma migrations
+before deploying the application so the refresh token fields exist.
+
+Existing non-expiring tokens are migrated when a merchant next opens the app.
+To migrate dormant installations in a controlled batch, set a strong
+`SHOPIFY_TOKEN_MIGRATION_SECRET` production environment variable and call the
+protected endpoint. Requests are dry runs unless `execute` is explicitly true:
+
+```powershell
+$headers = @{ Authorization = "Bearer $env:SHOPIFY_TOKEN_MIGRATION_SECRET" }
+Invoke-RestMethod -Method Post -Uri "$env:SHOPIFY_APP_URL/api/migrate-offline-tokens" -Headers $headers -ContentType "application/json" -Body '{}'
+Invoke-RestMethod -Method Post -Uri "$env:SHOPIFY_APP_URL/api/migrate-offline-tokens" -Headers $headers -ContentType "application/json" -Body '{"execute":true,"limit":25}'
+```
+
+Repeat the execute request until `remaining` is zero, then confirm the app's API
+health in the Shopify Dev Dashboard. The exchange revokes each original token
+and is irreversible, so run the dry request and verify database backups first.
+
 ## Architecture notes
 
 - Storefront API requests are authenticated through Shopify app-proxy

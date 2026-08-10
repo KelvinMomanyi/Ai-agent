@@ -21,9 +21,10 @@ export class UpstashSessionStorage implements SessionStorage {
   }
 
   async storeSession(session: Session): Promise<boolean> {
-    try {
-      if (!this.redis) return this.storeSessionInPrisma(session);
+    const storedInPrisma = await this.storeSessionInPrisma(session);
+    if (!this.redis) return storedInPrisma;
 
+    try {
       const data = session.toObject();
       const key = SESSION_KEY_PREFIX + session.id;
       const serialized = JSON.stringify(data, (_, value) => {
@@ -34,7 +35,7 @@ export class UpstashSessionStorage implements SessionStorage {
       await (this.redis.sadd as any)(shopSessionsKey(session.shop), session.id);
       return true;
     } catch {
-      return this.storeSessionInPrisma(session);
+      return storedInPrisma;
     }
   }
 
@@ -49,6 +50,9 @@ export class UpstashSessionStorage implements SessionStorage {
       const params = JSON.parse(data);
       if (params.expires) {
         params.expires = new Date(params.expires);
+      }
+      if (params.refreshTokenExpires) {
+        params.refreshTokenExpires = new Date(params.refreshTokenExpires);
       }
       if (params.onlineAccessInfo?.expires_in) {
         params.onlineAccessInfo.expires_in = new Date(
@@ -82,7 +86,9 @@ export class UpstashSessionStorage implements SessionStorage {
   async deleteSessions(ids: string[]): Promise<boolean> {
     try {
       if (this.redis) {
-        const sessions = await Promise.all(ids.map((id) => this.loadSession(id)));
+        const sessions = await Promise.all(
+          ids.map((id) => this.loadSession(id)),
+        );
         const pipeline = ids.map((id) => {
           const key = SESSION_KEY_PREFIX + id;
           return this.redis!.del(key);
@@ -95,9 +101,13 @@ export class UpstashSessionStorage implements SessionStorage {
           idsByShop.set(session.shop, shopIds);
         });
         idsByShop.forEach((shopIds, shop) => {
-          pipeline.push((this.redis!.srem as any)(shopSessionsKey(shop), ...shopIds));
+          pipeline.push(
+            (this.redis!.srem as any)(shopSessionsKey(shop), ...shopIds),
+          );
         });
-        pipeline.push((this.redis.srem as any)(LEGACY_SHOP_SESSIONS_KEY, ...ids));
+        pipeline.push(
+          (this.redis.srem as any)(LEGACY_SHOP_SESSIONS_KEY, ...ids),
+        );
         await Promise.all(pipeline);
       }
       await prisma.session.deleteMany({ where: { id: { in: ids } } });
@@ -146,6 +156,8 @@ export class UpstashSessionStorage implements SessionStorage {
           scope: session.scope || null,
           expires: session.expires || null,
           accessToken: session.accessToken || "",
+          refreshToken: session.refreshToken || null,
+          refreshTokenExpires: session.refreshTokenExpires || null,
         },
         create: {
           id: session.id,
@@ -155,6 +167,8 @@ export class UpstashSessionStorage implements SessionStorage {
           scope: session.scope || null,
           expires: session.expires || null,
           accessToken: session.accessToken || "",
+          refreshToken: session.refreshToken || null,
+          refreshTokenExpires: session.refreshTokenExpires || null,
         },
       });
       return true;
@@ -175,6 +189,8 @@ export class UpstashSessionStorage implements SessionStorage {
       scope: record.scope || undefined,
       expires: record.expires || undefined,
       accessToken: record.accessToken,
+      refreshToken: record.refreshToken || undefined,
+      refreshTokenExpires: record.refreshTokenExpires || undefined,
     });
   }
 
@@ -190,6 +206,8 @@ export class UpstashSessionStorage implements SessionStorage {
           scope: record.scope || undefined,
           expires: record.expires || undefined,
           accessToken: record.accessToken,
+          refreshToken: record.refreshToken || undefined,
+          refreshTokenExpires: record.refreshTokenExpires || undefined,
         }),
     );
   }
