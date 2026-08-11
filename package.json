@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "build": "npm run build:sdk && prisma generate && react-router build",
+    "vercel-build": "prisma migrate deploy && npm run build",
     "build:sdk": "vite build --config storefront-sdk/vite.config.ts",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",

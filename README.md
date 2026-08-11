@@ -97,8 +97,10 @@ npm run deploy
 ```
 
 For Vercel, keep the Framework Preset set to **React Router**. The committed
-`vercel.json` overrides any older Remix selection, while
-`react-router.config.ts` generates the Vercel Function output.
+`vercel.json` runs `prisma migrate deploy` before the application build, then
+`react-router.config.ts` generates the Vercel Function output. Both
+`DATABASE_URL` and `DATABASE_DIRECT_URL` must be available to the build so a
+deployment cannot publish a Prisma Client ahead of its database schema.
 
 After deployment, update the app installation so the configured scopes and
 webhooks are active. The merchant must also select AOVBoost as the post-purchase
