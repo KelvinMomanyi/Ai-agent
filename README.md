@@ -107,11 +107,12 @@ deployment cannot publish a Prisma Client ahead of its database schema.
 Production databases that were originally synchronized with `prisma db push`
 can already contain `CatalogSyncJob` even though migration
 `20260803090000_durable_catalog_sync` is absent from their Prisma migration
-history. If deployment fails with PostgreSQL error `42P07` for that table,
-first verify that the existing table has the columns and indexes declared in
-`prisma/migrations/20260803090000_durable_catalog_sync/migration.sql`. Then,
-using the production database environment, reconcile the failed migration and
-resume deployment:
+history. The Vercel pre-build checks for this exact failed migration and only
+reconciles it when the existing table's columns and indexes exactly match the
+known migration. The check is a no-op for new databases and after the legacy
+database has been reconciled.
+
+For a manual recovery using the production database environment, run:
 
 ```sh
 npx prisma migrate resolve --applied 20260803090000_durable_catalog_sync
@@ -119,9 +120,9 @@ npx prisma migrate deploy
 npx prisma migrate status
 ```
 
-This is a one-time reconciliation for a verified legacy table. Do not add
-`migrate resolve` to the normal build command or mark unrelated failed
-migrations as applied without independently verifying their database objects.
+This is a one-time reconciliation for a verified legacy table. Do not mark
+unrelated failed migrations as applied without independently verifying their
+database objects.
 
 After deployment, update the app installation so the configured scopes and
 webhooks are active. The merchant must also select AOVBoost as the post-purchase
