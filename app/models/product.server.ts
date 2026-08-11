@@ -2,6 +2,7 @@ import type { Prisma, Product, ProductAffinity } from "@prisma/client";
 import prisma from "../db.server";
 import { cacheKeys, getJsonCache, redis, setJsonCache } from "../redis.server";
 import {
+  getSyncedProductVariants,
   mapAdminCatalogProductNode,
   type ShopifyProductInput,
 } from "./productCatalogMapping";
@@ -304,6 +305,7 @@ export async function incrementOrderAffinities(
   shop: string,
   productIds: string[],
   orderId: string,
+  lineItems: Array<{ productId: string; variantId: string }> = [],
 ) {
   const uniqueProductIds = Array.from(new Set(productIds.filter(Boolean)));
   if (uniqueProductIds.length < 1 || !orderId) return;
@@ -347,6 +349,37 @@ export async function incrementOrderAffinities(
         });
       }
 
+      const knownIdSet = new Set(knownIds);
+      const orderedVariants = Array.from(
+        new Map(
+          lineItems
+            .filter(
+              (line) =>
+                knownIdSet.has(line.productId) &&
+                line.variantId.startsWith("gid://shopify/ProductVariant/"),
+            )
+            .map((line) => [`${line.productId}:${line.variantId}`, line]),
+        ).values(),
+      );
+      for (const line of orderedVariants) {
+        await tx.productVariantOrderStat.upsert({
+          where: {
+            shop_productId_variantId: {
+              shop,
+              productId: line.productId,
+              variantId: line.variantId,
+            },
+          },
+          update: { orderCount: { increment: 1 } },
+          create: {
+            shop,
+            productId: line.productId,
+            variantId: line.variantId,
+            orderCount: 1,
+          },
+        });
+      }
+
       for (const sourceId of knownIds) {
         for (const targetId of knownIds) {
           if (sourceId === targetId) continue;
@@ -387,6 +420,7 @@ export async function syncProductsPageFromAdmin(
   admin: ShopifyAdminGraphql,
   cursor: string | null,
 ) {
+  const startedAt = Date.now();
   const response = await admin.graphql(
     `#graphql
     query AOVBoostProducts($cursor: String) {
@@ -402,16 +436,21 @@ export async function syncProductsPageFromAdmin(
             onlineStoreUrl
             hasOnlyDefaultVariant
             collections(first: 50) { edges { node { id } } }
-            variants(first: 50) {
+            variants(first: 100) {
               edges {
                 node {
                   id
+                  title
+                  sku
                   price
                   compareAtPrice
+                  availableForSale
                   inventoryPolicy
                   sellableOnlineQuantity
+                  selectedOptions { name value }
                 }
               }
+              pageInfo { hasNextPage }
             }
             metafields(first: 20) {
               edges { node { namespace key value type } }
@@ -436,13 +475,43 @@ export async function syncProductsPageFromAdmin(
     throw new Error("Shopify product sync returned an invalid response");
   }
 
-  const products: ShopifyProductInput[] = (connection.edges as any[])
-    .map((edge: any) => mapAdminCatalogProductNode(edge.node))
+  const productNodes = (connection.edges as any[])
+    .map((edge: any) => edge?.node)
+    .filter(Boolean);
+  const productIdsForStats = productNodes.map((node: any) => String(node.id));
+  const variantStats = productIdsForStats.length
+    ? await prisma.productVariantOrderStat.findMany({
+        where: { shop, productId: { in: productIdsForStats } },
+        select: { variantId: true, orderCount: true },
+      })
+    : [];
+  const variantOrderCounts = new Map(
+    variantStats.map((stat) => [stat.variantId, stat.orderCount]),
+  );
+  const products: ShopifyProductInput[] = productNodes
+    .map((node: any) =>
+      mapAdminCatalogProductNode(node, { variantOrderCounts }),
+    )
     .filter(
       (product: ShopifyProductInput | null): product is ShopifyProductInput =>
         Boolean(product),
     );
   await upsertProductBatch(shop, products);
+  const syncedVariantCount = products.reduce(
+    (total, product) =>
+      total + getSyncedProductVariants(product.metafields).length,
+    0,
+  );
+  const truncatedProductCount = productNodes.filter((node: any) =>
+    Boolean(node.variants?.pageInfo?.hasNextPage),
+  ).length;
+  console.log("AOVBoost product sync page stored variants:", {
+    shop,
+    productCount: products.length,
+    syncedVariantCount,
+    truncatedProductCount,
+    durationMs: Date.now() - startedAt,
+  });
   const productIds = products.map((product) => product.id);
   const nextCursor = connection.pageInfo?.endCursor || null;
   const hasNextPage = Boolean(connection.pageInfo?.hasNextPage);

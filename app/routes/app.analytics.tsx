@@ -1,145 +1,148 @@
 import { data as json, type LoaderFunctionArgs, useLoaderData } from "react-router";
 import {
-  Page,
-  Layout,
+  Badge,
+  Banner,
+  BlockStack,
   Card,
   DataTable,
-  Text,
-  BlockStack,
   InlineStack,
-  Badge,
+  Layout,
+  Page,
+  Text,
 } from "@shopify/polaris";
-import { useMemo } from "react";
-import prisma from "../db.server";
+import { getRevenueAnalytics } from "../models/analytics.server";
 import { authenticate } from "../shopify.server";
 import UpsellChart from "./components/UpsellChart";
 import UpsellTimeSeriesChart from "./components/UpsellTimeSeriesChart";
 
-type EventData = {
-  event: string;
-  timestamp: string;
-  data: Record<string, any>;
-};
-
-type ShopData = {
-  currencyCode: string;
-  currencyFormats?: {
-    moneyFormat?: string;
-  };
-};
-
-type LoaderData = {
-  events: EventData[];
-  shop: ShopData;
-};
-
-type OfferPerformance = {
-  name: string;
-  impressions: number;
-  adds: number;
-  conversions: number;
-  revenue: number;
-  mode: string;
-  placement: string;
-  experiment: string;
-  offerType: string;
-};
+const WINDOW_DAYS = 30;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
-
-  const [events, shopResponse] = await Promise.all([
-    prisma.event.findMany({
-      where: {
-        storeId: session.shop,
-        timestamp: {
-          gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-        },
-      },
-      orderBy: { timestamp: "desc" },
-    }),
+  const from = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const [report, shopResponse] = await Promise.all([
+    getRevenueAnalytics(session.shop, from),
     admin.graphql(`#graphql
-      query getShop {
-        shop {
-          currencyCode
-          currencyFormats {
-            moneyFormat
-          }
-        }
+      query AOVBoostAnalyticsCurrency {
+        shop { currencyCode }
       }
     `),
   ]);
-
   const shopJson = await shopResponse.json();
+  const currencyCode = /^[A-Z]{3}$/.test(shopJson.data?.shop?.currencyCode)
+    ? shopJson.data.shop.currencyCode
+    : "USD";
 
-  return json({
-    events,
-    shop: shopJson.data.shop,
-  });
+  return json({ report, currencyCode, windowDays: WINDOW_DAYS });
 };
 
 export default function RevenueDashboard() {
-  const { events, shop } = useLoaderData<LoaderData>();
-
-  const dashboard = useMemo(() => processEvents(events), [events]);
-  const formatCurrency = (amount: number) => formatMoney(amount, shop);
-
+  const { report, currencyCode, windowDays } = useLoaderData<typeof loader>();
+  const { dashboard, funnel } = report;
+  const formatCurrency = (amount: number) =>
+    new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currencyCode,
+    }).format(amount);
   const metricCards = [
     {
       label: "Attributed revenue",
-      value: formatCurrency(dashboard.metrics.revenue),
+      value: formatCurrency(dashboard.attributedRevenue),
+      caption: "Discounted line revenue linked to converted offers.",
     },
     {
       label: "Offer impressions",
-      value: dashboard.metrics.impressions.toLocaleString(),
+      value: funnel.impressions.toLocaleString(),
+      caption: "Offers confirmed as rendered by the storefront.",
     },
     {
-      label: "Add rate",
-      value: formatPercent(dashboard.metrics.addRate),
+      label: "Click-through rate",
+      value:
+        funnel.impressions > 0
+          ? formatPercent(funnel.clicks / funnel.impressions)
+          : "Not available",
+      caption: `${funnel.clicks.toLocaleString()} recorded offer clicks.`,
     },
     {
-      label: "Conversion rate",
-      value: formatPercent(dashboard.metrics.conversionRate),
+      label: "Offer conversion rate",
+      value:
+        funnel.impressions > 0
+          ? formatPercent(funnel.conversions / funnel.impressions)
+          : "Not available",
+      caption: "Signed order conversions divided by impressions.",
     },
     {
-      label: "Abandoned opportunity",
-      value: formatCurrency(dashboard.metrics.abandonedOpportunity),
+      label: "Attributed-order AOV",
+      value:
+        dashboard.attributedOrderCount > 0
+          ? formatCurrency(dashboard.avgAov)
+          : "Not available",
+      caption: `${dashboard.attributedOrderCount.toLocaleString()} attributed orders.`,
+    },
+    {
+      label: "Observed AOV lift",
+      value: dashboard.aovLiftAvailable
+        ? formatPercent(dashboard.aovLift)
+        : "Not available",
+      caption: dashboard.aovLiftAvailable
+        ? "Compared with orders without an attributed offer."
+        : "Requires both attributed and unattributed orders.",
     },
   ];
-
-  const chartData = [
-    { name: "Generated", count: dashboard.metrics.generated, color: "#6B7280" },
-    { name: "Impressions", count: dashboard.metrics.impressions, color: "#2563EB" },
-    { name: "Adds", count: dashboard.metrics.adds, color: "#059669" },
-    { name: "Conversions", count: dashboard.metrics.conversions, color: "#D97706" },
+  const funnelData = [
+    { name: "Generated", count: funnel.generated, color: "#6B7280" },
+    { name: "Impressions", count: funnel.impressions, color: "#2563EB" },
+    { name: "Clicks", count: funnel.clicks, color: "#059669" },
+    { name: "Conversions", count: funnel.conversions, color: "#D97706" },
   ];
-
-  const offerRows = dashboard.offerRows.map((offer) => [
+  const offerRows = report.offerRows.map((offer) => [
     offer.name,
-    offer.mode,
-    offer.placement,
-    offer.offerType,
-    offer.impressions.toString(),
-    offer.adds.toString(),
-    offer.conversions.toString(),
+    formatLabel(offer.widgetType),
+    offer.generated.toLocaleString(),
+    offer.impressions.toLocaleString(),
+    offer.clicks.toLocaleString(),
+    offer.conversions.toLocaleString(),
     formatCurrency(offer.revenue),
-    formatPercent(offer.impressions ? offer.adds / offer.impressions : 0),
+    offer.impressions > 0
+      ? formatPercent(offer.clicks / offer.impressions)
+      : "Not available",
   ]);
-
-  const experimentRows = dashboard.experimentRows.map((experiment) => [
-    experiment.variant,
-    experiment.impressions.toString(),
-    experiment.adds.toString(),
-    formatPercent(experiment.impressions ? experiment.adds / experiment.impressions : 0),
-    experiment.revenue ? formatCurrency(experiment.revenue) : formatCurrency(0),
+  const experimentRows = report.experimentRows.map((experiment) => [
+    experiment.experiment,
+    formatLabel(experiment.variant),
+    experiment.generated.toLocaleString(),
+    experiment.impressions.toLocaleString(),
+    experiment.clicks.toLocaleString(),
+    experiment.conversions.toLocaleString(),
+    formatCurrency(experiment.revenue),
+    experiment.impressions > 0
+      ? formatPercent(experiment.clicks / experiment.impressions)
+      : "Not available",
+  ]);
+  const journeyRows = report.journeyRows.map((journey) => [
+    formatLabel(journey.journeyStage),
+    journey.sessions.toLocaleString(),
+    journey.convertedSessions.toLocaleString(),
+    formatCurrency(journey.revenue),
+    formatCurrency(journey.sessions ? journey.revenue / journey.sessions : 0),
   ]);
 
   return (
     <Page
-      title="Revenue Dashboard"
-      subtitle="Track revenue outcomes, winning offers, AI experiments, and customer segments."
+      title="Revenue analytics"
+      subtitle="Authoritative offer engagement and signed order outcomes"
     >
       <Layout>
+        <Layout.Section>
+          <Banner title="About this report" tone="info">
+            <Text as="p">
+              This report uses a rolling {windowDays}-day window. AOV lift is an
+              observational comparison between orders with and without an
+              attributed AOVBoost offer; it is not a randomized causal estimate.
+            </Text>
+          </Banner>
+        </Layout.Section>
+
         <Layout.Section>
           <div
             style={{
@@ -157,6 +160,9 @@ export default function RevenueDashboard() {
                   <Text as="p" variant="headingLg">
                     {metric.value}
                   </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    {metric.caption}
+                  </Text>
                 </BlockStack>
               </Card>
             ))}
@@ -167,15 +173,19 @@ export default function RevenueDashboard() {
           <Card>
             <BlockStack gap="300">
               <InlineStack gap="200">
-                <Badge>Revenue engine</Badge>
-                <Badge>{dashboard.metrics.bundleShareLabel}</Badge>
-                <Badge>{dashboard.metrics.topMode || "No mode data"}</Badge>
+                <Badge tone="success">Authoritative records</Badge>
+                <Badge>
+                  {funnel.impressions > 0
+                    ? `${Math.round(report.bundleShare * 100)}% bundle mix`
+                    : "Bundle mix unavailable"}
+                </Badge>
+                <Badge>{`${windowDays}-day window`}</Badge>
               </InlineStack>
               <Text as="h2" variant="headingMd">
-                AI Insights
+                Performance insights
               </Text>
               <BlockStack gap="200">
-                {dashboard.insights.map((insight) => (
+                {report.insights.map((insight) => (
                   <Text as="p" variant="bodyMd" key={insight}>
                     {insight}
                   </Text>
@@ -196,18 +206,24 @@ export default function RevenueDashboard() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">
-                  Revenue Funnel
+                  Offer funnel
                 </Text>
-                <UpsellChart data={chartData} />
+                <UpsellChart data={funnelData} />
               </BlockStack>
             </Card>
 
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">
-                  30-Day Trend
+                  30-day engagement trend
                 </Text>
-                <UpsellTimeSeriesChart data={dashboard.timeSeriesData} />
+                {report.timeSeries.length > 0 ? (
+                  <UpsellTimeSeriesChart data={report.timeSeries} />
+                ) : (
+                  <Text as="p" tone="subdued">
+                    No offers were generated in this reporting window.
+                  </Text>
+                )}
               </BlockStack>
             </Card>
           </div>
@@ -217,15 +233,14 @@ export default function RevenueDashboard() {
           <Card>
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">
-                Top Revenue Offers
+                Top revenue offers
               </Text>
               {offerRows.length > 0 ? (
                 <DataTable
                   columnContentTypes={[
                     "text",
                     "text",
-                    "text",
-                    "text",
+                    "numeric",
                     "numeric",
                     "numeric",
                     "numeric",
@@ -234,20 +249,19 @@ export default function RevenueDashboard() {
                   ]}
                   headings={[
                     "Offer",
-                    "Mode",
-                    "Placement",
-                    "Type",
+                    "Widget",
+                    "Generated",
                     "Impressions",
-                    "Adds",
+                    "Clicks",
                     "Conversions",
                     "Revenue",
-                    "Add rate",
+                    "CTR",
                   ]}
                   rows={offerRows}
                 />
               ) : (
                 <Text as="p" tone="subdued">
-                  No offer activity yet.
+                  No offers were generated in this reporting window.
                 </Text>
               )}
             </BlockStack>
@@ -258,48 +272,71 @@ export default function RevenueDashboard() {
           <Card>
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">
-                AI Experiment Performance
+                Experiment variant performance
               </Text>
               {experimentRows.length > 0 ? (
                 <DataTable
                   columnContentTypes={[
                     "text",
+                    "text",
+                    "numeric",
+                    "numeric",
                     "numeric",
                     "numeric",
                     "numeric",
                     "numeric",
                   ]}
-                  headings={["Variant", "Impressions", "Adds", "Add rate", "Revenue"]}
+                  headings={[
+                    "Experiment",
+                    "Variant",
+                    "Generated",
+                    "Impressions",
+                    "Clicks",
+                    "Conversions",
+                    "Revenue",
+                    "CTR",
+                  ]}
                   rows={experimentRows}
                 />
               ) : (
                 <Text as="p" tone="subdued">
-                  Experiment results appear after impressions and add-to-cart events.
+                  No experiment-attributed offers were generated in this window.
                 </Text>
               )}
             </BlockStack>
           </Card>
         </Layout.Section>
-        
+
         <Layout.Section>
           <Card>
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">
-                Visitor Intent Segments
+                Shopper journey stages
               </Text>
-              {dashboard.intentRows.length > 0 ? (
+              <Text as="p" tone="subdued">
+                Sessions are grouped by their latest computed journey stage.
+              </Text>
+              {journeyRows.length > 0 ? (
                 <DataTable
                   columnContentTypes={[
                     "text",
                     "numeric",
                     "numeric",
+                    "numeric",
+                    "numeric",
                   ]}
-                  headings={["Intent Profile", "Visitors", "Average Revenue"]}
-                  rows={dashboard.intentRows}
+                  headings={[
+                    "Journey stage",
+                    "Sessions",
+                    "Converted sessions",
+                    "Attributed revenue",
+                    "Average revenue/session",
+                  ]}
+                  rows={journeyRows}
                 />
               ) : (
                 <Text as="p" tone="subdued">
-                  No visitor intent data available yet.
+                  No shopper sessions were active in this reporting window.
                 </Text>
               )}
             </BlockStack>
@@ -310,311 +347,13 @@ export default function RevenueDashboard() {
   );
 }
 
-function processEvents(events: EventData[]) {
-  const offers = new Map<string, OfferPerformance>();
-  const experiments = new Map<
-    string,
-    { variant: string; impressions: number; adds: number; revenue: number }
-  >();
-  const timeSeries = new Map<
-    string,
-    { date: string; impressions: number; clicks: number; conversions: number; revenue: number }
-  >();
-  const modes = new Map<string, number>();
-  const placements = new Map<string, number>();
-  const trafficSources = new Map<string, { impressions: number; adds: number }>();
-  const intents = new Map<string, { visitors: Set<string>; revenue: number }>();
-
-  let generated = 0;
-  let impressions = 0;
-  let adds = 0;
-  let conversions = 0;
-  let revenue = 0;
-  let offerValueTotal = 0;
-  let offerValueCount = 0;
-  let bundleImpressions = 0;
-
-  for (const event of events) {
-    const data = event.data || {};
-    const date = new Date(event.timestamp).toISOString().split("T")[0];
-    const day = ensureDay(timeSeries, date);
-    const offerName = getOfferName(data);
-    const offer = ensureOffer(offers, offerName, data);
-    const experimentKey = data.experimentVariant || data.experimentId;
-    const trafficSource = data.behavior?.trafficSource || data.trafficSource || "direct";
-
-    if (data.modeLabel || data.mode) increment(modes, data.modeLabel || data.mode);
-    if (data.placement) increment(placements, data.placement);
-    if (trafficSource) {
-      const source = trafficSources.get(trafficSource) || { impressions: 0, adds: 0 };
-      trafficSources.set(trafficSource, source);
-    }
-
-    if (event.event === "offer_generated") {
-      generated += 1;
-    }
-
-    if (event.event === "upsell_impression") {
-      impressions += 1;
-      offer.impressions += 1;
-      day.impressions += 1;
-      trafficSources.get(trafficSource)!.impressions += 1;
-      if (data.offerType === "bundle" || data.bundleId) bundleImpressions += 1;
-      if (experimentKey) ensureExperiment(experiments, experimentKey, data).impressions += 1;
-      const offerValue = getOfferValue(data);
-      if (offerValue > 0) {
-        offerValueTotal += offerValue;
-        offerValueCount += 1;
-      }
-    }
-
-    if (event.event === "upsell_add_to_cart") {
-      adds += 1;
-      offer.adds += 1;
-      day.clicks += 1;
-      trafficSources.get(trafficSource)!.adds += 1;
-      if (experimentKey) ensureExperiment(experiments, experimentKey, data).adds += 1;
-    }
-
-    if (event.event === "conversion") {
-      const orderRevenue = getOrderRevenue(data);
-      conversions += 1;
-      revenue += orderRevenue;
-      offer.conversions += 1;
-      offer.revenue += orderRevenue;
-      day.conversions += 1;
-      day.revenue += orderRevenue;
-      if (experimentKey) ensureExperiment(experiments, experimentKey, data).revenue += orderRevenue;
-      
-      const intentProfile = data.behavior?.intentProfile || "unknown";
-      if (!intents.has(intentProfile)) intents.set(intentProfile, { visitors: new Set(), revenue: 0 });
-      const intentData = intents.get(intentProfile)!;
-      if (data.visitorId) intentData.visitors.add(data.visitorId);
-      intentData.revenue += orderRevenue;
-    }
-  }
-
-  const averageOfferValue = offerValueCount ? offerValueTotal / offerValueCount : 0;
-  const abandonedOpportunity = Math.max(impressions - adds, 0) * averageOfferValue;
-  const topMode = topKey(modes);
-  const topPlacement = topKey(placements);
-  const topTraffic = topTrafficSource(trafficSources);
-  const bundleShare = impressions ? bundleImpressions / impressions : 0;
-
-  const offerRows = Array.from(offers.values())
-    .filter((offer) => offer.impressions || offer.adds || offer.conversions)
-    .sort((a, b) => b.revenue - a.revenue || b.adds - a.adds)
-    .slice(0, 10);
-
-  const experimentRows = Array.from(experiments.values()).sort(
-    (a, b) => b.revenue - a.revenue || b.adds - a.adds,
-  );
-
-  const timeSeriesData = Array.from(timeSeries.values()).sort((a, b) =>
-    a.date.localeCompare(b.date),
-  );
-  
-  const intentRows = Array.from(intents.entries()).map(([intent, data]) => [
-    intent,
-    data.visitors.size.toString(),
-    data.visitors.size ? (data.revenue / data.visitors.size).toFixed(2) : "0.00",
-  ]);
-
-  return {
-    metrics: {
-      generated,
-      impressions,
-      adds,
-      conversions,
-      revenue,
-      addRate: impressions ? adds / impressions : 0,
-      conversionRate: adds ? conversions / adds : 0,
-      abandonedOpportunity,
-      topMode,
-      topPlacement,
-      bundleShareLabel: `${Math.round(bundleShare * 100)}% bundle mix`,
-    },
-    offerRows,
-    experimentRows,
-    timeSeriesData,
-    intentRows,
-    insights: buildInsights({
-      topMode,
-      topPlacement,
-      topTraffic,
-      bundleShare,
-      abandonedOpportunity,
-      impressions,
-      adds,
-    }),
-  };
-}
-
-function ensureOffer(
-  offers: Map<string, OfferPerformance>,
-  name: string,
-  data: Record<string, any>,
-) {
-  const existing = offers.get(name);
-  if (existing) return existing;
-
-  const offer = {
-    name,
-    impressions: 0,
-    adds: 0,
-    conversions: 0,
-    revenue: 0,
-    mode: data.modeLabel || data.mode || "Unknown",
-    placement: data.placement || "Unknown",
-    experiment: data.experimentVariant || "Baseline",
-    offerType: data.offerType || (data.bundleId ? "bundle" : "single"),
-  };
-
-  offers.set(name, offer);
-  return offer;
-}
-
-function ensureExperiment(
-  experiments: Map<string, { variant: string; impressions: number; adds: number; revenue: number }>,
-  key: string,
-  data: Record<string, any>,
-) {
-  const existing = experiments.get(key);
-  if (existing) return existing;
-
-  const experiment = {
-    variant: data.experimentVariant || key,
-    impressions: 0,
-    adds: 0,
-    revenue: 0,
-  };
-
-  experiments.set(key, experiment);
-  return experiment;
-}
-
-function ensureDay(
-  timeSeries: Map<string, { date: string; impressions: number; clicks: number; conversions: number; revenue: number }>,
-  date: string,
-) {
-  const existing = timeSeries.get(date);
-  if (existing) return existing;
-
-  const day = { date, impressions: 0, clicks: 0, conversions: 0, revenue: 0 };
-  timeSeries.set(date, day);
-  return day;
-}
-
-function getOfferName(data: Record<string, any>) {
-  return (
-    data.bundleTitle ||
-    data.title ||
-    data.product_title ||
-    data.name ||
-    data.id ||
-    "Revenue offer"
-  );
-}
-
-function getOfferValue(data: Record<string, any>) {
-  if (data.bundle?.discountedTotal) return parseFloat(data.bundle.discountedTotal) || 0;
-  if (data.discountedTotal) return parseFloat(data.discountedTotal) || 0;
-  if (data.price) return parseFloat(data.price) || 0;
-  if (data.final_price) return Number(data.final_price) / 100;
-  return 0;
-}
-
-function getOrderRevenue(data: Record<string, any>) {
-  if (data.total_price) return parseFloat(String(data.total_price)) || 0;
-  if (!Array.isArray(data.line_items)) return 0;
-
-  return data.line_items.reduce((sum: number, item: Record<string, any>) => {
-    const price = parseFloat(String(item.price || "0")) || 0;
-    return sum + price * (item.quantity || 1);
-  }, 0);
-}
-
-function buildInsights(input: {
-  topMode: string;
-  topPlacement: string;
-  topTraffic: string;
-  bundleShare: number;
-  abandonedOpportunity: number;
-  impressions: number;
-  adds: number;
-}) {
-  const insights = [];
-
-  if (input.topMode) {
-    insights.push(`${input.topMode} is currently the most active optimization goal.`);
-  }
-
-  if (input.topPlacement) {
-    insights.push(`${input.topPlacement} is the leading placement for recent offers.`);
-  }
-
-  if (input.topTraffic) {
-    insights.push(`${input.topTraffic} traffic is producing the strongest offer engagement.`);
-  }
-
-  if (input.bundleShare > 0.4) {
-    insights.push("Dynamic bundles are a major part of the offer mix, which supports higher AOV positioning.");
-  } else {
-    insights.push("Single-product offers still dominate. More bundle testing may uncover larger order-value gains.");
-  }
-
-  if (input.impressions > input.adds && input.abandonedOpportunity > 0) {
-    insights.push("Abandoned opportunity value shows how much accepted-offer revenue is being left in the funnel.");
-  }
-
-  return insights.length ? insights : ["Revenue insights appear after the storefront block records offer activity."];
-}
-
-function topTrafficSource(
-  trafficSources: Map<string, { impressions: number; adds: number }>,
-) {
-  let winner = "";
-  let winnerRate = 0;
-
-  for (const [source, stats] of trafficSources.entries()) {
-    const rate = stats.impressions ? stats.adds / stats.impressions : 0;
-    if (rate > winnerRate) {
-      winner = source;
-      winnerRate = rate;
-    }
-  }
-
-  return winner;
-}
-
-function topKey(values: Map<string, number>) {
-  return Array.from(values.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
-}
-
-function increment(values: Map<string, number>, key: string) {
-  values.set(key, (values.get(key) || 0) + 1);
-}
-
 function formatPercent(value: number) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-function formatMoney(amount: number, shop: ShopData) {
-  const formattedAmount = amount.toFixed(2);
-
-  if (shop.currencyFormats?.moneyFormat) {
-    return shop.currencyFormats.moneyFormat
-      .replace("{{amount}}", formattedAmount)
-      .replace("{{amount_with_comma_separator}}", formattedAmount.replace(".", ","))
-      .replace("{{amount_no_decimals}}", Math.round(amount).toString())
-      .replace(
-        "{{amount_with_comma_separator_no_decimals}}",
-        Math.round(amount).toString().replace(".", ","),
-      );
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: shop.currencyCode || "USD",
-  }).format(amount);
+function formatLabel(value: string) {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }

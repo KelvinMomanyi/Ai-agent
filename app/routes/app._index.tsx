@@ -90,6 +90,7 @@ export default function AovBoostDashboard() {
           ),
       }}
       secondaryActions={[
+        { content: "Analytics", url: "/app/analytics" },
         { content: "Bundles", url: "/app/bundles" },
         { content: "Experiments", url: "/app/experiments" },
       ]}
@@ -105,10 +106,29 @@ export default function AovBoostDashboard() {
           >
             <AovMetricCard
               label="Avg AOV"
-              value={formatCurrency(metrics.avgAov, currencyCode)}
+              value={
+                metrics.attributedOrderCount > 0
+                  ? formatCurrency(metrics.avgAov, currencyCode)
+                  : "Not available"
+              }
             />
-            <AovMetricCard label="AOV Lift" value={formatPercent(metrics.aovLift)} />
-            <AovMetricCard label="Widget CTR" value={formatPercent(metrics.widgetCtr)} />
+            <AovMetricCard
+              label="AOV Lift"
+              value={
+                metrics.aovLiftAvailable
+                  ? formatPercent(metrics.aovLift)
+                  : "Not available"
+              }
+              caption="Observational, not a randomized causal estimate."
+            />
+            <AovMetricCard
+              label="Widget CTR"
+              value={
+                metrics.widgetImpressions > 0
+                  ? formatPercent(metrics.widgetCtr)
+                  : "Not available"
+              }
+            />
             <AovMetricCard
               label="Chat Engaged"
               value={metrics.chatEngaged.toLocaleString()}

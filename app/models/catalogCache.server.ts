@@ -3,6 +3,7 @@ import prisma from "../db.server";
 import { getJsonCache, setJsonCache } from "../redis.server";
 import {
   getSafeDefaultVariantId,
+  getSyncedProductVariants,
   isCatalogProductAvailable,
 } from "./productCatalogMapping";
 
@@ -25,11 +26,13 @@ export type CatalogCacheProduct = {
   imageAlt: string;
   inventory: number | null;
   availableForSale: boolean;
+  defaultVariantId: string;
   variants: Array<{
     id: string;
     title: string;
     sku: string;
     price: string;
+    compareAtPrice: string | null;
     quantityAvailable: number | null;
     availableForSale: boolean;
     selectedOptions: Array<{ name: string; value: string }>;
@@ -291,6 +294,7 @@ function toCatalogProduct(product: ProductWithStats): CatalogCacheProduct {
   ]);
   const availableForSale = isCatalogProductAvailable(metafields);
   const variantId = getSafeDefaultVariantId(metafields);
+  const syncedVariants = getSyncedProductVariants(metafields);
   const sku = getMetafieldValue(metafields, ["sku", "aovboost.sku"]);
   const inventory = toNullableNumber(
     getMetafieldValue(metafields, [
@@ -300,8 +304,14 @@ function toCatalogProduct(product: ProductWithStats): CatalogCacheProduct {
       "aovboost.sellableOnlineQuantity",
     ]),
   );
-  const price = product.price.toString();
-  const compareAtPrice = product.compareAtPrice?.toString() || null;
+  const defaultVariant = syncedVariants.find(
+    (variant) => variant.id === variantId,
+  );
+  const price = defaultVariant?.price || product.price.toString();
+  const compareAtPrice =
+    defaultVariant?.compareAtPrice ||
+    product.compareAtPrice?.toString() ||
+    null;
   const priceSale =
     compareAtPrice && Number(compareAtPrice) > Number(price) ? price : null;
   const category = product.productType || "uncategorized";
@@ -325,19 +335,24 @@ function toCatalogProduct(product: ProductWithStats): CatalogCacheProduct {
     imageAlt: product.title,
     inventory,
     availableForSale,
-    variants: variantId
-      ? [
-          {
-            id: variantId,
-            title: "Default",
-            sku,
-            price,
-            quantityAvailable: inventory,
-            availableForSale,
-            selectedOptions: [],
-          },
-        ]
-      : [],
+    defaultVariantId: variantId,
+    variants:
+      syncedVariants.length > 0
+        ? syncedVariants
+        : variantId
+          ? [
+              {
+                id: variantId,
+                title: "Default",
+                sku,
+                price,
+                compareAtPrice,
+                quantityAvailable: inventory,
+                availableForSale,
+                selectedOptions: [],
+              },
+            ]
+          : [],
     searchText: [
       product.title,
       description,

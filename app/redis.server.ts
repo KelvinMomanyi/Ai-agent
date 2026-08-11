@@ -9,6 +9,7 @@ const upstash =
     : null;
 
 const memoryStore = new Map<string, { value: unknown; expiresAt?: number }>();
+let claimStoreWarningLogged = false;
 
 /**
  * Upstash's HTTP client works in serverless runtimes. The memory fallback keeps
@@ -134,6 +135,38 @@ export async function incrementRateLimit(
   return count;
 }
 
+/**
+ * Atomically reserves a key for a bounded window. In production this fails
+ * closed when Upstash is unavailable because an instance-local fallback
+ * cannot enforce an at-most-once guarantee across Vercel function instances.
+ */
+export async function claimExpiringKey(
+  key: string,
+  ttlSeconds: number,
+): Promise<boolean> {
+  if (upstash) {
+    try {
+      const result = await upstash.set(key, "1", {
+        ex: ttlSeconds,
+        nx: true,
+      });
+      return result === "OK";
+    } catch (error) {
+      warnClaimStoreUnavailable(error);
+      return false;
+    }
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    warnClaimStoreUnavailable("UPSTASH_REDIS_REST_URL/TOKEN are not configured");
+    return false;
+  }
+
+  if (getMemoryValue(key) !== null) return false;
+  setMemoryValue(key, "1", ttlSeconds);
+  return true;
+}
+
 export const cacheKeys = {
   offer: (sessionId: string, productId = "none") =>
     `offer:${sessionId}:${productId}`,
@@ -145,7 +178,28 @@ export const cacheKeys = {
   offerRateLimit: (sessionId: string) => `rate:offer:${sessionId}`,
   chatRateLimit: (sessionId: string) => `rate:chat:${sessionId}`,
   eventsRateLimit: (sessionId: string) => `rate:events:${sessionId}`,
+  liveRateLimit: (sessionId: string) => `rate:live:${sessionId}`,
+  liveDelivery: (
+    shop: string,
+    sessionId: string,
+    eventType: string,
+    productId: string,
+  ) =>
+    `live:delivery:${[shop, sessionId, eventType, productId]
+      .map(encodeURIComponent)
+      .join(":")}`,
+  experiment: (shop: string, widgetType: string) =>
+    `experiment:${shop}:${widgetType}`,
 };
+
+function warnClaimStoreUnavailable(error: unknown) {
+  if (claimStoreWarningLogged) return;
+  claimStoreWarningLogged = true;
+  console.warn(
+    "AOVBoost distributed claim store unavailable; live delivery is fail-closed:",
+    error instanceof Error ? error.message : String(error),
+  );
+}
 
 async function withRedis<T>(
   operation: (client: Redis) => Promise<T>,

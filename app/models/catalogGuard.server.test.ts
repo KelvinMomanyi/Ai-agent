@@ -53,8 +53,37 @@ describe("chat catalog guard", () => {
     expect(filterCatalogProducts([available], [available.id])).toEqual([]);
   });
 
-  it("never exposes an automatic cart variant for multi-option products", () => {
+  it("exposes only canonical variants and selects a real in-stock default", () => {
     const product = catalogProduct({
+      defaultVariantId: "gid://shopify/ProductVariant/11",
+      variants: [
+        {
+          id: "gid://shopify/ProductVariant/11",
+          title: "Small / Blue",
+          sku: "TRAIL-S-BLUE",
+          price: "499.00",
+          compareAtPrice: null,
+          quantityAvailable: 4,
+          availableForSale: true,
+          selectedOptions: [
+            { name: "Size", value: "Small" },
+            { name: "Color", value: "Blue" },
+          ],
+        },
+        {
+          id: "gid://shopify/ProductVariant/12",
+          title: "Large / Blue",
+          sku: "TRAIL-L-BLUE",
+          price: "529.00",
+          compareAtPrice: null,
+          quantityAvailable: 0,
+          availableForSale: false,
+          selectedOptions: [
+            { name: "Size", value: "Large" },
+            { name: "Color", value: "Blue" },
+          ],
+        },
+      ],
       metafields: {
         "aovboost.availableForSale": { value: "true", type: "boolean" },
         "aovboost.hasOnlyDefaultVariant": {
@@ -68,7 +97,12 @@ describe("chat catalog guard", () => {
       },
     });
 
-    expect(catalogProductToWidgetProduct(product).variantId).toBe("");
+    const widgetProduct = catalogProductToWidgetProduct(product);
+    expect(widgetProduct.variantId).toBe("gid://shopify/ProductVariant/11");
+    expect(widgetProduct.variants.map((variant) => variant.id)).toEqual([
+      "gid://shopify/ProductVariant/11",
+      "gid://shopify/ProductVariant/12",
+    ]);
   });
 });
 
@@ -94,12 +128,14 @@ function catalogProduct(
     imageAlt: "Trail Board",
     inventory: 4,
     availableForSale: true,
+    defaultVariantId: "gid://shopify/ProductVariant/11",
     variants: [
       {
         id: "gid://shopify/ProductVariant/11",
         title: "Default",
         sku: "TRAIL-1",
         price: "499.00",
+        compareAtPrice: null,
         quantityAvailable: 4,
         availableForSale: true,
         selectedOptions: [],

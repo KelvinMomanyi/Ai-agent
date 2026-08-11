@@ -8,10 +8,15 @@ import prisma from "../db.server";
 import { getOfferDecision } from "../ai/decisionEngine.server";
 import type { CurrentPageType, OfferDecision } from "../ai/types";
 import { enforceCatalogBackedDecision } from "../models/catalogGuard.server";
+import { getSyncedProductVariants } from "../models/productCatalogMapping";
 import {
   buildOfferCandidates,
   createOfferRecord,
 } from "../models/offer.server";
+import {
+  applyExperimentConfig,
+  type ExperimentVariant,
+} from "../models/experimentConfig";
 import {
   getShopperSession,
   toShopperSessionSnapshot,
@@ -182,14 +187,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       },
     });
-    const decision = await enforceCatalogBackedDecision({
+    const catalogGuardedDecision = await enforceCatalogBackedDecision({
       shop,
       decision: rawDecision,
       excludedProductIds: settings.blockedProductIds,
     });
-    const abVariant = decision.widgetType
-      ? await getCachedExperimentVariant(shop, decision.widgetType, sessionId)
+    const experimentAssignment = catalogGuardedDecision.widgetType
+      ? await getCachedExperimentAssignment(
+          shop,
+          catalogGuardedDecision.widgetType,
+          sessionId,
+        )
       : null;
+    const decision = experimentAssignment
+      ? applyExperimentConfig({
+          decision: catalogGuardedDecision,
+          config:
+            experimentAssignment.variant === "treatment"
+              ? experimentAssignment.experiment.treatmentConfig
+              : experimentAssignment.experiment.controlConfig,
+          experimentId: experimentAssignment.experiment.id,
+          variant: experimentAssignment.variant,
+        })
+      : catalogGuardedDecision;
+    const abVariant = experimentAssignment?.variant || null;
 
     const offer = await createOfferRecord({
       shop,
@@ -209,6 +230,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         session: decisionSession,
       },
       abVariant,
+      experimentId: experimentAssignment?.experiment.id,
     });
 
     const response: OfferDecision = {
@@ -341,7 +363,8 @@ function extractCartItemVariantIds(items: OfferBody["cartItems"]) {
 
 function getProductVariantIds(metafields: unknown) {
   const record = asRecord(metafields);
-  return [
+  return uniqueStrings([
+    ...getSyncedProductVariants(metafields).map((variant) => variant.id),
     record.defaultVariantId,
     record.variantId,
     record["aovboost.defaultVariantId"],
@@ -350,7 +373,7 @@ function getProductVariantIds(metafields: unknown) {
     asRecord(record.variantId).value,
     asRecord(record["aovboost.defaultVariantId"]).value,
     asRecord(record["aovboost.variantId"]).value,
-  ]
+  ])
     .map(String)
     .filter((value) => value && value !== "[object Object]");
 }
@@ -417,12 +440,12 @@ async function getCachedAppSettings(shop: string): Promise<AppSettings> {
   return settings;
 }
 
-async function getCachedExperimentVariant(
+async function getCachedExperimentAssignment(
   shop: string,
   widgetType: string,
   sessionId: string,
 ) {
-  const key = `experiment:${shop}:${widgetType}`;
+  const key = cacheKeys.experiment(shop, widgetType);
   const experiment = await getJsonCache<Experiment>(key);
 
   const exp =
@@ -439,5 +462,7 @@ async function getCachedExperimentVariant(
   }
 
   const bucket = hash(sessionId + exp.id) / 100;
-  return bucket < exp.trafficSplit ? "treatment" : "control";
+  const variant: ExperimentVariant =
+    bucket < exp.trafficSplit ? "treatment" : "control";
+  return { experiment: exp, variant };
 }

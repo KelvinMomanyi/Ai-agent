@@ -31,24 +31,25 @@ model Session {
 }
 
 model Product {
-  id              String
-  shop            String
-  title           String
-  handle          String
-  vendor          String?
-  productType     String?
-  tags            String[]          @default([])
-  price           Decimal           @db.Decimal(18, 2)
-  compareAtPrice  Decimal?          @db.Decimal(18, 2)
-  imageUrl        String?
-  collectionIds   String[]          @default([])
-  metafields      Json              @default("{}")
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  bundleItems     BundleItem[]
-  affinities      ProductAffinity[] @relation("SourceProduct")
-  affinityTargets ProductAffinity[] @relation("TargetProduct")
-  orderStats      ProductOrderStat?
+  id                String
+  shop              String
+  title             String
+  handle            String
+  vendor            String?
+  productType       String?
+  tags              String[]                  @default([])
+  price             Decimal                   @db.Decimal(18, 2)
+  compareAtPrice    Decimal?                  @db.Decimal(18, 2)
+  imageUrl          String?
+  collectionIds     String[]                  @default([])
+  metafields        Json                      @default("{}")
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  bundleItems       BundleItem[]
+  affinities        ProductAffinity[]         @relation("SourceProduct")
+  affinityTargets   ProductAffinity[]         @relation("TargetProduct")
+  orderStats        ProductOrderStat?
+  variantOrderStats ProductVariantOrderStat[]
 
   @@id([shop, id])
   @@index([shop])
@@ -78,6 +79,19 @@ model ProductOrderStat {
 
   @@unique([shop, productId])
   @@index([shop])
+}
+
+model ProductVariantOrderStat {
+  id         String  @id @default(cuid())
+  shop       String
+  productId  String
+  variantId  String
+  orderCount Int     @default(0)
+  product    Product @relation(fields: [shop, productId], references: [shop, id], onDelete: Cascade)
+
+  @@unique([shop, productId, variantId])
+  @@index([shop, productId])
+  @@index([shop, variantId])
 }
 
 model Bundle {
@@ -158,11 +172,14 @@ model Offer {
   converted      Boolean        @default(false)
   revenueImpact  Decimal?       @db.Decimal(18, 2)
   abVariant      String?
+  experimentId   String?
   createdAt      DateTime       @default(now())
   session        ShopperSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  experiment     Experiment?    @relation(fields: [experimentId], references: [id], onDelete: SetNull)
 
   @@index([shop, widgetType, createdAt])
   @@index([sessionId])
+  @@index([shop, experimentId, widgetType, abVariant])
 }
 
 model ChatMessage {
@@ -192,6 +209,7 @@ model Experiment {
   treatmentConfig Json      @default("{}")
   startedAt       DateTime  @default(now())
   endedAt         DateTime?
+  offers          Offer[]
 
   @@index([shop, isActive])
 }
@@ -210,6 +228,7 @@ model AppSettings {
   aiTone               String   @default("friendly")
   brandVoice           String?
   blockedProductIds    String[] @default([])
+  bundleDiscountId     String?
   updatedAt            DateTime @updatedAt
 }
 

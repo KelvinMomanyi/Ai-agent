@@ -165,12 +165,14 @@ function product(
     imageAlt: "Trail Board",
     inventory: 4,
     availableForSale: true,
+    defaultVariantId: "gid://shopify/ProductVariant/11",
     variants: [
       {
         id: "gid://shopify/ProductVariant/11",
         title: "Default",
         sku: "TRAIL-1",
         price: "499.00",
+        compareAtPrice: null,
         quantityAvailable: 4,
         availableForSale: true,
         selectedOptions: [],

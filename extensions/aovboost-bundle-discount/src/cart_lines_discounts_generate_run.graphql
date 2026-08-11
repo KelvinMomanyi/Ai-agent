@@ -1,0 +1,31 @@
+query CartInput {
+  cart {
+    lines {
+      id
+      quantity
+      bundleId: attribute(key: "_aovboost_bundle_id") {
+        value
+      }
+      bundleVersion: attribute(key: "_aovboost_bundle_version") {
+        value
+      }
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          product {
+            id
+          }
+        }
+      }
+    }
+  }
+  discount {
+    discountClasses
+    metafield(
+      namespace: "$app:aovboost-bundle-discount"
+      key: "function-configuration"
+    ) {
+      jsonValue
+    }
+  }
+}

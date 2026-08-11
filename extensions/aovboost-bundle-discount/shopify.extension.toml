@@ -1,0 +1,18 @@
+api_version = "2026-07"
+
+[[extensions]]
+name = "AOVBoost bundle discounts"
+handle = "aovboost-bundle-discount"
+uid = "274bb21d-68ec-42d0-a1c7-22931ed9ce9af387b3e2"
+type = "function"
+description = "Applies configured AOVBoost discounts to complete bundle cart lines."
+
+[[extensions.targeting]]
+target = "cart.lines.discounts.generate.run"
+input_query = "src/cart_lines_discounts_generate_run.graphql"
+export = "cart-lines-discounts-generate-run"
+
+[extensions.build]
+command = ""
+path = "dist/function.wasm"
+watch = ["src/**/*.js", "src/**/*.graphql"]

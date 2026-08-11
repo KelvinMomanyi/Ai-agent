@@ -1,10 +1,19 @@
 import prisma from "../db.server";
 import { getJsonCache, setJsonCache, redis } from "../redis.server";
+import {
+  normalizeBundleDiscount,
+  syncBundleDiscountFunction,
+  validateBundleDiscountAgainstCatalog,
+  type BundleDiscountType,
+  type ShopifyAdminGraphql,
+} from "./bundleDiscount.server";
+
+export { BundleValidationError } from "./bundleDiscount.server";
 
 export type BundleInput = {
   name: string;
   description?: string;
-  discountType: "percentage" | "fixed" | "none";
+  discountType: BundleDiscountType;
   discountValue: string | number;
   triggerProductIds: string[];
   isActive?: boolean;
@@ -27,19 +36,30 @@ export async function getBundle(shop: string, id: string) {
   });
 }
 
-function findActiveBundlesForProduct(shop: string, productId: string) {
+async function findActiveBundlesForProduct(shop: string, productId: string) {
   const productIds = toProductLookupKeys(productId);
 
-  return prisma.bundle.findMany({
-    where: {
-      shop,
-      isActive: true,
-      OR: productIds.map((id) => ({ triggerProductIds: { has: id } })),
-    },
-    include: { items: { include: { product: true } } },
-    orderBy: [{ priority: "desc" }, { updatedAt: "desc" }],
-    take: 5,
-  });
+  const [bundles, settings] = await Promise.all([
+    prisma.bundle.findMany({
+      where: {
+        shop,
+        isActive: true,
+        OR: productIds.map((id) => ({ triggerProductIds: { has: id } })),
+      },
+      include: { items: { include: { product: true } } },
+      orderBy: [{ priority: "desc" }, { updatedAt: "desc" }],
+      take: 5,
+    }),
+    prisma.appSettings.findUnique({
+      where: { shop },
+      select: { bundleDiscountId: true },
+    }),
+  ]);
+
+  return bundles.filter(
+    (bundle) =>
+      bundle.discountType === "none" || Boolean(settings?.bundleDiscountId),
+  );
 }
 
 type ActiveBundle = Awaited<
@@ -56,10 +76,11 @@ export async function getActiveBundlesForProduct(
   const key = bundleCacheKey(shop, productId);
   const cached = await getJsonCache<ActiveBundle[]>(key);
   if (cached) {
+    const readyCached = await filterBundlesToReadyDiscounts(shop, cached);
     const validCached = await filterBundlesToExistingProducts(
       shop,
       productId,
-      cached,
+      readyCached,
     );
     const allowedCached = filterBundlesToAllowedProducts(
       validCached,
@@ -87,12 +108,14 @@ export async function saveBundle(
   shop: string,
   id: string | null,
   input: BundleInput,
+  admin: ShopifyAdminGraphql,
 ) {
   const sanitizedInput = await normalizeBundleProductIds(
     shop,
     sanitizeBundleInput(input),
   );
   await assertBundleProductsExist(shop, sanitizedInput);
+  await validateBundleDiscountAgainstCatalog(shop, sanitizedInput, admin);
   const data = toBundleData(sanitizedInput);
 
   if (id && id !== "new") {
@@ -124,6 +147,32 @@ export async function saveBundle(
       ...data.triggerProductIds,
     ]);
 
+    if (
+      existing.discountType !== "none" ||
+      sanitizedInput.discountType !== "none"
+    ) {
+      try {
+        await syncBundleDiscountFunction(shop, admin, [
+          {
+            id: existing.id,
+            isActive: existing.isActive,
+            discountType: normalizeStoredDiscountType(existing.discountType),
+            discountValue: existing.discountValue.toString(),
+            items: existing.items,
+          },
+        ]);
+      } catch (error) {
+        if (result.isActive) {
+          await prisma.bundle.update({
+            where: { id: result.id },
+            data: { isActive: false },
+          });
+          await invalidateBundleCaches(shop, data.triggerProductIds);
+        }
+        throw error;
+      }
+    }
+
     return result;
   }
 
@@ -141,6 +190,21 @@ export async function saveBundle(
   // Invalidate cache for all products in trigger
   await invalidateBundleCaches(shop, data.triggerProductIds);
 
+  if (sanitizedInput.discountType !== "none") {
+    try {
+      await syncBundleDiscountFunction(shop, admin);
+    } catch (error) {
+      if (result.isActive) {
+        await prisma.bundle.update({
+          where: { id: result.id },
+          data: { isActive: false },
+        });
+        await invalidateBundleCaches(shop, data.triggerProductIds);
+      }
+      throw error;
+    }
+  }
+
   return result;
 }
 
@@ -148,6 +212,7 @@ export async function toggleBundle(
   shop: string,
   id: string,
   isActive: boolean,
+  admin: ShopifyAdminGraphql,
 ) {
   const bundle = await getBundle(shop, id);
   const result = await prisma.bundle.updateMany({
@@ -157,13 +222,47 @@ export async function toggleBundle(
 
   if (bundle) {
     await invalidateBundleCaches(shop, bundle.triggerProductIds);
+    if (bundle.discountType !== "none") {
+      try {
+        await syncBundleDiscountFunction(shop, admin);
+      } catch (error) {
+        await prisma.bundle.updateMany({
+          where: { shop, id },
+          data: { isActive: !isActive },
+        });
+        await invalidateBundleCaches(shop, bundle.triggerProductIds);
+        throw error;
+      }
+    }
   }
 
   return result;
 }
 
-export async function deleteBundle(shop: string, id: string) {
+export async function deleteBundle(
+  shop: string,
+  id: string,
+  admin: ShopifyAdminGraphql,
+) {
   const bundle = await getBundle(shop, id);
+  if (bundle?.isActive && bundle.discountType !== "none") {
+    await prisma.bundle.updateMany({
+      where: { shop, id },
+      data: { isActive: false },
+    });
+    await invalidateBundleCaches(shop, bundle.triggerProductIds);
+    try {
+      await syncBundleDiscountFunction(shop, admin);
+    } catch (error) {
+      await prisma.bundle.updateMany({
+        where: { shop, id },
+        data: { isActive: true },
+      });
+      await invalidateBundleCaches(shop, bundle.triggerProductIds);
+      throw error;
+    }
+  }
+
   const result = await prisma.bundle.deleteMany({
     where: { shop, id },
   });
@@ -290,12 +389,8 @@ async function assertBundleProductsExist(shop: string, input: BundleInput) {
 }
 
 function sanitizeBundleInput(input: BundleInput): BundleInput {
-  return {
+  return normalizeBundleDiscount({
     ...input,
-    // Bundle pricing stays authoritative in Shopify. A discount must never be
-    // displayed unless a Shopify discount function or changeset applies it.
-    discountType: "none",
-    discountValue: 0,
     triggerProductIds: unique(input.triggerProductIds),
     items: input.items
       .filter((item) => item.productId)
@@ -303,7 +398,30 @@ function sanitizeBundleInput(input: BundleInput): BundleInput {
         productId: item.productId,
         quantity: Math.max(1, Number(item.quantity || 1)),
       })),
-  };
+  });
+}
+
+async function filterBundlesToReadyDiscounts<T extends ActiveBundle>(
+  shop: string,
+  bundles: T[],
+) {
+  if (bundles.every((bundle) => bundle.discountType === "none")) return bundles;
+  const settings = await prisma.appSettings.findUnique({
+    where: { shop },
+    select: { bundleDiscountId: true },
+  });
+  return bundles.filter(
+    (bundle) =>
+      bundle.discountType === "none" || Boolean(settings?.bundleDiscountId),
+  );
+}
+
+function normalizeStoredDiscountType(value: string): BundleDiscountType {
+  if (value === "percentage" || value === "fixed_amount") return value;
+  if (value !== "none") {
+    console.warn("Ignoring unsupported stored bundle discount type", { value });
+  }
+  return "none";
 }
 
 async function normalizeBundleProductIds(

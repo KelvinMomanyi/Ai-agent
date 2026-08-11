@@ -1,4 +1,5 @@
 import { EventBus } from "./eventBus";
+import { LiveUpdates } from "./liveUpdates";
 import { OfferPoller } from "./offerPoller";
 import { SessionManager } from "./sessionManager";
 import { TriggerRouter } from "./triggerRouter";
@@ -84,6 +85,7 @@ async function start(): Promise<void> {
       offerPoller,
       sessionManager,
     });
+    const liveUpdates = new LiveUpdates({ apiBase, sessionManager });
 
     window.AOVBoostSDK = {
       shop,
@@ -100,6 +102,7 @@ async function start(): Promise<void> {
       requestOffer: (trigger = "global", payload = {}) =>
         offerPoller.requestOffer(trigger, payload),
       destroy: () => {
+        liveUpdates.destroy();
         triggerRouter.destroy();
         offerPoller.destroy();
         sessionManager.destroy();
@@ -110,6 +113,9 @@ async function start(): Promise<void> {
     triggerRouter.init();
     eventBus.init();
     offerPoller.init();
+    if (sessionManager.getSettings().liveEventsEnabled === true) {
+      liveUpdates.init();
+    }
   } catch (error) {
     console.log(
       "AOVBoost SDK skipped:",

@@ -44,6 +44,7 @@ export type StorefrontSettings = {
   discountThreshold?: number;
   exitIntentEnabled?: boolean;
   postPurchaseEnabled?: boolean;
+  liveEventsEnabled?: boolean;
 };
 
 export class SessionManager {

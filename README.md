@@ -36,9 +36,16 @@ extension.
    UPSTASH_REDIS_REST_URL
    UPSTASH_REDIS_REST_TOKEN
    AOVBOOST_STOREFRONT_SESSION_SECRET
+   AOVBOOST_ENABLE_LIVE_EVENTS
    GOOGLE_API_KEY
    GROQ_API_KEY
    ```
+
+   `AOVBOOST_ENABLE_LIVE_EVENTS` is fail-closed and defaults to `false`; set it
+   to the exact value `true` to enable authenticated storefront live-event
+   polling. Production live-event deduplication also requires the Upstash Redis
+   variables above so the ten-minute delivery cap is shared across Vercel
+   function instances.
 
 3. Generate Prisma Client and apply migrations:
 
@@ -105,18 +112,17 @@ before deploying the application so the refresh token fields exist.
 
 Existing non-expiring tokens are migrated when a merchant next opens the app.
 To migrate dormant installations in a controlled batch, set a strong
-`SHOPIFY_TOKEN_MIGRATION_SECRET` production environment variable and call the
-protected endpoint. Requests are dry runs unless `execute` is explicitly true:
+`OFFLINE_TOKEN_MIGRATION_SECRET` production environment variable and call the
+protected endpoint:
 
-```powershell
-$headers = @{ Authorization = "Bearer $env:SHOPIFY_TOKEN_MIGRATION_SECRET" }
-Invoke-RestMethod -Method Post -Uri "$env:SHOPIFY_APP_URL/api/migrate-offline-tokens" -Headers $headers -ContentType "application/json" -Body '{}'
-Invoke-RestMethod -Method Post -Uri "$env:SHOPIFY_APP_URL/api/migrate-offline-tokens" -Headers $headers -ContentType "application/json" -Body '{"execute":true,"limit":25}'
+```sh
+curl -X POST "https://ai-agent-plum-eight.vercel.app/internal/token-migration?limit=20" \
+  -H "Authorization: Bearer $OFFLINE_TOKEN_MIGRATION_SECRET"
 ```
 
-Repeat the execute request until `remaining` is zero, then confirm the app's API
-health in the Shopify Dev Dashboard. The exchange revokes each original token
-and is irreversible, so run the dry request and verify database backups first.
+Repeat the request until `remaining` is zero, then confirm the app's API health
+in the Shopify Dev Dashboard. The exchange revokes each original token and is
+irreversible, so verify database backups first.
 
 ## Architecture notes
 

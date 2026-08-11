@@ -94,6 +94,7 @@ export async function createOfferRecord(input: {
   decision: OfferDecision;
   triggerContext: Record<string, unknown>;
   abVariant?: string | null;
+  experimentId?: string | null;
 }) {
   if (!input.decision.widgetType) return null;
 
@@ -106,6 +107,7 @@ export async function createOfferRecord(input: {
       triggerContext: input.triggerContext as Prisma.InputJsonValue,
       aiProvider: input.decision.aiProvider,
       abVariant: input.abVariant || null,
+      experimentId: input.experimentId || null,
     },
   });
 }

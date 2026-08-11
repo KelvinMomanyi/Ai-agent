@@ -43,7 +43,7 @@ export default function UpsellTimeSeriesChart({
           dataKey="clicks"
           stroke="#059669"
           strokeWidth={2}
-          name="Adds"
+          name="Clicks"
         />
         <Line
           type="monotone"

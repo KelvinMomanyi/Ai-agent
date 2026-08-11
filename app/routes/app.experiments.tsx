@@ -21,6 +21,13 @@ import {
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getExperimentAnalytics } from "../models/analytics.server";
+import {
+  EXPERIMENT_CONFIG_HELP_TEXT,
+  EXPERIMENT_CONFIG_PLACEHOLDER,
+  parseExperimentConfigText,
+  type ExperimentConfig,
+} from "../models/experimentConfig";
+import { cacheKeys, redis } from "../redis.server";
 
 const widgetTypeOptions = [
   { label: "AI Assistant (Chat)", value: "chat" },
@@ -66,18 +73,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const errors: Record<string, string> = {};
     if (!name) errors.name = "Experiment name is required";
 
-    let controlConfig = {};
-    let treatmentConfig = {};
-    try {
-      controlConfig = JSON.parse(controlConfigRaw || "{}");
-    } catch {
-      errors.controlConfig = "Invalid control JSON config";
-    }
-    try {
-      treatmentConfig = JSON.parse(treatmentConfigRaw || "{}");
-    } catch {
-      errors.treatmentConfig = "Invalid treatment JSON config";
-    }
+    let controlConfig: ExperimentConfig = {};
+    let treatmentConfig: ExperimentConfig = {};
+    const parsedControl = parseExperimentConfigText(controlConfigRaw);
+    const parsedTreatment = parseExperimentConfigText(treatmentConfigRaw);
+    if (parsedControl.success) controlConfig = parsedControl.data;
+    else errors.controlConfig = parsedControl.error;
+    if (parsedTreatment.success) treatmentConfig = parsedTreatment.data;
+    else errors.treatmentConfig = parsedTreatment.error;
 
     if (Object.keys(errors).length > 0) {
       return json({ errors, success: false }, { status: 400 });
@@ -101,6 +104,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         startedAt: new Date(),
       },
     });
+    await redis.del(cacheKeys.experiment(session.shop, widgetType));
 
     return redirect("/app/experiments");
   }
@@ -109,6 +113,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const id = String(formData.get("id") || "");
     const isActiveStr = String(formData.get("isActive") || "");
     const wasActive = isActiveStr === "true";
+    const experiment = await prisma.experiment.findFirst({
+      where: { shop: session.shop, id },
+      select: { widgetType: true },
+    });
 
     await prisma.experiment.updateMany({
       where: { shop: session.shop, id },
@@ -117,15 +125,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         endedAt: wasActive ? new Date() : null,
       },
     });
+    if (experiment) {
+      await redis.del(
+        cacheKeys.experiment(session.shop, experiment.widgetType),
+      );
+    }
 
     return redirect("/app/experiments");
   }
 
   if (intent === "delete") {
     const id = String(formData.get("id") || "");
+    const experiment = await prisma.experiment.findFirst({
+      where: { shop: session.shop, id },
+      select: { widgetType: true },
+    });
     await prisma.experiment.deleteMany({
       where: { shop: session.shop, id },
     });
+    if (experiment) {
+      await redis.del(
+        cacheKeys.experiment(session.shop, experiment.widgetType),
+      );
+    }
 
     return redirect("/app/experiments");
   }
@@ -143,8 +165,8 @@ export default function Experiments() {
     name: "",
     widgetType: "chat",
     trafficSplit: "50",
-    controlConfig: "{}",
-    treatmentConfig: "{}",
+    controlConfig: "",
+    treatmentConfig: "",
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -153,15 +175,15 @@ export default function Experiments() {
   const handleCreate = () => {
     const tempErrors: Record<string, string> = {};
     if (!formState.name.trim()) tempErrors.name = "Experiment name is required";
-    try {
-      JSON.parse(formState.controlConfig);
-    } catch {
-      tempErrors.controlConfig = "Invalid control JSON config";
+    const parsedControl = parseExperimentConfigText(formState.controlConfig);
+    const parsedTreatment = parseExperimentConfigText(
+      formState.treatmentConfig,
+    );
+    if (!parsedControl.success) {
+      tempErrors.controlConfig = parsedControl.error;
     }
-    try {
-      JSON.parse(formState.treatmentConfig);
-    } catch {
-      tempErrors.treatmentConfig = "Invalid treatment JSON config";
+    if (!parsedTreatment.success) {
+      tempErrors.treatmentConfig = parsedTreatment.error;
     }
 
     if (Object.keys(tempErrors).length > 0) {
@@ -181,8 +203,8 @@ export default function Experiments() {
       name: "",
       widgetType: "chat",
       trafficSplit: "50",
-      controlConfig: "{}",
-      treatmentConfig: "{}",
+      controlConfig: "",
+      treatmentConfig: "",
     });
     setErrors({});
   };
@@ -246,18 +268,22 @@ export default function Experiments() {
                     label="Control Configuration Variant JSON"
                     value={formState.controlConfig}
                     onChange={(value) => setFormState({ ...formState, controlConfig: value })}
-                    multiline={4}
+                    multiline={8}
                     error={errors.controlConfig}
                     autoComplete="off"
+                    helpText={EXPERIMENT_CONFIG_HELP_TEXT}
+                    placeholder={EXPERIMENT_CONFIG_PLACEHOLDER}
                   />
 
                   <TextField
                     label="Treatment Configuration Variant JSON"
                     value={formState.treatmentConfig}
                     onChange={(value) => setFormState({ ...formState, treatmentConfig: value })}
-                    multiline={4}
+                    multiline={8}
                     error={errors.treatmentConfig}
                     autoComplete="off"
+                    helpText={EXPERIMENT_CONFIG_HELP_TEXT}
+                    placeholder={EXPERIMENT_CONFIG_PLACEHOLDER}
                   />
 
                   <InlineStack align="end" gap="200">

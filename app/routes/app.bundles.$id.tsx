@@ -9,6 +9,7 @@ import { Banner, BlockStack, Layout, Page } from "@shopify/polaris";
 import { BundleForm } from "../components/bundles/BundleForm";
 import prisma from "../db.server";
 import {
+  BundleValidationError,
   getBundle,
   saveBundle,
   type BundleInput,
@@ -43,7 +44,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
           id: bundle.id,
           name: bundle.name,
           description: bundle.description || "",
-          discountType: bundle.discountType as "none" | "percentage" | "fixed",
+          discountType: normalizeStoredDiscountType(bundle.discountType),
           discountValue: bundle.discountValue.toString(),
           triggerProductIds: bundle.triggerProductIds,
           isActive: bundle.isActive,
@@ -71,7 +72,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
   const input = parseBundleInput(formData);
   const errors = validateBundle(input);
@@ -81,12 +82,14 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
 
   try {
-    await saveBundle(session.shop, params.id || "new", input);
+    await saveBundle(session.shop, params.id || "new", input, admin);
   } catch (error) {
+    const field =
+      error instanceof BundleValidationError ? error.field : "items";
     return json(
       {
         errors: {
-          items:
+          [field]:
             error instanceof Error
               ? error.message
               : "Bundle products must exist in this store.",
@@ -163,14 +166,33 @@ function validateBundle(input: BundleInput) {
   if (input.triggerProductIds.length === 0) {
     errors.triggerProductIds = "Add at least one trigger product";
   }
+  const discountValue = Number(input.discountValue);
+  if (input.discountType !== "none" && !Number.isFinite(discountValue)) {
+    errors.discountValue = "Enter a valid discount value";
+  } else if (
+    input.discountType === "percentage" &&
+    (discountValue < 1 || discountValue > 50)
+  ) {
+    errors.discountValue = "Percentage discounts must be between 1% and 50%";
+  } else if (input.discountType === "fixed_amount" && discountValue <= 0) {
+    errors.discountValue = "Fixed-amount discounts must be greater than zero";
+  }
   return errors;
 }
 
 function normalizeDiscountType(value: FormDataEntryValue | null) {
-  if (value === "percentage" || value === "fixed" || value === "none") {
+  if (value === "percentage" || value === "fixed_amount" || value === "none") {
     return value;
   }
   return "none";
+}
+
+function normalizeStoredDiscountType(
+  value: string,
+): "none" | "percentage" | "fixed_amount" {
+  return value === "percentage" || value === "fixed_amount"
+    ? value
+    : ("none" as const);
 }
 
 function parseJson<T>(value: FormDataEntryValue | null, fallback: T): T {

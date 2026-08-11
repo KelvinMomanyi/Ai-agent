@@ -4,9 +4,15 @@ import {
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
 } from "react-router";
-import { Form, useLoaderData, useNavigation } from "react-router";
+import {
+  Form,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
 import {
   Badge,
+  Banner,
   BlockStack,
   Button,
   Card,
@@ -44,23 +50,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
   const id = String(formData.get("id") || "");
   const intent = String(formData.get("intent") || "");
 
   if (!id) return redirect("/app/bundles");
 
-  if (intent === "toggle") {
-    await toggleBundle(
-      session.shop,
-      id,
-      String(formData.get("isActive")) !== "true",
-    );
-  }
+  try {
+    if (intent === "toggle") {
+      await toggleBundle(
+        session.shop,
+        id,
+        String(formData.get("isActive")) !== "true",
+        admin,
+      );
+    }
 
-  if (intent === "delete") {
-    await deleteBundle(session.shop, id);
+    if (intent === "delete") {
+      await deleteBundle(session.shop, id, admin);
+    }
+  } catch (error) {
+    return json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Shopify could not update the bundle discount.",
+      },
+      { status: 400 },
+    );
   }
 
   return redirect("/app/bundles");
@@ -68,6 +87,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function BundleIndex() {
   const { bundles } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
 
@@ -79,67 +99,72 @@ export default function BundleIndex() {
     >
       <Layout>
         <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              {bundles.length === 0 ? (
-                <Text as="p" tone="subdued">
-                  Create a bundle to show contextual complete-the-set offers.
-                </Text>
-              ) : (
-                bundles.map((bundle) => (
-                  <div
-                    key={bundle.id}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "minmax(0, 1fr) auto",
-                      gap: "16px",
-                      padding: "12px 0",
-                      borderBottom: "1px solid #ebebeb",
-                    }}
-                  >
-                    <BlockStack gap="100">
-                      <InlineStack gap="200" blockAlign="center">
-                        <Text as="h3" variant="headingSm">
-                          {bundle.name}
+          <BlockStack gap="400">
+            {actionData?.error ? (
+              <Banner tone="critical">{actionData.error}</Banner>
+            ) : null}
+            <Card>
+              <BlockStack gap="300">
+                {bundles.length === 0 ? (
+                  <Text as="p" tone="subdued">
+                    Create a bundle to show contextual complete-the-set offers.
+                  </Text>
+                ) : (
+                  bundles.map((bundle) => (
+                    <div
+                      key={bundle.id}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(0, 1fr) auto",
+                        gap: "16px",
+                        padding: "12px 0",
+                        borderBottom: "1px solid #ebebeb",
+                      }}
+                    >
+                      <BlockStack gap="100">
+                        <InlineStack gap="200" blockAlign="center">
+                          <Text as="h3" variant="headingSm">
+                            {bundle.name}
+                          </Text>
+                          <Badge tone={bundle.isActive ? "success" : undefined}>
+                            {bundle.isActive ? "Active" : "Inactive"}
+                          </Badge>
+                        </InlineStack>
+                        <Text as="p" tone="subdued">
+                          {bundle.triggerProductCount} triggers,{" "}
+                          {bundle.itemCount} items, {bundle.discountSummary},
+                          priority {bundle.priority}
                         </Text>
-                        <Badge tone={bundle.isActive ? "success" : undefined}>
-                          {bundle.isActive ? "Active" : "Inactive"}
-                        </Badge>
-                      </InlineStack>
-                      <Text as="p" tone="subdued">
-                        {bundle.triggerProductCount} triggers,{" "}
-                        {bundle.itemCount} items, {bundle.discountSummary},
-                        priority {bundle.priority}
-                      </Text>
-                    </BlockStack>
+                      </BlockStack>
 
-                    <InlineStack gap="200">
-                      <Button url={`/app/bundles/${bundle.id}`}>Edit</Button>
-                      <Form method="post">
-                        <input type="hidden" name="id" value={bundle.id} />
-                        <input
-                          type="hidden"
-                          name="isActive"
-                          value={String(bundle.isActive)}
-                        />
-                        <input type="hidden" name="intent" value="toggle" />
-                        <Button submit loading={isSubmitting}>
-                          {bundle.isActive ? "Deactivate" : "Activate"}
-                        </Button>
-                      </Form>
-                      <Form method="post">
-                        <input type="hidden" name="id" value={bundle.id} />
-                        <input type="hidden" name="intent" value="delete" />
-                        <Button submit tone="critical" loading={isSubmitting}>
-                          Delete
-                        </Button>
-                      </Form>
-                    </InlineStack>
-                  </div>
-                ))
-              )}
-            </BlockStack>
-          </Card>
+                      <InlineStack gap="200">
+                        <Button url={`/app/bundles/${bundle.id}`}>Edit</Button>
+                        <Form method="post">
+                          <input type="hidden" name="id" value={bundle.id} />
+                          <input
+                            type="hidden"
+                            name="isActive"
+                            value={String(bundle.isActive)}
+                          />
+                          <input type="hidden" name="intent" value="toggle" />
+                          <Button submit loading={isSubmitting}>
+                            {bundle.isActive ? "Deactivate" : "Activate"}
+                          </Button>
+                        </Form>
+                        <Form method="post">
+                          <input type="hidden" name="id" value={bundle.id} />
+                          <input type="hidden" name="intent" value="delete" />
+                          <Button submit tone="critical" loading={isSubmitting}>
+                            Delete
+                          </Button>
+                        </Form>
+                      </InlineStack>
+                    </div>
+                  ))
+                )}
+              </BlockStack>
+            </Card>
+          </BlockStack>
         </Layout.Section>
       </Layout>
     </Page>
@@ -148,6 +173,8 @@ export default function BundleIndex() {
 
 function formatDiscount(discountType: string, discountValue: string) {
   if (discountType === "percentage") return `${discountValue}% off`;
-  if (discountType === "fixed") return `$${discountValue} off`;
+  if (discountType === "fixed_amount") {
+    return `${discountValue} fixed amount off`;
+  }
   return "No discount";
 }

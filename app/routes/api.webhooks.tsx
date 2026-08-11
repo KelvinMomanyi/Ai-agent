@@ -28,7 +28,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const productId = toProductGid(
         (payload as any).admin_graphql_api_id || (payload as any).id,
       );
-      const product = mapProductWebhook(payload);
+      const variantStats = productId
+        ? await prisma.productVariantOrderStat.findMany({
+            where: { shop, productId },
+            select: { variantId: true, orderCount: true },
+          })
+        : [];
+      const product = mapProductWebhook(payload, {
+        variantOrderCounts: new Map(
+          variantStats.map((stat) => [stat.variantId, stat.orderCount]),
+        ),
+      });
       if (!product) {
         if (productId) {
           await deleteProduct(shop, productId);
@@ -77,7 +87,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const orderId = String(
         (payload as any).admin_graphql_api_id || (payload as any).id || "",
       );
-      await incrementOrderAffinities(shop, attribution.productIds, orderId);
+      await incrementOrderAffinities(
+        shop,
+        attribution.productIds,
+        orderId,
+        attribution.lineItems,
+      );
 
       const knownOffers = attribution.offerIds.length
         ? await prisma.offer.findMany({
@@ -180,6 +195,7 @@ async function deleteShopData(shop: string, deleteSessions: boolean) {
     prisma.bundleItem.deleteMany({ where: { bundle: { shop } } }),
     prisma.bundle.deleteMany({ where: { shop } }),
     prisma.productAffinity.deleteMany({ where: { shop } }),
+    prisma.productVariantOrderStat.deleteMany({ where: { shop } }),
     prisma.productOrderStat.deleteMany({ where: { shop } }),
     prisma.product.deleteMany({ where: { shop } }),
     prisma.experiment.deleteMany({ where: { shop } }),

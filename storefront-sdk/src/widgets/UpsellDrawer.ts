@@ -3,6 +3,8 @@ import {
   addVariantToCart,
   getProducts,
   money,
+  renderVariantPicker,
+  resolveProductVariant,
   text,
 } from "./BaseWidget";
 
@@ -51,18 +53,21 @@ export class UpsellDrawer extends BaseWidget {
         <div class="product-grid">
           ${products
             .map(
-              (product) => `
+              (product, index) => `
                 <article class="product-card">
                   ${product.imageUrl ? `<img src="${text(product.imageUrl)}" alt="${text(product.title)}" loading="lazy">` : "<span></span>"}
                   <div class="stack">
                     <div>
                       <p class="product-name">${text(product.title)}</p>
-                      <span class="price">${text(product.price ? money(product.price) : "")}</span>
+                      <span class="price" data-variant-price="upsell-${index}">${text(product.price ? money(product.price) : "")}</span>
                     </div>
                     <p class="reason">${text(product.reason || copy.whyThisGoes || "It pairs well with your cart.")}</p>
+                    ${renderVariantPicker(product, `upsell-${index}`)}
                     ${
-                      product.variantId
-                        ? `<button type="button" class="primary" data-add="${text(product.variantId)}">Add to cart</button>`
+                      product.variants.some(
+                        (variant) => variant.availableForSale,
+                      )
+                        ? `<button type="button" class="primary" data-add data-product-index="${index}">Add to cart</button>`
                         : product.handle
                           ? `<a class="primary" href="/products/${text(product.handle)}">View product</a>`
                           : ""
@@ -82,14 +87,28 @@ export class UpsellDrawer extends BaseWidget {
     this.root.querySelectorAll("[data-dismiss]").forEach((element) => {
       element.addEventListener("click", () => this.dismiss());
     });
+    this.root.querySelectorAll("[data-variant-picker]").forEach((picker) => {
+      picker.addEventListener("change", () => {
+        products.forEach((product, index) => {
+          const key = `upsell-${index}`;
+          const variant = resolveProductVariant(this.root, product, key);
+          const price = this.root.querySelector(
+            `[data-variant-price="${key}"]`,
+          );
+          if (price && variant) price.textContent = money(variant.price);
+        });
+      });
+    });
     this.root.querySelectorAll("[data-add]").forEach((button) => {
       button.addEventListener("click", async () => {
+        const index = Number((button as HTMLElement).dataset.productIndex);
+        const product = products[index];
+        const variant = product
+          ? resolveProductVariant(this.root, product, `upsell-${index}`)
+          : null;
+        if (!variant) return;
         this.trackClick("add_upsell");
-        await addVariantToCart(
-          (button as HTMLElement).dataset.add,
-          1,
-          this.payload.offerId,
-        );
+        await addVariantToCart(variant.id, 1, this.payload.offerId);
       });
     });
 

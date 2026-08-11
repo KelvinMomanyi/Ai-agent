@@ -15,6 +15,30 @@ type StorefrontCurrency = {
   source?: string;
 };
 
+export type WidgetVariant = {
+  id: string;
+  title: string;
+  sku: string;
+  price: string;
+  compareAtPrice: string | null;
+  quantityAvailable: number | null;
+  availableForSale: boolean;
+  selectedOptions: Array<{ name: string; value: string }>;
+};
+
+export type WidgetProduct = {
+  id: string;
+  variantId: string;
+  title: string;
+  handle: string;
+  imageUrl: string;
+  price: string;
+  quantity: number;
+  reason: string;
+  orderCount: number;
+  variants: WidgetVariant[];
+};
+
 export abstract class BaseWidget {
   protected root: ShadowRoot;
   protected container: HTMLElement;
@@ -268,7 +292,7 @@ function stripHtml(value: string) {
     .replace(/&#39;/g, "'");
 }
 
-export function getProducts(payload: WidgetPayload): any[] {
+export function getProducts(payload: WidgetPayload): WidgetProduct[] {
   const productSources = [
     payload.products,
     (payload.bundle as any)?.items,
@@ -279,19 +303,154 @@ export function getProducts(payload: WidgetPayload): any[] {
 
   return source.map((item) => {
     const product = item.product || item.target || item;
+    const requestedVariantId = String(
+      product.variantId || item.variantId || "",
+    );
+    const variants = normalizeWidgetVariants(product.variants || item.variants);
+    if (variants.length === 0 && requestedVariantId) {
+      variants.push({
+        id: requestedVariantId,
+        title: "Default",
+        sku: "",
+        price: String(product.price || item.price || "0"),
+        compareAtPrice: null,
+        quantityAvailable: null,
+        availableForSale: true,
+        selectedOptions: [],
+      });
+    }
+    const defaultVariant =
+      variants.find(
+        (variant) =>
+          variant.id === requestedVariantId && variant.availableForSale,
+      ) || variants.find((variant) => variant.availableForSale);
+
     return {
       id: product.id || item.productId || item.targetId,
-      variantId: product.variantId || item.variantId || "",
+      variantId: defaultVariant?.id || "",
       title: product.title || item.title || "Recommended product",
       handle: product.handle || item.handle || "",
       imageUrl:
-        product.imageUrl || product.image || item.imageUrl || item.image,
-      price: product.price || item.price || "",
-      quantity: item.quantity || 1,
-      reason: item.reason || item.affinity?.reason || item.reasoning || "",
-      orderCount: item.orderCount || item.affinity?.orderCount || 0,
+        product.imageUrl || product.image || item.imageUrl || item.image || "",
+      price: String(defaultVariant?.price || product.price || item.price || ""),
+      quantity: Number(item.quantity || 1),
+      reason: String(
+        item.reason || item.affinity?.reason || item.reasoning || "",
+      ),
+      orderCount: Number(item.orderCount || item.affinity?.orderCount || 0),
+      variants,
     };
   });
+}
+
+export function renderVariantPicker(product: WidgetProduct, key: string) {
+  if (product.variants.length <= 1) return "";
+  return `
+    <label class="variant-picker">
+      <span>Choose options</span>
+      <select data-variant-picker="${text(key)}" aria-label="Choose ${text(product.title)} options">
+        ${product.variants
+          .map(
+            (variant) => `
+              <option value="${text(variant.id)}"
+                ${variant.id === product.variantId ? "selected" : ""}
+                ${variant.availableForSale ? "" : "disabled"}>
+                ${text(formatVariantLabel(variant))}${variant.availableForSale ? "" : " - Sold out"}
+              </option>
+            `,
+          )
+          .join("")}
+      </select>
+    </label>
+  `;
+}
+
+export function resolveProductVariant(
+  root: ParentNode,
+  product: WidgetProduct,
+  key: string,
+) {
+  const picker = Array.from(
+    root.querySelectorAll<HTMLSelectElement>("[data-variant-picker]"),
+  ).find((element) => element.dataset.variantPicker === key);
+  const selectedId = picker?.value || product.variantId;
+  return (
+    product.variants.find(
+      (variant) => variant.id === selectedId && variant.availableForSale,
+    ) ||
+    product.variants.find((variant) => variant.availableForSale) ||
+    null
+  );
+}
+
+export function formatVariantLabel(variant: WidgetVariant) {
+  const options = variant.selectedOptions
+    .map((option) => `${option.name}: ${option.value}`)
+    .join(" / ");
+  return options || variant.title || "Default";
+}
+
+function normalizeWidgetVariants(value: unknown): WidgetVariant[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value
+    .map((entry) =>
+      entry && typeof entry === "object" && !Array.isArray(entry)
+        ? (entry as Record<string, any>)
+        : {},
+    )
+    .map((variant) => {
+      const id = String(variant.id || "");
+      const price = Number(variant.price);
+      if (
+        !id.startsWith("gid://shopify/ProductVariant/") ||
+        !Number.isFinite(price)
+      ) {
+        return null;
+      }
+      const selectedOptions = Array.isArray(variant.selectedOptions)
+        ? variant.selectedOptions
+            .map((option: unknown) =>
+              option && typeof option === "object" && !Array.isArray(option)
+                ? (option as Record<string, unknown>)
+                : {},
+            )
+            .map((option: Record<string, unknown>) => ({
+              name: String(option.name || ""),
+              value: String(option.value || ""),
+            }))
+            .filter(
+              (option: { name: string; value: string }) =>
+                option.name && option.value,
+            )
+        : [];
+      const quantity =
+        variant.quantityAvailable === null ||
+        variant.quantityAvailable === undefined
+          ? null
+          : Number(variant.quantityAvailable);
+      return {
+        id,
+        title: String(variant.title || "Default"),
+        sku: String(variant.sku || ""),
+        price: String(variant.price),
+        compareAtPrice:
+          variant.compareAtPrice === null ||
+          variant.compareAtPrice === undefined
+            ? null
+            : String(variant.compareAtPrice),
+        quantityAvailable:
+          quantity !== null && Number.isFinite(quantity) ? quantity : null,
+        availableForSale: variant.availableForSale === true,
+        selectedOptions,
+      } satisfies WidgetVariant;
+    })
+    .filter((variant): variant is WidgetVariant => Boolean(variant))
+    .filter((variant) => {
+      if (seen.has(variant.id)) return false;
+      seen.add(variant.id);
+      return true;
+    });
 }
 
 export async function addVariantToCart(
@@ -316,13 +475,14 @@ export async function addVariantToCart(
 export async function addManyToCart(
   items: Array<{ variantId: unknown; quantity: number }>,
   offerId?: unknown,
+  properties?: Record<string, string>,
 ) {
   const cartItems = items
     .filter((item) => item.variantId)
     .map((item) => ({
       id: String(item.variantId).split("/").pop(),
       quantity: item.quantity || 1,
-      properties: offerLineProperties(offerId),
+      properties: offerLineProperties(offerId, properties),
     }));
   if (cartItems.length === 0) return null;
 
@@ -334,9 +494,17 @@ export async function addManyToCart(
   return response.ok ? response.json() : null;
 }
 
-function offerLineProperties(offerId: unknown) {
+function offerLineProperties(
+  offerId: unknown,
+  properties: Record<string, string> = {},
+) {
   const value = String(offerId || "").trim();
-  return value ? { _aovboost_offer_id: value } : undefined;
+  const entries = Object.entries(properties).filter(
+    ([key, propertyValue]) => key.startsWith("_aovboost_") && propertyValue,
+  );
+  const result = Object.fromEntries(entries);
+  if (value) result._aovboost_offer_id = value;
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function escapeHtml(value: unknown) {
@@ -361,7 +529,7 @@ const BASE_WIDGET_CSS = `
   font-family: inherit;
 }
 * { box-sizing: border-box; letter-spacing: 0; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 .card, .drawer, .bar, .modal, .pill {
   background: var(--aovboost-surface);
   border: 1px solid var(--aovboost-line);
@@ -389,4 +557,6 @@ button, input { font: inherit; }
 .product-name { margin: 0; font-size: 13px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
 .price { color: var(--aovboost-ink); font-size: 13px; font-weight: 700; }
 .reason { color: var(--aovboost-muted); font-size: 12px; line-height: 1.35; }
+.variant-picker { display: grid; gap: 4px; color: var(--aovboost-muted); font-size: 11px; }
+.variant-picker select { width: 100%; min-height: 34px; border: 1px solid var(--aovboost-line); border-radius: 7px; background: var(--aovboost-surface); color: var(--aovboost-ink); padding: 6px 8px; }
 `;

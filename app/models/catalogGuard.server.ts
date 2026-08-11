@@ -5,7 +5,9 @@ import {
 } from "./catalogCache.server";
 import {
   getSafeDefaultVariantId,
+  getSyncedProductVariants,
   isCatalogProductAvailable,
+  type SyncedProductVariant,
 } from "./productCatalogMapping";
 
 export type CatalogProduct = CatalogCacheProduct;
@@ -19,6 +21,7 @@ type ProductWidgetSource = {
   compareAtPrice?: string | number | { toString(): string } | null;
   tags?: string[] | null;
   metafields?: unknown;
+  variants?: unknown;
 };
 
 type WidgetProduct = ReturnType<typeof catalogProductToWidgetProduct>;
@@ -75,7 +78,18 @@ export async function enforceCatalogBackedDecision(input: {
 }
 
 export function catalogProductToWidgetProduct(product: ProductWidgetSource) {
-  const variantId = getSafeDefaultVariantId(product.metafields);
+  const storedVariants = getSyncedProductVariants(product.metafields);
+  const variants =
+    storedVariants.length > 0
+      ? storedVariants
+      : normalizeCatalogVariants(product.variants);
+  const requestedVariantId = getSafeDefaultVariantId(product.metafields);
+  const defaultVariant =
+    variants.find(
+      (variant) =>
+        variant.id === requestedVariantId && variant.availableForSale,
+    ) || variants.find((variant) => variant.availableForSale);
+  const variantId = defaultVariant?.id || requestedVariantId;
 
   return {
     id: product.id,
@@ -84,9 +98,13 @@ export function catalogProductToWidgetProduct(product: ProductWidgetSource) {
     title: product.title,
     handle: product.handle,
     imageUrl: product.imageUrl || null,
-    price: product.price.toString(),
-    compareAtPrice: product.compareAtPrice?.toString(),
+    price: defaultVariant?.price || product.price.toString(),
+    compareAtPrice:
+      defaultVariant?.compareAtPrice || product.compareAtPrice?.toString(),
     tags: product.tags || [],
+    variants,
+    defaultVariantId: variantId,
+    hasMultipleVariants: variants.length > 1,
   };
 }
 
@@ -256,6 +274,7 @@ function sanitizeProductItem(
     productId: safeProduct.id,
     targetId: safeProduct.id,
     variantId: safeProduct.variantId,
+    variants: safeProduct.variants,
     quantity: Math.max(1, Number(record.quantity || 1)),
     reason: String(record.reason || asRecord(record.affinity).reason || ""),
     product: safeProduct,
@@ -335,6 +354,9 @@ function omitUnsafeProductFields(record: Record<string, unknown>) {
     image: _image,
     price: _price,
     compareAtPrice: _compareAtPrice,
+    variantId: _variantId,
+    defaultVariantId: _defaultVariantId,
+    variants: _variants,
     product: _product,
     target: _target,
     products: _products,
@@ -343,6 +365,60 @@ function omitUnsafeProductFields(record: Record<string, unknown>) {
   } = record;
 
   return rest;
+}
+
+function normalizeCatalogVariants(value: unknown): SyncedProductVariant[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value
+    .map((entry) => asRecord(entry))
+    .map((variant) => {
+      const id = String(variant.id || "");
+      const price = Number(variant.price);
+      if (
+        !id.startsWith("gid://shopify/ProductVariant/") ||
+        !Number.isFinite(price)
+      ) {
+        return null;
+      }
+      const selectedOptions = Array.isArray(variant.selectedOptions)
+        ? variant.selectedOptions
+            .map((option) => asRecord(option))
+            .map((option) => ({
+              name: String(option.name || ""),
+              value: String(option.value || ""),
+            }))
+            .filter((option) => option.name && option.value)
+        : [];
+      const rawQuantity =
+        variant.quantityAvailable === null ||
+        variant.quantityAvailable === undefined
+          ? null
+          : Number(variant.quantityAvailable);
+      return {
+        id,
+        title: String(variant.title || "Default"),
+        sku: String(variant.sku || ""),
+        price: String(variant.price),
+        compareAtPrice:
+          variant.compareAtPrice === null ||
+          variant.compareAtPrice === undefined
+            ? null
+            : String(variant.compareAtPrice),
+        quantityAvailable:
+          rawQuantity !== null && Number.isFinite(rawQuantity)
+            ? rawQuantity
+            : null,
+        availableForSale: variant.availableForSale === true,
+        selectedOptions,
+      } satisfies SyncedProductVariant;
+    })
+    .filter((variant): variant is SyncedProductVariant => Boolean(variant))
+    .filter((variant) => {
+      if (seen.has(variant.id)) return false;
+      seen.add(variant.id);
+      return true;
+    });
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

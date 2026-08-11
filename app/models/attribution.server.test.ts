@@ -53,4 +53,29 @@ describe("extractOrderAttribution", () => {
     expect(result.offerIds).toEqual([]);
     expect(result.lineItems[0].totalDiscount).toBe(3.75);
   });
+
+  it("attributes a bundle's actual post-discount line revenue", () => {
+    const result = extractOrderAttribution({
+      line_items: [
+        {
+          product_id: 1,
+          quantity: 1,
+          price: "40.00",
+          discount_allocations: [{ amount: "6.00" }],
+          properties: { _aovboost_offer_id: "bundle_offer" },
+        },
+        {
+          product_id: 2,
+          quantity: 2,
+          price: "30.00",
+          discount_allocations: [{ amount: "9.00" }],
+          properties: { _aovboost_offer_id: "bundle_offer" },
+        },
+      ],
+    });
+
+    expect(result.attributedOffers).toEqual([
+      { offerId: "bundle_offer", revenue: 85 },
+    ]);
+  });
 });

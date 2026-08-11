@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   getSafeDefaultVariantId,
+  getSyncedProductVariants,
   mapAdminCatalogProductNode,
   mapProductWebhook,
+  selectDefaultVariant,
 } from "./productCatalogMapping";
 
 describe("Shopify catalog safety mapping", () => {
@@ -25,7 +27,7 @@ describe("Shopify catalog safety mapping", () => {
     });
   });
 
-  it("keeps multi-option products discoverable without auto-selecting a variant", () => {
+  it("stores every fetched variant and defaults to the first in-stock variant", () => {
     const product = mapAdminCatalogProductNode(
       adminProduct({
         hasOnlyDefaultVariant: false,
@@ -37,13 +39,100 @@ describe("Shopify catalog safety mapping", () => {
     );
 
     expect(product).not.toBeNull();
-    expect(getSafeDefaultVariantId(product?.metafields)).toBe("");
+    expect(getSafeDefaultVariantId(product?.metafields)).toBe(
+      "gid://shopify/ProductVariant/11",
+    );
+    expect(getSyncedProductVariants(product?.metafields)).toHaveLength(2);
+  });
+
+  it("prefers the most ordered in-stock variant as the direct-add default", () => {
+    const product = mapAdminCatalogProductNode(
+      adminProduct({
+        hasOnlyDefaultVariant: false,
+        variants: [
+          adminVariant({ id: "gid://shopify/ProductVariant/11" }),
+          adminVariant({
+            id: "gid://shopify/ProductVariant/12",
+            title: "Large / Blue",
+            price: "549.00",
+            selectedOptions: [
+              { name: "Size", value: "Large" },
+              { name: "Color", value: "Blue" },
+            ],
+          }),
+        ],
+      }),
+      {
+        variantOrderCounts: new Map([
+          ["gid://shopify/ProductVariant/11", 2],
+          ["gid://shopify/ProductVariant/12", 9],
+        ]),
+      },
+    );
+
+    expect(getSafeDefaultVariantId(product?.metafields)).toBe(
+      "gid://shopify/ProductVariant/12",
+    );
+    expect(product?.price).toBe("549.00");
+    expect(getSyncedProductVariants(product?.metafields)[1]).toMatchObject({
+      title: "Large / Blue",
+      selectedOptions: [
+        { name: "Size", value: "Large" },
+        { name: "Color", value: "Blue" },
+      ],
+    });
+  });
+
+  it("never chooses a sold-out popular variant over an in-stock variant", () => {
+    const variants = [
+      {
+        id: "gid://shopify/ProductVariant/11",
+        title: "Small",
+        sku: "SMALL",
+        price: "10.00",
+        compareAtPrice: null,
+        quantityAvailable: 2,
+        availableForSale: true,
+        selectedOptions: [{ name: "Size", value: "Small" }],
+      },
+      {
+        id: "gid://shopify/ProductVariant/12",
+        title: "Large",
+        sku: "LARGE",
+        price: "10.00",
+        compareAtPrice: null,
+        quantityAvailable: 0,
+        availableForSale: false,
+        selectedOptions: [{ name: "Size", value: "Large" }],
+      },
+    ];
+
+    expect(
+      selectDefaultVariant(
+        variants,
+        new Map([["gid://shopify/ProductVariant/12", 100]]),
+      )?.id,
+    ).toBe("gid://shopify/ProductVariant/11");
   });
 
   it("accepts products without onlineStoreUrl", () => {
     expect(
       mapAdminCatalogProductNode(adminProduct({ onlineStoreUrl: null })),
     ).not.toBeNull();
+  });
+
+  it("caps stored variant JSON at 100 and records truncation", () => {
+    const variants = Array.from({ length: 101 }, (_, index) =>
+      adminVariant({ id: `gid://shopify/ProductVariant/${index + 1}` }),
+    );
+    const node = adminProduct({ variants });
+    node.variants.pageInfo.hasNextPage = true;
+    const product = mapAdminCatalogProductNode(node);
+
+    expect(getSyncedProductVariants(product?.metafields)).toHaveLength(100);
+    expect(product?.metafields).toMatchObject({
+      "aovboost.variantsTruncated": { value: "true" },
+    });
   });
 
   it("keeps zero-sellable products but marks them unavailable", () => {
@@ -104,17 +193,18 @@ describe("Shopify catalog safety mapping", () => {
     );
 
     expect(mapProductWebhook({ ...base, published_at: null })).toBeNull();
-    expect(
-      mapProductWebhook({
-        ...base,
-        variants: [
-          {
-            ...base.variants[0],
-            inventory_quantity: 0,
-          },
-        ],
-      }),
-    ).toBeNull();
+    const unavailable = mapProductWebhook({
+      ...base,
+      variants: [
+        {
+          ...base.variants[0],
+          inventory_quantity: 0,
+        },
+      ],
+    });
+    expect(unavailable?.metafields).toMatchObject({
+      "aovboost.availableForSale": { value: "false" },
+    });
   });
 });
 
@@ -128,7 +218,10 @@ function adminProduct(overrides: Record<string, unknown> = {}) {
     onlineStoreUrl: "https://example.test/products/trail-board",
     hasOnlyDefaultVariant: true,
     tags: ["trail"],
-    variants: { edges: variants.map((node) => ({ node })) },
+    variants: {
+      edges: variants.map((node) => ({ node })),
+      pageInfo: { hasNextPage: false },
+    },
     collections: { edges: [] },
     metafields: { edges: [] },
     ...overrides,
@@ -138,6 +231,7 @@ function adminProduct(overrides: Record<string, unknown> = {}) {
             edges: (overrides.variants as Array<Record<string, unknown>>).map(
               (node) => ({ node }),
             ),
+            pageInfo: { hasNextPage: false },
           },
         }
       : {}),
@@ -147,10 +241,16 @@ function adminProduct(overrides: Record<string, unknown> = {}) {
 function adminVariant(overrides: Record<string, unknown> = {}) {
   return {
     id: "gid://shopify/ProductVariant/11",
+    title: "Medium / Black",
+    sku: "TRAIL-M-BLK",
     price: "499.00",
     compareAtPrice: null,
     inventoryPolicy: "DENY",
     sellableOnlineQuantity: 4,
+    selectedOptions: [
+      { name: "Size", value: "Medium" },
+      { name: "Color", value: "Black" },
+    ],
     ...overrides,
   };
 }

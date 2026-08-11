@@ -3,6 +3,8 @@ import {
   addVariantToCart,
   getProducts,
   money,
+  renderVariantPicker,
+  resolveProductVariant,
   text,
 } from "./BaseWidget";
 
@@ -34,15 +36,16 @@ export class RecStrip extends BaseWidget {
         <div class="rail">
           ${products
             .map(
-              (product) => `
+              (product, index) => `
                 <article class="tile">
                   ${product.reason ? `<span class="badge">${text(product.reason)}</span>` : ""}
                   ${product.imageUrl ? `<img data-src="${text(product.imageUrl)}" alt="${text(product.title)}">` : ""}
                   <p class="product-name">${text(product.title)}</p>
-                  <span class="price">${text(product.price ? money(product.price) : "")}</span>
+                  <span class="price" data-variant-price="rec-${index}">${text(product.price ? money(product.price) : "")}</span>
+                  ${renderVariantPicker(product, `rec-${index}`)}
                   ${
-                    product.variantId
-                      ? `<button type="button" class="primary" data-add="${text(product.variantId)}">Add to cart</button>`
+                    product.variants.some((variant) => variant.availableForSale)
+                      ? `<button type="button" class="primary" data-add data-product-index="${index}">Add to cart</button>`
                       : product.handle
                         ? `<a class="primary" href="/products/${text(product.handle)}">View product</a>`
                         : ""
@@ -56,14 +59,28 @@ export class RecStrip extends BaseWidget {
     `);
 
     this.lazyLoadImages();
+    this.root.querySelectorAll("[data-variant-picker]").forEach((picker) => {
+      picker.addEventListener("change", () => {
+        products.forEach((product, index) => {
+          const key = `rec-${index}`;
+          const variant = resolveProductVariant(this.root, product, key);
+          const price = this.root.querySelector(
+            `[data-variant-price="${key}"]`,
+          );
+          if (price && variant) price.textContent = money(variant.price);
+        });
+      });
+    });
     this.root.querySelectorAll("[data-add]").forEach((button) => {
       button.addEventListener("click", async () => {
+        const index = Number((button as HTMLElement).dataset.productIndex);
+        const product = products[index];
+        const variant = product
+          ? resolveProductVariant(this.root, product, `rec-${index}`)
+          : null;
+        if (!variant) return;
         this.trackClick("add_recommendation");
-        await addVariantToCart(
-          (button as HTMLElement).dataset.add,
-          1,
-          this.payload.offerId,
-        );
+        await addVariantToCart(variant.id, 1, this.payload.offerId);
       });
     });
   }

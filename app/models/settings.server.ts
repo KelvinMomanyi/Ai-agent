@@ -9,6 +9,7 @@ export type PublicAppSettings = {
   discountThreshold: number;
   exitIntentEnabled: boolean;
   postPurchaseEnabled: boolean;
+  liveEventsEnabled: boolean;
 };
 
 export async function getAppSettings(shop: string) {
@@ -32,5 +33,11 @@ export function toPublicAppSettings(settings: AppSettings): PublicAppSettings {
     discountThreshold: Number(settings.discountThreshold),
     exitIntentEnabled: settings.exitIntentEnabled,
     postPurchaseEnabled: settings.postPurchaseEnabled,
+    // Explicit opt-in: an absent, empty, or differently-cased value is off.
+    liveEventsEnabled: isLiveEventsEnabled(),
   };
+}
+
+export function isLiveEventsEnabled() {
+  return process.env.AOVBOOST_ENABLE_LIVE_EVENTS === "true";
 }

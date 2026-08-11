@@ -8,6 +8,7 @@ import {
   FormLayout,
   InlineStack,
   RangeSlider,
+  Select,
   Text,
   TextField,
 } from "@shopify/polaris";
@@ -27,7 +28,7 @@ type BundleFormValue = {
   id?: string;
   name: string;
   description: string;
-  discountType: "none" | "percentage" | "fixed";
+  discountType: "none" | "percentage" | "fixed_amount";
   discountValue: string;
   triggerProductIds: string[];
   isActive: boolean;
@@ -54,7 +55,8 @@ export function BundleForm({ bundle, products, errors = {} }: BundleFormProps) {
       items: productIds.map((productId) => ({
         productId,
         quantity:
-          current.items.find((item) => item.productId === productId)?.quantity || 1,
+          current.items.find((item) => item.productId === productId)
+            ?.quantity || 1,
       })),
     }));
   };
@@ -66,11 +68,13 @@ export function BundleForm({ bundle, products, errors = {} }: BundleFormProps) {
         name="triggerProductIds"
         value={JSON.stringify(formState.triggerProductIds)}
       />
-      <input type="hidden" name="items" value={JSON.stringify(formState.items)} />
+      <input
+        type="hidden"
+        name="items"
+        value={JSON.stringify(formState.items)}
+      />
       <input type="hidden" name="isActive" value={String(formState.isActive)} />
       <input type="hidden" name="priority" value={String(formState.priority)} />
-      <input type="hidden" name="discountType" value="none" />
-      <input type="hidden" name="discountValue" value="0" />
 
       <Card>
         <BlockStack gap="500">
@@ -159,9 +163,62 @@ export function BundleForm({ bundle, products, errors = {} }: BundleFormProps) {
             />
           </FormLayout>
 
+          <FormLayout>
+            <Select
+              label="Discount type"
+              name="discountType"
+              options={[
+                { label: "No discount", value: "none" },
+                { label: "Percentage", value: "percentage" },
+                { label: "Fixed amount", value: "fixed_amount" },
+              ]}
+              value={formState.discountType}
+              error={errors.discountType}
+              onChange={(discountType) =>
+                setFormState({
+                  ...formState,
+                  discountType: discountType as BundleFormValue["discountType"],
+                  discountValue:
+                    discountType === "none" ? "0" : formState.discountValue,
+                })
+              }
+            />
+            {formState.discountType === "none" ? (
+              <input type="hidden" name="discountValue" value="0" />
+            ) : (
+              <TextField
+                label={
+                  formState.discountType === "percentage"
+                    ? "Percentage off"
+                    : "Amount off"
+                }
+                name="discountValue"
+                type="number"
+                min={formState.discountType === "percentage" ? 1 : 0.01}
+                max={formState.discountType === "percentage" ? 50 : undefined}
+                step={0.01}
+                suffix={
+                  formState.discountType === "percentage" ? "%" : undefined
+                }
+                value={formState.discountValue}
+                error={errors.discountValue}
+                helpText={
+                  formState.discountType === "percentage"
+                    ? "Enter 1–50%."
+                    : "Must be greater than zero and less than the live Shopify price of all bundle lines."
+                }
+                onChange={(discountValue) =>
+                  setFormState({ ...formState, discountValue })
+                }
+                autoComplete="off"
+              />
+            )}
+          </FormLayout>
+
           <Text as="p" tone="subdued">
-            Bundles group products at their Shopify prices. This app does not
-            advertise a bundle discount unless Shopify can apply it at checkout.
+            Base prices are refreshed from Shopify when you save. Active
+            discounts are applied by AOVBoost&apos;s Shopify automatic discount,
+            so the cart and checkout receive the same price shown in the bundle.
           </Text>
 
           <InlineStack gap="300">
@@ -177,5 +234,7 @@ export function BundleForm({ bundle, products, errors = {} }: BundleFormProps) {
 }
 
 function getProductTitle(products: ProductSummary[], productId: string) {
-  return products.find((product) => product.id === productId)?.title || productId;
+  return (
+    products.find((product) => product.id === productId)?.title || productId
+  );
 }

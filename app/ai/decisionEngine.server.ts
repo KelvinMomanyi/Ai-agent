@@ -8,6 +8,7 @@ import { generateWidgetCopy } from "./copyWriter.server";
 import { DECISION_ENGINE_SYSTEM } from "./prompts";
 import type { DecisionInput, OfferDecision } from "./types";
 import { getActiveBundlesForProduct } from "../models/bundle.server";
+import { getBundleDiscountVersion } from "../models/bundleDiscount.server";
 import { catalogProductToWidgetProduct } from "../models/catalogGuard.server";
 import {
   getRecommendationCatalog,
@@ -658,9 +659,18 @@ function enrichPayload(
     const products = getProductsFromBundle(bundle);
     if (products.length === 0) return null;
 
+    const discountVersion =
+      bundle.discountType === "percentage" ||
+      bundle.discountType === "fixed_amount"
+        ? getBundleDiscountVersion(bundle as any)
+        : "";
+    const storefrontBundle = discountVersion
+      ? { ...bundle, discountVersion }
+      : bundle;
+
     return {
       ...omitUnsafeProductPayload(payload),
-      bundle,
+      bundle: storefrontBundle,
       bundles: context.bundles,
       products,
       currentProductId: context.currentProductId,
