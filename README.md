@@ -124,6 +124,12 @@ This is a one-time reconciliation for a verified legacy table. Do not mark
 unrelated failed migrations as applied without independently verifying their
 database objects.
 
+The same guarded pre-build recognizes the original PostgreSQL `42883` JSON
+operator failure from `20260811130000_product_variant_order_stats`. It verifies
+any partially created table, marks only that failed attempt as rolled back, and
+retries the corrected idempotent migration. Any other failure reason or table
+shape remains a hard deployment failure for manual investigation.
+
 After deployment, update the app installation so the configured scopes and
 webhooks are active. The merchant must also select AOVBoost as the post-purchase
 app in Shopify Checkout settings and the app must have post-purchase access.

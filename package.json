@@ -3,9 +3,10 @@
   "private": true,
   "scripts": {
     "build": "npm run build:sdk && prisma generate && react-router build",
-    "prevercel-build": "prisma generate && node scripts/reconcile-durable-catalog-migration.mjs",
+    "prevercel-build": "prisma generate && node scripts/reconcile-failed-migrations.mjs",
     "vercel-build": "prisma migrate deploy && npm run build",
     "migrate:resolve:durable-catalog": "prisma migrate resolve --applied 20260803090000_durable_catalog_sync",
+    "migrate:rollback:variant-stats": "prisma migrate resolve --rolled-back 20260811130000_product_variant_order_stats",
     "build:sdk": "vite build --config storefront-sdk/vite.config.ts",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",
