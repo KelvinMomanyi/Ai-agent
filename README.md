@@ -177,6 +177,11 @@ irreversible, so verify database backups first.
   and server-side conversation history. Model-selected product IDs are checked
   against the shop catalog before canonical titles, prices, links, or cards are
   rendered.
+- Each chat request reads Shopify's live Ajax cart. Cart questions are answered
+  deterministically from its item quantities, presentment currency, discounts,
+  and current total; a failed cart read is reported as unavailable rather than
+  incorrectly described as empty. Cart items are matched back to the same
+  shop's synced catalog and cart-only items cannot become recommendations.
 - Product relationships use `(shop, productId)` keys to preserve tenant
   isolation.
 - Bundle widgets display Shopify's actual product prices. Only the signed

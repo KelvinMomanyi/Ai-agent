@@ -28,6 +28,27 @@ type Message = {
   productCards?: ProductCard[];
 };
 
+type LiveCartContext = {
+  status: "loaded" | "unavailable";
+  currency?: string;
+  itemCount?: number;
+  totalPrice?: number | null;
+  totalDiscount?: number | null;
+  capturedAt: number;
+  items: Array<{
+    productId: string;
+    variantId: string;
+    quantity: number;
+    title: string;
+    variantTitle: string;
+    handle: string;
+    finalUnitPrice: number | null;
+    originalUnitPrice: number | null;
+    finalLinePrice: number | null;
+    originalLinePrice: number | null;
+  }>;
+};
+
 export class ChatWidget extends BaseWidget {
   private messages: Message[] = [];
   private expanded = false;
@@ -455,12 +476,17 @@ export class ChatWidget extends BaseWidget {
     const config = (window as any).AOVBoost || {};
     const sdk = (window as any).AOVBoostSDK;
     const apiBase = normalizeProxyApiBase(config.apiBase).replace(/\/$/, "");
-    const auth =
+    const [auth, cartContext] = await Promise.all([
       typeof sdk?.getSignedAuthPayload === "function"
-        ? await sdk.getSignedAuthPayload()
-        : null;
+        ? sdk.getSignedAuthPayload()
+        : Promise.resolve(null),
+      readLiveCartContext(),
+    ]);
     if (!auth) throw new Error("Missing signed storefront auth");
     const currency = getStorefrontCurrency();
+    const cartCurrency = normalizeCurrencyCode(cartContext.currency);
+    const cartUsesDifferentCurrency =
+      Boolean(cartCurrency) && cartCurrency !== currency.code;
 
     return fetch(`${apiBase}/chat`, {
       method: "POST",
@@ -472,12 +498,17 @@ export class ChatWidget extends BaseWidget {
         ...auth,
         message: value,
         messageHistory: this.messages.slice(0, -2),
-        currency: currency.code,
-        currencySource: currency.source,
-        moneyFormat: currency.moneyFormat,
-        moneyWithCurrencyFormat: currency.moneyWithCurrencyFormat,
+        currency: cartCurrency || currency.code,
+        currencySource: cartCurrency ? "shopify_cart" : currency.source,
+        moneyFormat: cartUsesDifferentCurrency
+          ? undefined
+          : currency.moneyFormat,
+        moneyWithCurrencyFormat: cartUsesDifferentCurrency
+          ? undefined
+          : currency.moneyWithCurrencyFormat,
         locale: currency.locale,
         storefrontContext: getCurrentStorefrontContext(),
+        cartContext,
       }),
     });
   }
@@ -602,4 +633,78 @@ function getCurrentStorefrontContext() {
     productId,
     productHandle: String(product?.handle || "").slice(0, 255),
   };
+}
+
+async function readLiveCartContext(): Promise<LiveCartContext> {
+  const capturedAt = Date.now();
+  try {
+    const response = await fetch("/cart.js", {
+      headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`Cart read failed: ${response.status}`);
+    const cart = await response.json();
+    if (!cart || !Array.isArray(cart.items)) {
+      throw new Error("Invalid cart response");
+    }
+
+    return {
+      status: "loaded",
+      currency: normalizeCurrencyCode(cart.currency),
+      itemCount: normalizeCartInteger(cart.item_count),
+      totalPrice: fromCartMinorUnits(cart.total_price),
+      totalDiscount: fromCartMinorUnits(cart.total_discount),
+      capturedAt,
+      items: cart.items.slice(0, 100).flatMap((item: any) => {
+        const quantity = normalizeCartInteger(item?.quantity);
+        if (!quantity || quantity < 1) return [];
+        return [
+          {
+            productId: toShopifyGid("Product", item.product_id),
+            variantId: toShopifyGid(
+              "ProductVariant",
+              item.variant_id || item.id,
+            ),
+            quantity,
+            title: String(item.product_title || item.title || "").slice(0, 200),
+            variantTitle: String(item.variant_title || "").slice(0, 160),
+            handle: String(item.handle || "").slice(0, 255),
+            finalUnitPrice: fromCartMinorUnits(item.final_price),
+            originalUnitPrice: fromCartMinorUnits(item.original_price),
+            finalLinePrice: fromCartMinorUnits(item.final_line_price),
+            originalLinePrice: fromCartMinorUnits(item.original_line_price),
+          },
+        ];
+      }),
+    };
+  } catch {
+    return { status: "unavailable", capturedAt, items: [] };
+  }
+}
+
+function fromCartMinorUnits(value: unknown) {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0
+    ? Math.round(amount) / 100
+    : null;
+}
+
+function normalizeCartInteger(value: unknown) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : 0;
+}
+
+function toShopifyGid(type: "Product" | "ProductVariant", value: unknown) {
+  const id = String(value || "").trim();
+  if (!id) return "";
+  return id.startsWith(`gid://shopify/${type}/`)
+    ? id
+    : `gid://shopify/${type}/${id}`;
+}
+
+function normalizeCurrencyCode(value: unknown) {
+  const code = String(value || "")
+    .trim()
+    .toUpperCase();
+  return /^[A-Z]{3}$/.test(code) ? code : "";
 }

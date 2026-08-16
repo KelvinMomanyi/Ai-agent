@@ -45,6 +45,192 @@ export type ValidatedChatResponse = {
   fallbackUsed: boolean;
 };
 
+export type GroundedCartItem = {
+  product: CatalogProduct | null;
+  productId: string;
+  variantId: string;
+  title: string;
+  variantTitle: string;
+  handle: string;
+  quantity: number;
+  finalUnitPrice: number | null;
+  originalUnitPrice: number | null;
+  finalLinePrice: number | null;
+  originalLinePrice: number | null;
+};
+
+export type GroundedCartContext = {
+  status: "loaded" | "unavailable";
+  currencyCode: string;
+  itemCount: number;
+  totalPrice: number | null;
+  totalDiscount: number | null;
+  items: GroundedCartItem[];
+};
+
+export function normalizeLiveCartContext(
+  value: unknown,
+  catalogProducts: CatalogProduct[],
+): GroundedCartContext {
+  const input = asRecord(value);
+  if (input.status !== "loaded" || !Array.isArray(input.items)) {
+    return unavailableCartContext();
+  }
+
+  const productIndex = new Map<string, CatalogProduct>();
+  for (const product of catalogProducts) {
+    for (const key of productLookupKeys(product)) {
+      productIndex.set(key, product);
+    }
+  }
+
+  const items = input.items.slice(0, 100).flatMap((rawItem) => {
+    const item = asRecord(rawItem);
+    const quantity = boundedInteger(item.quantity, 1, 1000);
+    if (quantity === null) return [];
+
+    const suppliedProductId = cleanPromptText(item.productId, 100);
+    const suppliedHandle = cleanPromptText(item.handle, 255).toLowerCase();
+    const numericProductId = suppliedProductId.split("/").filter(Boolean).pop();
+    const productIdLookupKeys = [
+      suppliedProductId,
+      numericProductId,
+      numericProductId ? `gid://shopify/Product/${numericProductId}` : "",
+    ]
+      .filter((key): key is string => Boolean(key))
+      .map((key) => key.toLowerCase());
+    const handleLookupKeys = [
+      suppliedHandle,
+      suppliedHandle ? `/products/${suppliedHandle}` : "",
+    ].filter(Boolean);
+    const product = suppliedProductId
+      ? productIdLookupKeys.map((key) => productIndex.get(key)).find(Boolean) ||
+        null
+      : handleLookupKeys.map((key) => productIndex.get(key)).find(Boolean) ||
+        null;
+
+    const suppliedVariantId = cleanPromptText(item.variantId, 120);
+    const numericVariantId = suppliedVariantId.split("/").filter(Boolean).pop();
+    const variant = product?.variants.find((candidate) => {
+      const candidateNumericId = candidate.id.split("/").filter(Boolean).pop();
+      return (
+        candidate.id === suppliedVariantId ||
+        candidateNumericId === suppliedVariantId ||
+        candidate.id === `gid://shopify/ProductVariant/${numericVariantId}`
+      );
+    });
+    const rawTitle = cleanPromptText(item.title, 200);
+    const rawVariantTitle = cleanPromptText(item.variantTitle, 160);
+    const variantTitle = cleanCartVariantTitle(
+      variant?.title || rawVariantTitle,
+    );
+
+    return [
+      {
+        product,
+        productId: product?.id || suppliedProductId,
+        variantId: variant?.id || suppliedVariantId,
+        title: product?.title || rawTitle || "Cart item",
+        variantTitle,
+        handle: product?.handle || suppliedHandle,
+        quantity,
+        finalUnitPrice: boundedMoney(item.finalUnitPrice),
+        originalUnitPrice: boundedMoney(item.originalUnitPrice),
+        finalLinePrice: boundedMoney(item.finalLinePrice),
+        originalLinePrice: boundedMoney(item.originalLinePrice),
+      },
+    ];
+  });
+  const summedItemCount = items.reduce((sum, item) => sum + item.quantity, 0);
+  const reportedItemCount = boundedInteger(input.itemCount, 0, 10_000);
+  if ((reportedItemCount || 0) > 0 && summedItemCount === 0) {
+    return unavailableCartContext();
+  }
+  const itemCount = Math.max(summedItemCount, reportedItemCount || 0);
+  const computedTotal = items.reduce<number | null>((sum, item) => {
+    const linePrice =
+      item.finalLinePrice ??
+      (item.finalUnitPrice === null
+        ? null
+        : item.finalUnitPrice * item.quantity);
+    return linePrice === null || sum === null ? null : sum + linePrice;
+  }, 0);
+
+  return {
+    status: "loaded",
+    currencyCode: normalizeCurrencyCode(input.currency, ""),
+    itemCount,
+    totalPrice: boundedMoney(input.totalPrice) ?? computedTotal,
+    totalDiscount: boundedMoney(input.totalDiscount),
+    items,
+  };
+}
+
+export function formatCartContextForPrompt(
+  cart: GroundedCartContext,
+  currency: CurrencyInfo,
+) {
+  if (cart.status !== "loaded") {
+    return "The live Shopify cart could not be verified. Do not say it is empty and do not guess its contents or total.";
+  }
+  if (cart.itemCount === 0) return "Verified live Shopify cart: empty.";
+
+  const total =
+    cart.totalPrice === null
+      ? "unavailable"
+      : formatCartMoney(cart.totalPrice, currency);
+  const lines = cart.items.map((item) => {
+    const variant = item.variantTitle ? `; option: ${item.variantTitle}` : "";
+    const linePrice =
+      item.finalLinePrice === null
+        ? ""
+        : `; current line total: ${formatCartMoney(item.finalLinePrice, currency)}`;
+    const verification = item.product
+      ? `verified catalog ID: ${item.product.id}`
+      : "live-cart-only item; not eligible for recommendation or productIds";
+    return `- ${item.quantity} x ${item.title}${variant}${linePrice}; ${verification}`;
+  });
+
+  return [
+    `Verified live Shopify cart item count: ${cart.itemCount}`,
+    `Verified current cart total after cart discounts: ${total}`,
+    ...lines,
+  ].join("\n");
+}
+
+export function buildCartSummaryReply(
+  cart: GroundedCartContext,
+  currency: CurrencyInfo,
+) {
+  if (cart.status !== "loaded") {
+    return "I couldn\u2019t verify your live cart just now, so I won\u2019t guess whether it is empty or what its total is. Please try again in a moment.";
+  }
+  if (cart.itemCount === 0) return "Your cart is currently empty.";
+
+  const itemLabel = cart.itemCount === 1 ? "item" : "items";
+  const total =
+    cart.totalPrice === null
+      ? "an unavailable current total"
+      : `a current total of ${formatCartMoney(cart.totalPrice, currency)}`;
+  const discount =
+    cart.totalDiscount !== null && cart.totalDiscount > 0
+      ? ` You\u2019re currently saving ${formatCartMoney(cart.totalDiscount, currency)} through cart discounts.`
+      : "";
+  const details = cart.items
+    .map((item) => {
+      const option = item.variantTitle ? ` (${item.variantTitle})` : "";
+      const lineTotal =
+        item.finalLinePrice === null
+          ? ""
+          : ` \u2014 ${formatCartMoney(item.finalLinePrice, currency)}`;
+      const link = item.handle ? ` /products/${item.handle}` : "";
+      return `- ${item.quantity} \u00d7 ${item.title}${option}${lineTotal}${link}`;
+    })
+    .join("\n");
+
+  return `Your cart has ${cart.itemCount} ${itemLabel}, with ${total}.${discount}${details ? `\n\n${details}` : ""}`;
+}
+
 export function sanitizeMessageHistory(value: unknown): ChatMessageHistory {
   if (!Array.isArray(value)) return [];
   return value
@@ -384,6 +570,15 @@ export function normalizeCurrencyCode(value: unknown, fallback = "USD") {
 
 export function classifyMessageIntent(value: string) {
   if (
+    /\b(cart|bag|basket)\b/i.test(value) ||
+    /\b(?:what(?:'s| is)|how much)\b.*\b(?:my\s+)?(?:total|subtotal)\b/i.test(
+      value,
+    )
+  ) {
+    return "cart_summary";
+  }
+
+  if (
     /\b(expensive|cheaper|cheap|discount|coupon|promo|deal|sale|price|afford|budget|cost)\b/i.test(
       value,
     )
@@ -528,6 +723,63 @@ function productLookupKeys(product: CatalogProduct) {
   return [id, numericId, handle, `/products/${handle}`]
     .filter(Boolean)
     .map((value) => value.toLowerCase());
+}
+
+function unavailableCartContext(): GroundedCartContext {
+  return {
+    status: "unavailable",
+    currencyCode: "",
+    itemCount: 0,
+    totalPrice: null,
+    totalDiscount: null,
+    items: [],
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function boundedInteger(value: unknown, minimum: number, maximum: number) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < minimum || number > maximum) {
+    return null;
+  }
+  return number;
+}
+
+function boundedMoney(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || number > 1_000_000_000) {
+    return null;
+  }
+  return Math.round(number * 100) / 100;
+}
+
+function cleanCartVariantTitle(value: unknown) {
+  const title = cleanPromptText(value, 160);
+  return /^(default|default title)$/i.test(title) ? "" : title;
+}
+
+function formatCartMoney(amount: number, currency: CurrencyInfo) {
+  if (amount > 0) return formatPrice(amount, currency);
+  const moneyFormat =
+    currency.moneyFormat || currency.moneyWithCurrencyFormat || "";
+  if (moneyFormat) {
+    return applyShopifyMoneyFormat(0, moneyFormat, currency.code);
+  }
+  try {
+    return new Intl.NumberFormat(currency.locale || undefined, {
+      style: "currency",
+      currency: currency.code,
+      currencyDisplay: "symbol",
+    }).format(0);
+  } catch {
+    return `${currency.code} 0.00`.trim();
+  }
 }
 
 function cleanPromptText(value: unknown, maxLength: number) {

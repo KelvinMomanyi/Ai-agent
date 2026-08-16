@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { CatalogCacheProduct } from "./catalogCache.server";
 import {
+  buildCartSummaryReply,
   buildCatalogFallbackReply,
   classifyMessageIntent,
   enforceReplyCurrency,
   findRequestedCartProduct,
+  formatCartContextForPrompt,
   formatCatalogProductsForPrompt,
   formatPrice,
   getReplyProductCards,
+  normalizeLiveCartContext,
   sanitizeMessageHistory,
   validateGroundedAiChatResponse,
 } from "./chatResponse";
@@ -36,7 +39,101 @@ describe("chat response contract", () => {
     expect(classifyMessageIntent("Do you stock a trail board?")).toBe(
       "product_availability",
     );
+    expect(classifyMessageIntent("What is the total cost in my cart?")).toBe(
+      "cart_summary",
+    );
+    expect(classifyMessageIntent("Is my bag empty?")).toBe("cart_summary");
     expect(classifyMessageIntent("Hello there")).toBe("general");
+  });
+
+  it("grounds live cart contents, quantities, variants, and totals", () => {
+    const cart = normalizeLiveCartContext(
+      {
+        status: "loaded",
+        currency: "KES",
+        itemCount: 2,
+        totalPrice: 898,
+        totalDiscount: 100,
+        items: [
+          {
+            productId: "1",
+            variantId: "11",
+            quantity: 2,
+            title: "Tampered title",
+            variantTitle: "Default Title",
+            handle: "trail-board",
+            finalUnitPrice: 449,
+            originalUnitPrice: 499,
+            finalLinePrice: 898,
+            originalLinePrice: 998,
+          },
+        ],
+      },
+      [product()],
+    );
+
+    expect(cart).toMatchObject({
+      status: "loaded",
+      currencyCode: "KES",
+      itemCount: 2,
+      totalPrice: 898,
+      totalDiscount: 100,
+      items: [
+        {
+          productId: "gid://shopify/Product/1",
+          variantId: "gid://shopify/ProductVariant/11",
+          title: "Trail Board",
+          variantTitle: "",
+          quantity: 2,
+        },
+      ],
+    });
+    const reply = buildCartSummaryReply(cart, kes);
+    expect(reply).toContain("2 items");
+    expect(reply).toContain("current total of KSh898.00");
+    expect(reply).toContain("saving KSh100.00");
+    expect(reply).toContain("2 × Trail Board — KSh898.00");
+    expect(reply).not.toContain("Tampered title");
+  });
+
+  it("never turns an unavailable cart read into a false empty answer", () => {
+    const cart = normalizeLiveCartContext(
+      { status: "unavailable", items: [] },
+      [product()],
+    );
+    expect(buildCartSummaryReply(cart, kes)).toContain("won’t guess");
+    expect(buildCartSummaryReply(cart, kes)).not.toContain("currently empty");
+    expect(formatCartContextForPrompt(cart, kes)).toContain(
+      "Do not say it is empty",
+    );
+  });
+
+  it("keeps Shopify cart-only items out of the recommendation catalog", () => {
+    const cart = normalizeLiveCartContext(
+      {
+        status: "loaded",
+        currency: "KES",
+        itemCount: 1,
+        totalPrice: 250,
+        items: [
+          {
+            productId: "gid://shopify/Product/999",
+            variantId: "gid://shopify/ProductVariant/9991",
+            quantity: 1,
+            title: "Archived Store Item",
+            handle: "trail-board",
+            finalLinePrice: 250,
+          },
+        ],
+      },
+      [product()],
+    );
+
+    expect(cart.items[0].product).toBeNull();
+    expect(formatCartContextForPrompt(cart, kes)).toContain(
+      "not eligible for recommendation or productIds",
+    );
+    expect(buildCartSummaryReply(cart, kes)).toContain("Archived Store Item");
   });
 
   it("bounds and sanitizes conversation history", () => {

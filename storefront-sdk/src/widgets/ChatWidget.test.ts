@@ -36,6 +36,32 @@ describe("ChatWidget", () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        if (url === "/cart.js") {
+          return new Response(
+            JSON.stringify({
+              currency: "KES",
+              item_count: 2,
+              total_price: 99800,
+              total_discount: 0,
+              items: [
+                {
+                  product_id: 1,
+                  variant_id: 11,
+                  quantity: 2,
+                  product_title: "Trail Board",
+                  variant_title: "Default Title",
+                  handle: "trail-board",
+                  final_price: 49900,
+                  original_price: 49900,
+                  final_line_price: 99800,
+                  original_line_price: 99800,
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
         if (url === "/apps/aovboost/chat") {
           return new Response(
             `data: ${JSON.stringify({
@@ -101,6 +127,7 @@ describe("ChatWidget", () => {
       sessionToken: "signed-session-token",
       message: "Show me a trail board",
       currency: "KES",
+      currencySource: "shopify_cart",
       moneyFormat: "KSh{{amount}}",
       storefrontContext: {
         pageType: "home",
@@ -108,7 +135,29 @@ describe("ChatWidget", () => {
         productId: "",
         productHandle: "",
       },
+      cartContext: {
+        status: "loaded",
+        currency: "KES",
+        itemCount: 2,
+        totalPrice: 998,
+        totalDiscount: 0,
+        items: [
+          {
+            productId: "gid://shopify/Product/1",
+            variantId: "gid://shopify/ProductVariant/11",
+            quantity: 2,
+            title: "Trail Board",
+            variantTitle: "Default Title",
+            handle: "trail-board",
+            finalUnitPrice: 499,
+            originalUnitPrice: 499,
+            finalLinePrice: 998,
+            originalLinePrice: 998,
+          },
+        ],
+      },
     });
+    expect(requestBody.cartContext.capturedAt).toEqual(expect.any(Number));
     expect(requestBody.messageHistory).toEqual([
       { role: "assistant", content: "How can I help?" },
     ]);
@@ -131,14 +180,15 @@ describe("ChatWidget", () => {
   it("renders accessible input controls and escapes assistant HTML", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(
-            `data: ${JSON.stringify({ delta: '<img src=x onerror="alert(1)">' })}\n\ndata: [DONE]\n\n`,
-            { status: 200 },
-          ),
-        ),
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === "/cart.js") {
+          return new Response("Unavailable", { status: 503 });
+        }
+        return new Response(
+          `data: ${JSON.stringify({ delta: '<img src=x onerror="alert(1)">' })}\n\ndata: [DONE]\n\n`,
+          { status: 200 },
+        );
+      }),
     );
 
     const widget = new ChatWidget({ copy: { greeting: "Hello" } });
