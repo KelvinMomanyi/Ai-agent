@@ -58,6 +58,12 @@ export class ChatWidget extends BaseWidget {
 
   render(): void {
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
+    const configuredShopName = String(
+      (window as any).AOVBoost?.shopName || "",
+    ).trim();
+    const assistantLabel = configuredShopName
+      ? `${configuredShopName} assistant`
+      : "Store assistant";
 
     this.html(`
       <style>
@@ -121,9 +127,9 @@ export class ChatWidget extends BaseWidget {
         .product-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .price { color: var(--aovboost-muted); font-size: 12px; font-weight: 700; }
       </style>
-      <aside class="wrap card" aria-label="AOVBoost Assistant">
+      <aside class="wrap card" aria-label="${text(assistantLabel)}">
         <div class="head">
-          <h3 class="title">AOVBoost Assistant</h3>
+          <h3 class="title">${text(assistantLabel)}</h3>
           <button type="button" class="icon" data-close aria-label="Close">×</button>
         </div>
         ${
@@ -131,7 +137,7 @@ export class ChatWidget extends BaseWidget {
             ? this.renderChatUi()
             : `<p class="body">${text(copy.greeting || this.messages[0].content)}</p>
               <div class="actions">
-                <button type="button" class="primary" data-expand>${text(copy.ctaAccept || "Chat with AI")}</button>
+                <button type="button" class="primary" data-expand>${text(copy.ctaAccept || "Chat with store assistant")}</button>
                 <button type="button" class="secondary" data-dismiss>${text(copy.ctaDecline || "Browse myself")}</button>
               </div>`
         }
@@ -164,7 +170,7 @@ export class ChatWidget extends BaseWidget {
 
   private renderChatUi() {
     return `
-      <div class="messages" data-messages>
+      <div class="messages" role="log" aria-live="polite" aria-relevant="additions text" data-messages>
         ${this.messages.map((message) => this.renderMessage(message)).join("")}
       </div>
       <div class="compose">
@@ -471,6 +477,7 @@ export class ChatWidget extends BaseWidget {
         moneyFormat: currency.moneyFormat,
         moneyWithCurrencyFormat: currency.moneyWithCurrencyFormat,
         locale: currency.locale,
+        storefrontContext: getCurrentStorefrontContext(),
       }),
     });
   }
@@ -572,4 +579,27 @@ function normalizeProxyApiBase(value?: string) {
   if (candidate.includes("/apps/aovboost")) return candidate;
   if (candidate.startsWith("/apps/")) return candidate;
   return "/apps/aovboost";
+}
+
+function getCurrentStorefrontContext() {
+  const win = window as any;
+  const product = win.Shopify?.product || win.ShopifyAnalytics?.meta?.product;
+  const rawProductId = String(product?.gid || product?.id || "");
+  const productId = rawProductId
+    ? rawProductId.startsWith("gid://shopify/Product/")
+      ? rawProductId
+      : `gid://shopify/Product/${rawProductId}`
+    : "";
+  const pageType = String(
+    win.ShopifyAnalytics?.meta?.page?.pageType ||
+      document.body?.dataset?.template ||
+      (window.location.pathname === "/" ? "home" : "other"),
+  );
+
+  return {
+    pageType: pageType.slice(0, 50),
+    path: window.location.pathname.slice(0, 300),
+    productId,
+    productHandle: String(product?.handle || "").slice(0, 255),
+  };
 }

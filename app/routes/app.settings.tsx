@@ -53,6 +53,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           postPurchaseEnabled: config.postPurchaseEnabled,
           aiTone: config.aiTone,
           brandVoice: config.brandVoice || "",
+          storeKnowledge: config.storeKnowledge || "",
           blockedProductIds: config.blockedProductIds.join(", "),
         }
       : {
@@ -66,6 +67,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           postPurchaseEnabled: true,
           aiTone: "friendly",
           brandVoice: "",
+          storeKnowledge: "",
           blockedProductIds: "",
         },
   });
@@ -79,12 +81,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const chatGreeting = String(formData.get("chatGreeting") || "").trim();
   const bundlesEnabled = parseBoolean(formData.get("bundlesEnabled"));
   const upsellEnabled = parseBoolean(formData.get("upsellEnabled"));
-  const discountNudgeEnabled = parseBoolean(formData.get("discountNudgeEnabled"));
-  const discountThreshold = parseFloat(String(formData.get("discountThreshold") || "50"));
+  const discountNudgeEnabled = parseBoolean(
+    formData.get("discountNudgeEnabled"),
+  );
+  const discountThreshold = parseFloat(
+    String(formData.get("discountThreshold") || "50"),
+  );
   const exitIntentEnabled = parseBoolean(formData.get("exitIntentEnabled"));
   const postPurchaseEnabled = parseBoolean(formData.get("postPurchaseEnabled"));
   const aiTone = String(formData.get("aiTone") || "friendly");
-  const brandVoice = String(formData.get("brandVoice") || "").trim();
+  const brandVoice = String(formData.get("brandVoice") || "")
+    .trim()
+    .slice(0, 4_000);
+  const storeKnowledge = String(formData.get("storeKnowledge") || "")
+    .trim()
+    .slice(0, 12_000);
   const blockedProductIdsRaw = String(formData.get("blockedProductIds") || "");
   const blockedProductIds = blockedProductIdsRaw
     .split(",")
@@ -105,6 +116,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         postPurchaseEnabled,
         aiTone,
         brandVoice: brandVoice || null,
+        storeKnowledge: storeKnowledge || null,
         blockedProductIds,
       },
       create: {
@@ -119,6 +131,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         postPurchaseEnabled,
         aiTone,
         brandVoice: brandVoice || null,
+        storeKnowledge: storeKnowledge || null,
         blockedProductIds,
       },
     });
@@ -160,6 +173,7 @@ export default function Settings() {
     postPurchaseEnabled: config.postPurchaseEnabled,
     aiTone: config.aiTone,
     brandVoice: config.brandVoice,
+    storeKnowledge: config.storeKnowledge,
     blockedProductIds: config.blockedProductIds,
   });
 
@@ -195,7 +209,9 @@ export default function Settings() {
       <Layout>
         {actionData?.success && (
           <Layout.Section>
-            <Banner tone="success">Storefront configuration settings saved successfully.</Banner>
+            <Banner tone="success">
+              Storefront configuration settings saved successfully.
+            </Banner>
           </Layout.Section>
         )}
 
@@ -212,12 +228,19 @@ export default function Settings() {
                   Storefront Widgets Toggles
                 </Text>
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  Individually enable or disable widgets computed by the AOVBoost behavioral decision engine.
+                  Individually enable or disable widgets computed by the
+                  AOVBoost behavioral decision engine.
                 </Text>
               </BlockStack>
 
               <FormLayout>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "16px",
+                  }}
+                >
                   <Checkbox
                     label="AI Assistant (Chat)"
                     checked={formState.chatEnabled}
@@ -243,7 +266,10 @@ export default function Settings() {
                     label="Cart-value Progress Nudges"
                     checked={formState.discountNudgeEnabled}
                     onChange={(checked) =>
-                      setFormState({ ...formState, discountNudgeEnabled: checked })
+                      setFormState({
+                        ...formState,
+                        discountNudgeEnabled: checked,
+                      })
                     }
                   />
                   <Checkbox
@@ -257,7 +283,10 @@ export default function Settings() {
                     label="Post Purchase Upsell"
                     checked={formState.postPurchaseEnabled}
                     onChange={(checked) =>
-                      setFormState({ ...formState, postPurchaseEnabled: checked })
+                      setFormState({
+                        ...formState,
+                        postPurchaseEnabled: checked,
+                      })
                     }
                   />
                 </div>
@@ -274,7 +303,8 @@ export default function Settings() {
                   AI Chat Widget & Personality
                 </Text>
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  Customize the first greeting and voice style of the storefront shopping companion.
+                  Customize the first greeting and voice style of the storefront
+                  shopping companion.
                 </Text>
               </BlockStack>
 
@@ -310,7 +340,8 @@ export default function Settings() {
                   Offer Economics & Guardrails
                 </Text>
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  Define budget constraints and catalog exemptions for A/B tests and widgets.
+                  Define budget constraints and catalog exemptions for A/B tests
+                  and widgets.
                 </Text>
               </BlockStack>
 
@@ -351,7 +382,8 @@ export default function Settings() {
                   AI Brand Guidelines
                 </Text>
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  Describe your brand personality, core demographics, or styling criteria to prompt the generation engine.
+                  Describe your brand personality, core demographics, or styling
+                  criteria to prompt the generation engine.
                 </Text>
               </BlockStack>
 
@@ -366,6 +398,20 @@ export default function Settings() {
                   placeholder="E.g., Energetic, helpful, focus on athletic performance, emphasize high product materials and premium customer experience."
                   autoComplete="off"
                   helpText="Guidelines used directly in dynamic copy generation prompt engineering."
+                />
+
+                <TextField
+                  label="Store facts, FAQs, and support guidance"
+                  value={formState.storeKnowledge}
+                  onChange={(value) =>
+                    setFormState({ ...formState, storeKnowledge: value })
+                  }
+                  multiline={8}
+                  maxLength={12000}
+                  showCharacterCount
+                  placeholder="Add only verified store facts: sizing guidance, delivery estimates, pickup details, warranty rules, support hours, materials, care instructions, and common FAQs."
+                  autoComplete="off"
+                  helpText="The assistant treats this as store-specific reference material. Shopify product data and published store policies remain authoritative for catalog, price, stock, shipping, and returns."
                 />
               </FormLayout>
             </BlockStack>

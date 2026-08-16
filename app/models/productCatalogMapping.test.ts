@@ -115,10 +115,28 @@ describe("Shopify catalog safety mapping", () => {
     ).toBe("gid://shopify/ProductVariant/11");
   });
 
-  it("accepts products without onlineStoreUrl", () => {
+  it("rejects products that are not published to the Online Store", () => {
     expect(
       mapAdminCatalogProductNode(adminProduct({ onlineStoreUrl: null })),
-    ).not.toBeNull();
+    ).toBeNull();
+  });
+
+  it("stores a plain-text product description and featured image for grounding", () => {
+    const product = mapAdminCatalogProductNode(
+      adminProduct({
+        description: "A waterproof trail board with a bamboo core.",
+        featuredMedia: {
+          preview: { image: { url: "https://cdn.example.test/trail.jpg" } },
+        },
+      }),
+    );
+
+    expect(product?.imageUrl).toBe("https://cdn.example.test/trail.jpg");
+    expect(product?.metafields).toMatchObject({
+      "aovboost.description": {
+        value: "A waterproof trail board with a bamboo core.",
+      },
+    });
   });
 
   it("caps stored variant JSON at 100 and records truncation", () => {
@@ -175,6 +193,7 @@ describe("Shopify catalog safety mapping", () => {
       handle: "trail-board",
       status: "active",
       published_at: "2026-08-04T00:00:00Z",
+      body_html: "<p>Built for <strong>rocky trails</strong>.</p>",
       variants: [
         {
           id: 201,
@@ -188,6 +207,9 @@ describe("Shopify catalog safety mapping", () => {
 
     const product = mapProductWebhook(base);
     expect(product?.id).toBe("gid://shopify/Product/101");
+    expect(product?.metafields).toMatchObject({
+      "aovboost.description": { value: "Built for rocky trails." },
+    });
     expect(getSafeDefaultVariantId(product?.metafields)).toBe(
       "gid://shopify/ProductVariant/201",
     );

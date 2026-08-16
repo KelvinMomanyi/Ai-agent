@@ -227,6 +227,7 @@ model AppSettings {
   postPurchaseEnabled  Boolean  @default(true)
   aiTone               String   @default("friendly")
   brandVoice           String?
+  storeKnowledge       String?
   blockedProductIds    String[] @default([])
   bundleDiscountId     String?
   updatedAt            DateTime @updatedAt

@@ -33,6 +33,18 @@ export type CurrencyInfo = {
   source?: string;
 };
 
+export type GroundedAiChatResponse = {
+  reply?: unknown;
+  productIds?: unknown;
+  followUpQuestion?: unknown;
+};
+
+export type ValidatedChatResponse = {
+  reply: string;
+  products: CatalogProduct[];
+  fallbackUsed: boolean;
+};
+
 export function sanitizeMessageHistory(value: unknown): ChatMessageHistory {
   if (!Array.isArray(value)) return [];
   return value
@@ -56,24 +68,47 @@ export function buildCatalogFallbackReply(
   bundles: BundleSummary[],
   messageIntent = "general",
   currency: CurrencyInfo = { code: "USD" },
+  excludedProductIds: string[] = [],
 ) {
   if (catalogProducts.length === 0) {
-    return "I do not see synced products in this store yet. Sync the product catalog first, then I can recommend exact items.";
+    return "I can’t verify any available products in this store’s synced catalog right now, so I won’t invent a recommendation.";
+  }
+
+  if (
+    /^\s*(hi|hello|hey|good (?:morning|afternoon|evening))[!.?\s]*$/i.test(
+      userMessage,
+    )
+  ) {
+    return "Hi! Tell me what you’re shopping for, and I’ll check only this store’s current catalog.";
+  }
+
+  const excluded = new Set(excludedProductIds);
+  const eligibleProducts = catalogProducts.filter(
+    (product) => !excluded.has(product.id),
+  );
+  if (eligibleProducts.length === 0) {
+    return "I don’t see another verified in-store product to suggest right now.";
   }
 
   const queryTokens = tokenize(userMessage);
-  const scoredProducts = catalogProducts
+  const minimumMatchScore =
+    queryTokens.length === 0
+      ? Number.POSITIVE_INFINITY
+      : queryTokens.length === 1
+        ? 4
+        : Math.min(10, queryTokens.length * 3);
+  const scoredProducts = eligibleProducts
     .map((product) => ({
       product,
       score: scoreProduct(product, queryTokens),
     }))
-    .filter((item) => item.score > 0)
+    .filter((item) => item.score >= minimumMatchScore)
     .sort((left, right) => right.score - left.score)
     .slice(0, 3);
 
   const matches =
     messageIntent === "price_sensitive"
-      ? catalogProducts
+      ? eligibleProducts
           .slice()
           .sort(
             (left, right) => Number(left.price || 0) - Number(right.price || 0),
@@ -81,7 +116,13 @@ export function buildCatalogFallbackReply(
           .slice(0, 3)
       : scoredProducts.length > 0
         ? scoredProducts.map((item) => item.product)
-        : catalogProducts.slice(0, 3);
+        : isOpenEndedDiscoveryRequest(userMessage)
+          ? eligibleProducts.slice(0, 3)
+          : [];
+
+  if (matches.length === 0) {
+    return "I couldn’t find an exact match in this store’s current catalog. I’d rather be accurate than suggest an item the store may not carry—tell me the category or feature you want and I’ll check the closest in-store options.";
+  }
 
   const intro =
     messageIntent === "price_sensitive"
@@ -100,6 +141,138 @@ export function buildCatalogFallbackReply(
     : "";
 
   return `${intro} ${recommendations}.${bundle}`;
+}
+
+export function formatCatalogProductsForPrompt(
+  products: CatalogProduct[],
+  currency: CurrencyInfo,
+) {
+  if (products.length === 0)
+    return "No verified sellable products are available.";
+
+  return products
+    .map((product) => {
+      const availableVariants = product.variants.filter(
+        (variant) => variant.availableForSale,
+      );
+      const optionValues = new Map<string, Set<string>>();
+      for (const variant of availableVariants) {
+        for (const option of variant.selectedOptions) {
+          const values = optionValues.get(option.name) || new Set<string>();
+          values.add(option.value);
+          optionValues.set(option.name, values);
+        }
+      }
+      const options = Array.from(optionValues.entries())
+        .map(
+          ([name, values]) =>
+            `${name}: ${Array.from(values).slice(0, 30).join(", ")}`,
+        )
+        .join("; ");
+      const prices = availableVariants
+        .map((variant) => Number(variant.price))
+        .filter((price) => Number.isFinite(price) && price > 0);
+      const lowestPrice =
+        prices.length > 0 ? Math.min(...prices) : Number(product.price);
+      const highestPrice =
+        prices.length > 0 ? Math.max(...prices) : Number(product.price);
+      const priceRange =
+        Number.isFinite(lowestPrice) && lowestPrice > 0
+          ? lowestPrice === highestPrice
+            ? formatPrice(lowestPrice, currency)
+            : `${formatPrice(lowestPrice, currency)} to ${formatPrice(highestPrice, currency)}`
+          : "not provided";
+      const description = cleanPromptText(product.description, 700);
+      const details = [
+        `ID: ${product.id}`,
+        `Exact title: ${cleanPromptText(product.title, 200)}`,
+        `URL: /products/${product.handle}`,
+        `Current price: ${priceRange}`,
+        `Availability: sellable now`,
+        product.inventory === null
+          ? "Inventory quantity: not provided"
+          : `Synced sellable quantity: ${Math.max(0, product.inventory)}`,
+        product.vendor ? `Vendor: ${cleanPromptText(product.vendor, 150)}` : "",
+        product.productType
+          ? `Product type: ${cleanPromptText(product.productType, 150)}`
+          : "",
+        product.tags.length > 0
+          ? `Tags: ${product.tags
+              .slice(0, 20)
+              .map((tag) => cleanPromptText(tag, 80))
+              .join(", ")}`
+          : "",
+        options
+          ? `Available option values: ${options}`
+          : "Available option values: none listed",
+        description
+          ? `Verified description: ${description}`
+          : "Verified description: not provided",
+      ]
+        .filter(Boolean)
+        .join("\n  ");
+      return `- ${details}`;
+    })
+    .join("\n\n");
+}
+
+export function validateGroundedAiChatResponse(input: {
+  value: GroundedAiChatResponse | null;
+  catalog: CatalogProduct[];
+  fallback: string;
+  currency: CurrencyInfo;
+}): ValidatedChatResponse {
+  const reply =
+    typeof input.value?.reply === "string"
+      ? input.value.reply.trim().slice(0, 2_000)
+      : "";
+  if (!reply || containsModelSuppliedPrice(reply)) {
+    return { reply: input.fallback, products: [], fallbackUsed: true };
+  }
+
+  const index = new Map<string, CatalogProduct>();
+  for (const product of input.catalog) {
+    for (const key of productLookupKeys(product)) index.set(key, product);
+  }
+  const requestedIds = Array.isArray(input.value?.productIds)
+    ? input.value.productIds.map(String).filter(Boolean).slice(0, 8)
+    : [];
+  const products: CatalogProduct[] = [];
+  const seen = new Set<string>();
+  for (const requestedId of requestedIds) {
+    const product = index.get(requestedId.toLowerCase());
+    if (!product) {
+      return { reply: input.fallback, products: [], fallbackUsed: true };
+    }
+    if (!seen.has(product.id)) {
+      products.push(product);
+      seen.add(product.id);
+    }
+  }
+
+  const followUp =
+    typeof input.value?.followUpQuestion === "string"
+      ? input.value.followUpQuestion.trim().slice(0, 300)
+      : "";
+  const conversationalReply = [reply, followUp]
+    .filter((part, index, parts) => part && parts.indexOf(part) === index)
+    .join(" ")
+    .slice(0, 2_200);
+  const canonicalProducts = products
+    .slice(0, 4)
+    .map(
+      (product) =>
+        `${product.title} (${formatPrice(product.price, input.currency)}) /products/${product.handle}`,
+    );
+
+  return {
+    reply:
+      canonicalProducts.length > 0
+        ? `${conversationalReply}\n\n${canonicalProducts.join("\n")}`
+        : conversationalReply,
+    products: products.slice(0, 4),
+    fallbackUsed: false,
+  };
 }
 
 export function getReplyProductCards(
@@ -222,6 +395,46 @@ export function classifyMessageIntent(value: string) {
     return "comparison";
   }
 
+  if (/\b(return|refund|exchange|money back)\b/i.test(value)) {
+    return "returns_policy";
+  }
+
+  if (/\b(ship|shipping|deliver|delivery|dispatch|ships to)\b/i.test(value)) {
+    return "shipping_policy";
+  }
+
+  if (
+    /\b(privacy|personal data|data policy|terms of service|terms and conditions)\b/i.test(
+      value,
+    )
+  ) {
+    return "store_policy";
+  }
+
+  if (
+    /\b(contact|email|phone|customer service|support team|speak to (?:a )?(?:human|person))\b/i.test(
+      value,
+    )
+  ) {
+    return "human_support";
+  }
+
+  if (
+    /\b(do you (?:have|sell|stock)|in stock|available|availability|sold out)\b/i.test(
+      value,
+    )
+  ) {
+    return "product_availability";
+  }
+
+  if (
+    /\b(recommend|suggest|show me|find me|looking for|i need|what do you sell)\b/i.test(
+      value,
+    )
+  ) {
+    return "product_search";
+  }
+
   if (
     /\b(warranty|protect|support|installment|payment|pay later)\b/i.test(value)
   ) {
@@ -269,21 +482,60 @@ function normalizeComparableText(value: unknown) {
 function scoreProduct(product: CatalogProduct, queryTokens: string[]) {
   if (queryTokens.length === 0) return 0;
 
-  const searchable = [
-    product.title,
-    product.handle,
-    ...(Array.isArray(product.tags) ? product.tags : []),
-  ]
-    .join(" ")
-    .toLowerCase();
+  const titleTokens = new Set(tokenize(`${product.title} ${product.handle}`));
+  const categoryTokens = new Set(
+    tokenize(`${product.productType} ${product.category}`),
+  );
+  const tagTokens = new Set(tokenize(product.tags.join(" ")));
+  const vendorTokens = new Set(tokenize(product.vendor));
+  const descriptionTokens = new Set(tokenize(product.description));
 
   return queryTokens.reduce((score, token) => {
-    if (searchable.includes(token)) return score + 2;
-    if (token.length > 4 && searchable.includes(token.slice(0, -1))) {
-      return score + 1;
-    }
+    const variants = [
+      token,
+      ...(token.length > 4 && token.endsWith("ies")
+        ? [`${token.slice(0, -3)}y`]
+        : token.length > 3 && token.endsWith("s")
+          ? [token.slice(0, -1)]
+          : []),
+    ];
+    if (variants.some((value) => titleTokens.has(value))) return score + 10;
+    if (variants.some((value) => tagTokens.has(value))) return score + 6;
+    if (variants.some((value) => categoryTokens.has(value))) return score + 6;
+    if (variants.some((value) => vendorTokens.has(value))) return score + 4;
+    if (variants.some((value) => descriptionTokens.has(value)))
+      return score + 2;
     return score;
   }, 0);
+}
+
+function isOpenEndedDiscoveryRequest(value: string) {
+  return /\b(recommend|suggest|popular|best sellers?|browse|show me (?:something|products?)|what do you sell|surprise me|gift ideas?)\b/i.test(
+    value,
+  );
+}
+
+function containsModelSuppliedPrice(value: string) {
+  return /(?:(?:[$€£¥]|\b(?:USD|KES|EUR|GBP|CAD|AUD|JPY|KSH)\b)\s*\d|\d(?:[\d,.]*\d)?\s*\b(?:USD|KES|EUR|GBP|CAD|AUD|JPY|KSH)\b)/i.test(
+    value,
+  );
+}
+
+function productLookupKeys(product: CatalogProduct) {
+  const id = String(product.id || "");
+  const handle = String(product.handle || "");
+  const numericId = id.split("/").filter(Boolean).pop() || "";
+  return [id, numericId, handle, `/products/${handle}`]
+    .filter(Boolean)
+    .map((value) => value.toLowerCase());
+}
+
+function cleanPromptText(value: unknown, maxLength: number) {
+  return String(value || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
 }
 
 function tokenize(value: string) {
@@ -292,11 +544,14 @@ function tokenize(value: string) {
     "anything",
     "best",
     "find",
+    "have",
     "help",
     "need",
     "product",
     "recommend",
+    "sell",
     "show",
+    "stock",
     "with",
   ]);
 

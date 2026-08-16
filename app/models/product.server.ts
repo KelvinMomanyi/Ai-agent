@@ -430,11 +430,13 @@ export async function syncProductsPageFromAdmin(
             id
             title
             handle
+            description
             vendor
             productType
             tags
             onlineStoreUrl
             hasOnlyDefaultVariant
+            featuredMedia { preview { image { url } } }
             collections(first: 50) { edges { node { id } } }
             variants(first: 100) {
               edges {

@@ -51,6 +51,19 @@ describe("chat catalog guard", () => {
       available,
     ]);
     expect(filterCatalogProducts([available], [available.id])).toEqual([]);
+    expect(filterCatalogProducts([available], ["1"])).toEqual([]);
+  });
+
+  it("does not force product links into store-policy answers", () => {
+    expect(
+      sanitizeAssistantReplyToCatalog({
+        reply: "Returns are covered by the store's published refund policy.",
+        userMessage: "What is your return policy?",
+        messageIntent: "returns_policy",
+        catalog: [catalogProduct()],
+        fallback: "fallback",
+      }),
+    ).toBe("Returns are covered by the store's published refund policy.");
   });
 
   it("exposes only canonical variants and selects a real in-stock default", () => {

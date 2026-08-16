@@ -5,9 +5,11 @@ import {
   classifyMessageIntent,
   enforceReplyCurrency,
   findRequestedCartProduct,
+  formatCatalogProductsForPrompt,
   formatPrice,
   getReplyProductCards,
   sanitizeMessageHistory,
+  validateGroundedAiChatResponse,
 } from "./chatResponse";
 
 const kes = {
@@ -26,6 +28,13 @@ describe("chat response contract", () => {
     );
     expect(classifyMessageIntent("Can I pay later?")).toBe(
       "checkout_assistance",
+    );
+    expect(classifyMessageIntent("Do you deliver to Uganda?")).toBe(
+      "shipping_policy",
+    );
+    expect(classifyMessageIntent("Can I return this?")).toBe("returns_policy");
+    expect(classifyMessageIntent("Do you stock a trail board?")).toBe(
+      "product_availability",
     );
     expect(classifyMessageIntent("Hello there")).toBe("general");
   });
@@ -84,6 +93,72 @@ describe("chat response contract", () => {
     expect(
       enforceReplyCurrency("The Trail Board is KSh499.00.", fallback, kes),
     ).toBe("The Trail Board is KSh499.00.");
+  });
+
+  it("does not recommend unrelated products when no catalog item matches", () => {
+    expect(
+      buildCatalogFallbackReply(
+        "Do you sell espresso machines?",
+        [product()],
+        [],
+        "product_availability",
+        kes,
+      ),
+    ).toContain("couldn’t find an exact match");
+
+    expect(
+      buildCatalogFallbackReply(
+        "Do you sell waterproof socks?",
+        [
+          product({
+            description: "A waterproof board for trail riding",
+          }),
+        ],
+        [],
+        "product_availability",
+        kes,
+      ),
+    ).toContain("couldn’t find an exact match");
+  });
+
+  it("validates model product IDs and renders product facts canonically", () => {
+    const catalog = [product()];
+    const validated = validateGroundedAiChatResponse({
+      value: {
+        reply: "This is the closest verified match for trail riding.",
+        productIds: ["gid://shopify/Product/1"],
+        followUpQuestion: "Would you like help comparing its options?",
+      },
+      catalog,
+      fallback: "fallback",
+      currency: kes,
+    });
+
+    expect(validated.fallbackUsed).toBe(false);
+    expect(validated.reply).toContain(
+      "Trail Board (KSh499.00) /products/trail-board",
+    );
+    expect(validated.products).toEqual(catalog);
+
+    expect(
+      validateGroundedAiChatResponse({
+        value: {
+          reply: "Try this imaginary item.",
+          productIds: ["gid://shopify/Product/999"],
+        },
+        catalog,
+        fallback: "fallback",
+        currency: kes,
+      }),
+    ).toEqual({ reply: "fallback", products: [], fallbackUsed: true });
+  });
+
+  it("gives the model exact descriptions, variants, and currency context", () => {
+    const prompt = formatCatalogProductsForPrompt([product()], kes);
+    expect(prompt).toContain("ID: gid://shopify/Product/1");
+    expect(prompt).toContain("Verified description: A board for trail riding");
+    expect(prompt).toContain("Current price: KSh499.00");
+    expect(prompt).toContain("Availability: sellable now");
   });
 
   it("creates deduplicated product cards and withholds multi-option cart actions", () => {

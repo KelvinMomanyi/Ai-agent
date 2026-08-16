@@ -9,6 +9,7 @@ describe("ChatWidget", () => {
     localStorage.clear();
     (window as any).AOVBoost = {
       shop: "teretret.myshopify.com",
+      shopName: "Teretret Outdoors",
       apiBase: "/apps/aovboost",
       currency: "KES",
       moneyFormat: "KSh{{amount}}",
@@ -77,6 +78,7 @@ describe("ChatWidget", () => {
       "[data-aovboost-widget='chat']",
     )?.shadowRoot;
     expect(root?.textContent).toContain("How can I help?");
+    expect(root?.textContent).toContain("Teretret Outdoors assistant");
 
     (root?.querySelector("[data-expand]") as HTMLButtonElement).click();
     const input = root?.querySelector("[data-input]") as HTMLInputElement;
@@ -100,6 +102,12 @@ describe("ChatWidget", () => {
       message: "Show me a trail board",
       currency: "KES",
       moneyFormat: "KSh{{amount}}",
+      storefrontContext: {
+        pageType: "home",
+        path: "/",
+        productId: "",
+        productHandle: "",
+      },
     });
     expect(requestBody.messageHistory).toEqual([
       { role: "assistant", content: "How can I help?" },

@@ -112,10 +112,10 @@ export function filterCatalogProducts(
   products: CatalogProduct[],
   excludedProductIds: string[] = [],
 ) {
-  const excluded = new Set(excludedProductIds);
+  const excluded = new Set(excludedProductIds.flatMap(toProductLookupKeys));
   return products.filter(
     (product) =>
-      !excluded.has(product.id) &&
+      !toProductLookupKeys(product.id).some((id) => excluded.has(id)) &&
       product.availableForSale !== false &&
       isCatalogProductAvailable(product.metafields),
   );
@@ -149,11 +149,13 @@ export function sanitizeAssistantReplyToCatalog(input: {
   fallback: string;
 }) {
   const allowedHandles = new Set(
-    input.catalog.map((product) => product.handle).filter(Boolean),
+    input.catalog
+      .map((product) => product.handle.toLowerCase())
+      .filter(Boolean),
   );
   const linkedHandles = Array.from(
     input.reply.matchAll(/\/products\/([a-z0-9][a-z0-9-]*)/gi),
-  ).map((match) => match[1]);
+  ).map((match) => match[1].toLowerCase());
 
   if (linkedHandles.some((handle) => !allowedHandles.has(handle))) {
     return input.fallback;
@@ -324,8 +326,18 @@ function shouldReplyWithCatalogProducts(
   userMessage: string,
   messageIntent: string,
 ) {
-  if (messageIntent !== "general") return true;
-  return /\b(recommend|suggest|show|find|buy|bundle|upsell|cross-sell|alternative|similar|cheaper|compare|pair|go with|add-on|accessor)/i.test(
+  if (
+    new Set([
+      "price_sensitive",
+      "comparison",
+      "product_search",
+      "product_question",
+      "product_availability",
+    ]).has(messageIntent)
+  ) {
+    return true;
+  }
+  return /\b(recommend|suggest|show|find|buy|bundle|upsell|cross-sell|alternative|similar|cheaper|compare|pair|go with|add-on|accessor|do you (?:have|sell|stock)|in stock|available)\b/i.test(
     userMessage,
   );
 }

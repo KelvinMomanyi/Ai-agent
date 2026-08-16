@@ -29,7 +29,10 @@ type AiService = {
 let lastAiProvider: AiProvider = "none";
 
 const MODEL_COOLDOWN_MS = 30_000;
-const modelHealth = new Map<Exclude<AiProvider, "none">, { downUntil: number }>();
+const modelHealth = new Map<
+  Exclude<AiProvider, "none">,
+  { downUntil: number }
+>();
 
 const TIMEOUT_MS = {
   urgent: Number(process.env.AOVBOOST_AI_TIMEOUT_URGENT_MS || 2500),
@@ -63,12 +66,13 @@ function makeOpenAiService(
         { role: "user", content: request.userPrompt },
       ],
       max_tokens: request.maxTokens || 400,
-      temperature: 0,
+      ...(name === "deepseek"
+        ? { thinking: { type: "disabled" } }
+        : { temperature: 0 }),
       response_format:
         request.schemaType === "json" ? { type: "json_object" } : undefined,
     }),
-    extractContent: (data: any) =>
-      data.choices?.[0]?.message?.content ?? null,
+    extractContent: (data: any) => data.choices?.[0]?.message?.content ?? null,
   };
 }
 
@@ -77,17 +81,20 @@ function getAiServices(): AiService[] {
     process.env.GOOGLE_API_KEY
       ? {
           name: "gemini" as const,
-          url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`,
+          url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(process.env.GOOGLE_AI_MODEL || "gemini-3.6-flash")}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
           headers: { "Content-Type": "application/json" },
           buildBody: (request: AiGatewayRequest) => ({
+            systemInstruction: {
+              parts: [{ text: request.systemPrompt }],
+            },
             contents: [
               {
-                parts: [{ text: `${request.systemPrompt}\n\n${request.userPrompt}` }],
+                role: "user",
+                parts: [{ text: request.userPrompt }],
               },
             ],
             generationConfig: {
               maxOutputTokens: request.maxTokens || 400,
-              temperature: 0,
               responseMimeType:
                 request.schemaType === "json" ? "application/json" : undefined,
             },
@@ -101,7 +108,7 @@ function getAiServices(): AiService[] {
           "mistral",
           process.env.MISTRAL_API_KEY,
           "https://api.mistral.ai/v1/chat/completions",
-          "mistral-small-latest",
+          process.env.MISTRAL_AI_MODEL || "mistral-small-latest",
         )
       : null,
     process.env.GROQ_API_KEY
@@ -109,7 +116,7 @@ function getAiServices(): AiService[] {
           "groq",
           process.env.GROQ_API_KEY,
           "https://api.groq.com/openai/v1/chat/completions",
-          "llama-3.3-70b-versatile",
+          process.env.GROQ_AI_MODEL || "llama-3.3-70b-versatile",
         )
       : null,
     process.env.DEEPSEEK_API_KEY
@@ -117,7 +124,7 @@ function getAiServices(): AiService[] {
           "deepseek",
           process.env.DEEPSEEK_API_KEY,
           "https://api.deepseek.com/chat/completions",
-          "deepseek-chat",
+          process.env.DEEPSEEK_AI_MODEL || "deepseek-v4-flash",
         )
       : null,
   ].filter(Boolean) as AiService[];
@@ -138,7 +145,9 @@ export async function callAi(
   return result.content;
 }
 
-export async function callAI(request: AiGatewayRequest): Promise<AiGatewayResult> {
+export async function callAI(
+  request: AiGatewayRequest,
+): Promise<AiGatewayResult> {
   const startedAt = Date.now();
   const errors: AiGatewayResult["errors"] = [];
   const timeoutProfile = request.timeoutProfile || "normal";
@@ -149,7 +158,10 @@ export async function callAI(request: AiGatewayRequest): Promise<AiGatewayResult
   for (const service of getAvailableServices()) {
     const remainingMs = deadlineAt - Date.now();
     if (remainingMs <= 200) {
-      errors.push({ provider: service.name, message: "Gateway deadline reached" });
+      errors.push({
+        provider: service.name,
+        message: "Gateway deadline reached",
+      });
       break;
     }
 
@@ -172,6 +184,12 @@ export async function callAI(request: AiGatewayRequest): Promise<AiGatewayResult
       const data = await response.json();
       const content = service.extractContent(data);
       if (content) {
+        if (request.schemaType === "json" && !isJsonObject(content)) {
+          const message = "Model returned invalid JSON";
+          errors.push({ provider: service.name, message });
+          logGatewayAttempt(request, service.name, startedAt, false, message);
+          continue;
+        }
         lastAiProvider = service.name;
         markModelUp(service.name);
         logGatewayAttempt(request, service.name, startedAt, true);
@@ -196,10 +214,9 @@ export async function callAI(request: AiGatewayRequest): Promise<AiGatewayResult
     }
   }
 
-  const fallback = request.fallback ?? getGatewayFallback(
-    request.triggerName,
-    request.schemaType,
-  );
+  const fallback =
+    request.fallback ??
+    getGatewayFallback(request.triggerName, request.schemaType);
   console.warn("AOVBoost AI gateway fallback used:", {
     triggerName: request.triggerName,
     executionMs: Date.now() - startedAt,
@@ -232,6 +249,13 @@ export function parseAiJson<T>(raw: string | null): T | null {
   }
 }
 
+function isJsonObject(raw: string) {
+  const parsed = parseAiJson<unknown>(raw);
+  return Boolean(
+    parsed && typeof parsed === "object" && !Array.isArray(parsed),
+  );
+}
+
 export function getActiveProvider(): AiProvider {
   if (process.env.GOOGLE_API_KEY) return "gemini";
   if (process.env.MISTRAL_API_KEY) return "mistral";
@@ -260,14 +284,20 @@ function markModelUp(provider: Exclude<AiProvider, "none">) {
   modelHealth.delete(provider);
 }
 
-function getTimeoutMs(profile: NonNullable<AiGatewayRequest["timeoutProfile"]>) {
+function getTimeoutMs(
+  profile: NonNullable<AiGatewayRequest["timeoutProfile"]>,
+) {
   const timeout = TIMEOUT_MS[profile];
   return Number.isFinite(timeout) && timeout > 0 ? timeout : TIMEOUT_MS.normal;
 }
 
-function getTotalTimeoutMs(profile: NonNullable<AiGatewayRequest["timeoutProfile"]>) {
+function getTotalTimeoutMs(
+  profile: NonNullable<AiGatewayRequest["timeoutProfile"]>,
+) {
   const timeout = TOTAL_TIMEOUT_MS[profile];
-  return Number.isFinite(timeout) && timeout > 0 ? timeout : TOTAL_TIMEOUT_MS.normal;
+  return Number.isFinite(timeout) && timeout > 0
+    ? timeout
+    : TOTAL_TIMEOUT_MS.normal;
 }
 
 function getGatewayFallback(triggerName: string, schemaType?: "json" | "text") {
@@ -291,7 +321,10 @@ function getGatewayFallback(triggerName: string, schemaType?: "json" | "text") {
       bundleLabel: "Recommended add-ons",
     });
   }
-  if (triggerName === "price_sensitive_chat" || triggerName === "price_hesitation") {
+  if (
+    triggerName === "price_sensitive_chat" ||
+    triggerName === "price_hesitation"
+  ) {
     return JSON.stringify({
       hesitationDetected: true,
       discountCode: null,

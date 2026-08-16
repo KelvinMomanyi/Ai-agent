@@ -85,7 +85,7 @@ export async function refreshCatalogCache(shop: string) {
     include: { orderStats: true },
     orderBy: [{ updatedAt: "desc" }],
   });
-  const snapshot = buildCatalogSnapshot(shop, products);
+  const snapshot = buildCatalogSnapshot(shop, rankProducts(products));
   const hotSnapshot = buildCatalogSnapshot(
     shop,
     rankProducts(products).slice(0, HOT_PRODUCT_LIMIT),
@@ -138,17 +138,23 @@ export function pickCatalogProducts(input: {
   sourceProductId?: string;
   cartProductIds?: string[];
   excludeProductIds?: string[];
+  preferredProductIds?: string[];
+  includeContextProducts?: boolean;
   query?: string;
   limit?: number;
 }) {
   const limit = input.limit || 5;
-  const excluded = new Set(
+  const contextProductIds = new Set(
     [
       ...(input.cartProductIds || []),
-      ...(input.excludeProductIds || []),
+      ...(input.preferredProductIds || []),
       input.sourceProductId || "",
     ].filter(Boolean),
   );
+  const excluded = new Set([
+    ...(input.excludeProductIds || []),
+    ...(input.includeContextProducts ? [] : Array.from(contextProductIds)),
+  ]);
   const source = input.sourceProductId
     ? input.catalog.byId[input.sourceProductId]
     : undefined;
@@ -158,7 +164,9 @@ export function pickCatalogProducts(input: {
     .filter((product) => !excluded.has(product.id))
     .map((product) => ({
       product,
-      score: scoreCatalogProduct(product, source, queryTokens),
+      score:
+        scoreCatalogProduct(product, source, queryTokens) +
+        (contextProductIds.has(product.id) ? 100 : 0),
     }))
     .sort((left, right) => right.score - left.score)
     .slice(0, limit)
@@ -402,14 +410,43 @@ function scoreCatalogProduct(
   source: CatalogCacheProduct | undefined,
   queryTokens: string[],
 ) {
-  const queryScore = queryTokens.reduce(
-    (score, token) => score + (product.searchText.includes(token) ? 2 : 0),
-    0,
+  const titleTokens = new Set(tokenize(product.title));
+  const vendorTokens = new Set(tokenize(product.vendor));
+  const typeTokens = new Set(
+    tokenize(`${product.productType} ${product.category}`),
   );
+  const tagTokens = new Set(tokenize(product.tags.join(" ")));
+  const descriptionTokens = new Set(tokenize(product.description));
+  const normalizedTitle = normalizeSearchText(product.title);
+  const normalizedQuery = queryTokens.join(" ");
+  const exactTitleScore =
+    normalizedQuery.length >= 3 && normalizedTitle.includes(normalizedQuery)
+      ? 30
+      : 0;
+  const queryScore = queryTokens.reduce((score, token) => {
+    const variants = tokenVariants(token);
+    if (variants.some((candidate) => titleTokens.has(candidate))) {
+      return score + 10;
+    }
+    if (variants.some((candidate) => tagTokens.has(candidate))) {
+      return score + 6;
+    }
+    if (variants.some((candidate) => typeTokens.has(candidate))) {
+      return score + 5;
+    }
+    if (variants.some((candidate) => vendorTokens.has(candidate))) {
+      return score + 4;
+    }
+    if (variants.some((candidate) => descriptionTokens.has(candidate))) {
+      return score + 2;
+    }
+    return score;
+  }, exactTitleScore);
   if (!source) return queryScore + 0.1;
 
+  const sourceTags = new Set(source.tags.map((tag) => tag.toLowerCase()));
   const sharedTags = product.tags.filter((tag) =>
-    source.tags.includes(tag),
+    sourceTags.has(tag.toLowerCase()),
   ).length;
   const sameCategory =
     product.category && product.category === source.category ? 3 : 0;
@@ -419,11 +456,54 @@ function scoreCatalogProduct(
 }
 
 function tokenize(value: string) {
-  return value
+  const stopWords = new Set([
+    "about",
+    "anything",
+    "best",
+    "could",
+    "find",
+    "have",
+    "help",
+    "looking",
+    "need",
+    "please",
+    "product",
+    "recommend",
+    "show",
+    "something",
+    "that",
+    "this",
+    "want",
+    "what",
+    "with",
+    "would",
+    "your",
+  ]);
+  return normalizeSearchText(value)
     .toLowerCase()
-    .split(/[^a-z0-9]+/)
+    .split(/[^\p{L}\p{N}]+/u)
     .map((token) => token.trim())
-    .filter((token) => token.length > 2);
+    .filter((token) => token.length > 2 && !stopWords.has(token));
+}
+
+function normalizeSearchText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenVariants(token: string) {
+  const variants = [token];
+  if (token.length > 4 && token.endsWith("ies")) {
+    variants.push(`${token.slice(0, -3)}y`);
+  } else if (token.length > 3 && token.endsWith("s")) {
+    variants.push(token.slice(0, -1));
+  }
+  return variants;
 }
 
 function getMetafieldValue(record: Record<string, unknown>, keys: string[]) {
@@ -437,6 +517,7 @@ function getMetafieldValue(record: Record<string, unknown>, keys: string[]) {
 }
 
 function toNullableNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }

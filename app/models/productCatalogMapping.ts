@@ -52,6 +52,12 @@ export function mapAdminCatalogProductNode(
   options: VariantMappingOptions = {},
 ): ShopifyProductInput | null {
   if (!node?.id || !node?.handle) return null;
+  if (
+    Object.prototype.hasOwnProperty.call(node, "onlineStoreUrl") &&
+    !node.onlineStoreUrl
+  ) {
+    return null;
+  }
 
   const variants: SyncedProductVariant[] = (
     node.variants?.edges ||
@@ -101,6 +107,12 @@ export function mapAdminCatalogProductNode(
   metafields["aovboost.variantsTruncated"] = booleanMetafield(
     Boolean(node.variants?.pageInfo?.hasNextPage),
   );
+  const description = normalizeProductDescription(
+    node.description || node.descriptionHtml,
+  );
+  if (description) {
+    metafields["aovboost.description"] = textMetafield(description);
+  }
   if (defaultVariant?.id) {
     metafields["aovboost.defaultVariantId"] = textMetafield(defaultVariant.id);
   }
@@ -182,6 +194,12 @@ export function mapProductWebhook(
   if (defaultVariant?.id) {
     metafields["aovboost.defaultVariantId"] = textMetafield(defaultVariant.id);
   }
+  const description = normalizeProductDescription(
+    product.body_html || product.bodyHtml || product.description,
+  );
+  if (description) {
+    metafields["aovboost.description"] = textMetafield(description);
+  }
 
   return {
     id: productId,
@@ -203,7 +221,13 @@ export function mapProductWebhook(
     compareAtPrice: defaultVariant?.compareAtPrice || null,
     imageUrl:
       String(
-        asRecord(product.image).src || asRecord(product.image).url || "",
+        asRecord(product.image).src ||
+          asRecord(product.image).url ||
+          asRecord(Array.isArray(product.images) ? product.images[0] : null)
+            .src ||
+          asRecord(Array.isArray(product.images) ? product.images[0] : null)
+            .url ||
+          "",
       ) || null,
     collectionIds: [],
     metafields,
@@ -459,6 +483,23 @@ function textMetafield(value: string) {
 
 function numberMetafield(value: number) {
   return { value: String(value), type: "number_integer" };
+}
+
+function normalizeProductDescription(value: unknown) {
+  return String(value || "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.!?;:])/g, "$1")
+    .trim()
+    .slice(0, 6_000);
 }
 
 function toProductGid(value: unknown) {

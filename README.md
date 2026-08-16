@@ -38,8 +38,20 @@ extension.
    AOVBOOST_STOREFRONT_SESSION_SECRET
    AOVBOOST_ENABLE_LIVE_EVENTS
    GOOGLE_API_KEY
+   GOOGLE_AI_MODEL
+   MISTRAL_API_KEY
+   MISTRAL_AI_MODEL
    GROQ_API_KEY
+   GROQ_AI_MODEL
+   DEEPSEEK_API_KEY
+   DEEPSEEK_AI_MODEL
    ```
+
+   AI model variables are optional overrides. The production defaults are
+   `gemini-3.6-flash`, `mistral-small-latest`,
+   `llama-3.3-70b-versatile`, and `deepseek-v4-flash`. Providers are tried in
+   that order when their API key is configured, and malformed structured
+   responses are rejected before trying the next provider.
 
    `AOVBOOST_ENABLE_LIVE_EVENTS` is fail-closed and defaults to `false`; set it
    to the exact value `true` to enable authenticated storefront live-event
@@ -160,6 +172,11 @@ irreversible, so verify database backups first.
   signatures plus a short-lived signed storefront session.
 - Order webhooks are the source of truth for normal conversion attribution.
 - Catalog synchronization is resumable and stored in PostgreSQL.
+- Chat answers are grounded per shop in the full sellable Online Store catalog,
+  current Shopify store profile and policies, merchant-entered verified facts,
+  and server-side conversation history. Model-selected product IDs are checked
+  against the shop catalog before canonical titles, prices, links, or cards are
+  rendered.
 - Product relationships use `(shop, productId)` keys to preserve tenant
   isolation.
 - Bundle widgets display Shopify's actual product prices. Only the signed
