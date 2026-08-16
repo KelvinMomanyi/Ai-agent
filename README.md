@@ -172,16 +172,17 @@ irreversible, so verify database backups first.
   signatures plus a short-lived signed storefront session.
 - Order webhooks are the source of truth for normal conversion attribution.
 - Catalog synchronization is resumable and stored in PostgreSQL.
-- Chat answers are grounded per shop in the full sellable Online Store catalog,
-  current Shopify store profile and policies, merchant-entered verified facts,
-  and server-side conversation history. Model-selected product IDs are checked
-  against the shop catalog before canonical titles, prices, links, or cards are
-  rendered.
+- Chat requests assemble store, catalog, cart, visitor-signal, and server-side
+  conversation context with independent fallbacks. The catalog prompt is a
+  bounded relevant slice of the shop's webhook-refreshed cache, not a full
+  catalog dump. Model-selected product and variant IDs are allowlisted before
+  canonical titles, prices, links, cards, variant chips, or actions are rendered.
 - Each chat request reads Shopify's live Ajax cart. Cart questions are answered
-  deterministically from its item quantities, presentment currency, discounts,
-  and current total; a failed cart read is reported as unavailable rather than
-  incorrectly described as empty. Cart items are matched back to the same
-  shop's synced catalog and cart-only items cannot become recommendations.
+  deterministically from its item quantities, variants, subtotal, presentment
+  currency, discounts, and current total; a failed cart read is reported as
+  unavailable rather than incorrectly described as empty. Cart items are
+  matched back to the same shop's synced catalog and cannot be repeated as
+  cross-sell recommendations.
 - Product relationships use `(shop, productId)` keys to preserve tenant
   isolation.
 - Bundle widgets display Shopify's actual product prices. Only the signed

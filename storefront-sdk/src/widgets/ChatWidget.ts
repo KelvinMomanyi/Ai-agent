@@ -13,10 +13,18 @@ type ProductCard = {
   variantId?: string;
   imageUrl?: string | null;
   price?: string;
+  variants?: Array<{
+    id?: string;
+    title?: string;
+    price?: string;
+    selectedOptions?: Array<{ name?: string; value?: string }>;
+  }>;
+  variantsTruncated?: boolean;
 };
 
 type CartAction = {
   type?: string;
+  productId?: string;
   productTitle?: string;
   variantId?: string;
   quantity?: number;
@@ -32,8 +40,10 @@ type LiveCartContext = {
   status: "loaded" | "unavailable";
   currency?: string;
   itemCount?: number;
+  subtotalPrice?: number | null;
   totalPrice?: number | null;
   totalDiscount?: number | null;
+  discounts?: Array<{ title: string; amount: number | null }>;
   capturedAt: number;
   items: Array<{
     productId: string;
@@ -147,6 +157,24 @@ export class ChatWidget extends BaseWidget {
         .product-copy { display: grid; gap: 3px; min-width: 0; }
         .product-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .price { color: var(--aovboost-muted); font-size: 12px; font-weight: 700; }
+        .variant-groups { display: grid; gap: 6px; margin: 4px 0; }
+        .variant-group { display: grid; gap: 4px; }
+        .variant-label { color: var(--aovboost-muted); font-size: 11px; font-weight: 700; }
+        .variant-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+        .variant-chip {
+          border: 1px solid var(--aovboost-line) !important;
+          background: #fff !important;
+          color: var(--aovboost-ink) !important;
+          min-height: 26px !important;
+          padding: 4px 7px !important;
+        }
+        .variant-chip[aria-pressed="true"] {
+          border-color: var(--aovboost-action) !important;
+          box-shadow: 0 0 0 1px var(--aovboost-action);
+        }
+        .variant-note { color: var(--aovboost-muted); font-size: 10px; }
+        .cart-confirmation { color: #166534; font-size: 11px; font-weight: 700; }
+        .cart-confirmation.error { color: #b91c1c; }
       </style>
       <aside class="wrap card" aria-label="${text(assistantLabel)}">
         <div class="head">
@@ -235,12 +263,24 @@ export class ChatWidget extends BaseWidget {
 
   private renderProductCard(product: ProductCard) {
     const handle = String(product.handle || "");
+    const productId = String(product.productId || "");
     const title = String(
       product.title || handle.replace(/-/g, " ") || "Recommended product",
     );
     const href = handle ? `/products/${text(handle)}` : "";
+    const variants = normalizeProductCardVariants(product);
+    const selectedVariant = variants.find(
+      (variant) => variant.id === product.variantId,
+    );
+    const optionGroups = getProductCardOptionGroups(variants);
+    const needsOptionSelection = optionGroups.length > 0 && variants.length > 1;
+    const selectedVariantId =
+      selectedVariant?.id ||
+      (!needsOptionSelection
+        ? String(product.variantId || variants[0]?.id || "")
+        : "");
     return `
-      <article class="inline-product" data-product-card data-handle="${text(handle)}">
+      <article class="inline-product" data-product-card data-product-id="${text(productId)}" data-handle="${text(handle)}">
         ${
           product.imageUrl
             ? `<img data-product-image src="${text(product.imageUrl)}" alt="${text(title)}" loading="lazy">`
@@ -248,17 +288,52 @@ export class ChatWidget extends BaseWidget {
         }
         <span class="product-copy">
           <span class="product-name">${text(title)}</span>
-          ${product.price ? `<span class="price">${text(product.price)}</span>` : ""}
+          ${product.price ? `<span class="price" data-product-price>${text(selectedVariant?.price || product.price)}</span>` : ""}
+          ${this.renderVariantGroups(optionGroups, selectedVariant)}
+          ${product.variantsTruncated ? `<span class="variant-note">More options are available on the product page.</span>` : ""}
           <span class="product-actions">
             ${href ? `<a href="${href}">View product</a>` : ""}
             ${
-              product.variantId
-                ? `<button type="button" data-chat-add="${text(product.variantId)}">Add to cart</button>`
+              variants.length > 0 || product.variantId
+                ? `<button type="button" data-chat-add="${text(selectedVariantId)}" ${selectedVariantId ? "" : "disabled"}>${selectedVariantId ? "Add to cart" : "Choose options"}</button>`
                 : ""
             }
           </span>
+          <span data-cart-confirmation aria-live="polite"></span>
         </span>
       </article>
+    `;
+  }
+
+  private renderVariantGroups(
+    groups: Array<{ name: string; values: string[] }>,
+    selectedVariant?: NormalizedProductCardVariant,
+  ) {
+    if (groups.length === 0) return "";
+    const selectedOptions = new Map(
+      selectedVariant?.options.map((option) => [option.name, option.value]) ||
+        [],
+    );
+    return `
+      <div class="variant-groups">
+        ${groups
+          .map(
+            (group) => `
+              <div class="variant-group" role="group" aria-label="${text(group.name)}">
+                <span class="variant-label">${text(group.name)}</span>
+                <span class="variant-chips">
+                  ${group.values
+                    .map((value) => {
+                      const selected =
+                        selectedOptions.get(group.name) === value;
+                      return `<button type="button" class="variant-chip" data-chat-option data-option-name="${text(group.name)}" data-option-value="${text(value)}" aria-pressed="${selected ? "true" : "false"}">${text(value)}</button>`;
+                    })
+                    .join("")}
+                </span>
+              </div>`,
+          )
+          .join("")}
+      </div>
     `;
   }
 
@@ -285,6 +360,14 @@ export class ChatWidget extends BaseWidget {
 
   private handleProductCardClick = async (event: Event) => {
     const target = event.target as Element | null;
+    const optionButton = target?.closest?.(
+      "[data-chat-option]",
+    ) as HTMLButtonElement | null;
+    if (optionButton) {
+      event.preventDefault();
+      this.selectProductOption(optionButton);
+      return;
+    }
     const button = target?.closest?.(
       "[data-chat-add]",
     ) as HTMLButtonElement | null;
@@ -293,6 +376,7 @@ export class ChatWidget extends BaseWidget {
     event.preventDefault();
     const variantId = button.dataset.chatAdd;
     if (!variantId || button.disabled) return;
+    const card = button.closest("[data-product-card]") as HTMLElement | null;
 
     button.disabled = true;
     button.textContent = "Adding";
@@ -300,16 +384,94 @@ export class ChatWidget extends BaseWidget {
       const result = await addVariantToCart(variantId, 1, this.payload.offerId);
       if (!result) throw new Error("Cart add failed");
       button.textContent = "Added";
+      this.showCartConfirmation(card, "Added to your cart.");
       document.dispatchEvent(
         new CustomEvent("add-to-cart", {
-          detail: { source: "chat_widget", variantId },
+          detail: {
+            source: "chat_widget",
+            productId: card?.dataset.productId || "",
+            variantId,
+          },
         }),
       );
     } catch {
       button.disabled = false;
       button.textContent = "Try again";
+      this.showCartConfirmation(
+        card,
+        "Could not add this item. Try again.",
+        true,
+      );
     }
   };
+
+  private selectProductOption(button: HTMLButtonElement) {
+    const card = button.closest("[data-product-card]") as HTMLElement | null;
+    const name = button.dataset.optionName || "";
+    if (!card || !name) return;
+    card.querySelectorAll("[data-chat-option]").forEach((candidate) => {
+      if ((candidate as HTMLElement).dataset.optionName === name) {
+        candidate.setAttribute("aria-pressed", "false");
+      }
+    });
+    button.setAttribute("aria-pressed", "true");
+
+    const product = this.findRenderedProductCard(card.dataset.productId || "");
+    if (!product) return;
+    const variants = normalizeProductCardVariants(product);
+    const selectedOptions = new Map(
+      Array.from(
+        card.querySelectorAll("[data-chat-option][aria-pressed='true']"),
+      ).map((candidate) => {
+        const element = candidate as HTMLElement;
+        return [
+          element.dataset.optionName || "",
+          element.dataset.optionValue || "",
+        ];
+      }),
+    );
+    const groups = getProductCardOptionGroups(variants);
+    const variant =
+      selectedOptions.size === groups.length
+        ? variants.find((candidate) =>
+            candidate.options.every(
+              (option) => selectedOptions.get(option.name) === option.value,
+            ),
+          )
+        : undefined;
+    const addButton = card.querySelector(
+      "[data-chat-add]",
+    ) as HTMLButtonElement | null;
+    if (addButton) {
+      addButton.dataset.chatAdd = variant?.id || "";
+      addButton.disabled = !variant;
+      addButton.textContent = variant ? "Add to cart" : "Choose options";
+    }
+    const price = card.querySelector("[data-product-price]");
+    if (price && variant?.price) price.textContent = variant.price;
+    this.showCartConfirmation(card, "");
+  }
+
+  private findRenderedProductCard(productId: string) {
+    return this.messages
+      .flatMap((message) => message.productCards || [])
+      .slice()
+      .reverse()
+      .find((product) => String(product.productId || "") === productId);
+  }
+
+  private showCartConfirmation(
+    card: HTMLElement | null,
+    message: string,
+    isError = false,
+  ) {
+    const status = card?.querySelector(
+      "[data-cart-confirmation]",
+    ) as HTMLElement | null;
+    if (!status) return;
+    status.className = `cart-confirmation${isError ? " error" : ""}`;
+    status.textContent = message;
+  }
 
   private async hydrateProductCards(root: ParentNode) {
     const cards = Array.from(
@@ -533,10 +695,25 @@ export class ChatWidget extends BaseWidget {
         this.messages[assistantIndex],
       );
       this.hydrateProductCards(assistantEl);
+      const addedButton = Array.from(
+        assistantEl.querySelectorAll("[data-chat-add]"),
+      ).find(
+        (candidate) =>
+          (candidate as HTMLElement).dataset.chatAdd === action.variantId,
+      ) as HTMLButtonElement | undefined;
+      if (addedButton) {
+        addedButton.disabled = true;
+        addedButton.textContent = "Added";
+      }
+      this.showCartConfirmation(
+        addedButton?.closest("[data-product-card]") as HTMLElement | null,
+        "Added to your cart.",
+      );
       document.dispatchEvent(
         new CustomEvent("add-to-cart", {
           detail: {
             source: "chat_widget",
+            productId: action.productId || "",
             variantId: action.variantId,
             quantity: Number(action.quantity || 1),
           },
@@ -549,6 +726,14 @@ export class ChatWidget extends BaseWidget {
         this.messages[assistantIndex],
       );
       this.hydrateProductCards(assistantEl);
+      const failedCard = assistantEl.querySelector(
+        "[data-product-card]",
+      ) as HTMLElement | null;
+      this.showCartConfirmation(
+        failedCard,
+        "Could not add this item. Choose an option or try again.",
+        true,
+      );
     }
   }
 
@@ -635,12 +820,70 @@ function getCurrentStorefrontContext() {
   };
 }
 
+type NormalizedProductCardVariant = {
+  id: string;
+  title: string;
+  price: string;
+  options: Array<{ name: string; value: string }>;
+};
+
+function normalizeProductCardVariants(
+  product: ProductCard,
+): NormalizedProductCardVariant[] {
+  const variants = Array.isArray(product.variants) ? product.variants : [];
+  return variants
+    .map((variant) => {
+      const id = String(variant.id || "");
+      const title = String(variant.title || "");
+      const selectedOptions = Array.isArray(variant.selectedOptions)
+        ? variant.selectedOptions
+            .map((option) => ({
+              name: String(option.name || ""),
+              value: String(option.value || ""),
+            }))
+            .filter((option) => option.name && option.value)
+        : [];
+      const options =
+        selectedOptions.length > 0
+          ? selectedOptions
+          : variants.length > 1 && title && !/^default(?: title)?$/i.test(title)
+            ? [{ name: "Option", value: title }]
+            : [];
+      return {
+        id,
+        title,
+        price: String(variant.price || ""),
+        options,
+      };
+    })
+    .filter((variant) => variant.id);
+}
+
+function getProductCardOptionGroups(variants: NormalizedProductCardVariant[]) {
+  const groups = new Map<string, Set<string>>();
+  for (const variant of variants) {
+    for (const option of variant.options) {
+      const values = groups.get(option.name) || new Set<string>();
+      values.add(option.value);
+      groups.set(option.name, values);
+    }
+  }
+  return Array.from(groups.entries()).map(([name, values]) => ({
+    name,
+    values: Array.from(values),
+  }));
+}
+
 async function readLiveCartContext(): Promise<LiveCartContext> {
   const capturedAt = Date.now();
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 1_500);
   try {
     const response = await fetch("/cart.js", {
       headers: { Accept: "application/json", "Cache-Control": "no-cache" },
       cache: "no-store",
+      credentials: "same-origin",
+      signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Cart read failed: ${response.status}`);
     const cart = await response.json();
@@ -652,8 +895,12 @@ async function readLiveCartContext(): Promise<LiveCartContext> {
       status: "loaded",
       currency: normalizeCurrencyCode(cart.currency),
       itemCount: normalizeCartInteger(cart.item_count),
+      subtotalPrice: fromCartMinorUnits(
+        cart.items_subtotal_price ?? cart.original_total_price,
+      ),
       totalPrice: fromCartMinorUnits(cart.total_price),
       totalDiscount: fromCartMinorUnits(cart.total_discount),
+      discounts: readCartDiscounts(cart),
       capturedAt,
       items: cart.items.slice(0, 100).flatMap((item: any) => {
         const quantity = normalizeCartInteger(item?.quantity);
@@ -679,7 +926,41 @@ async function readLiveCartContext(): Promise<LiveCartContext> {
     };
   } catch {
     return { status: "unavailable", capturedAt, items: [] };
+  } finally {
+    window.clearTimeout(timeoutId);
   }
+}
+
+function readCartDiscounts(cart: any) {
+  const discounts = new Map<string, number>();
+  const addDiscount = (value: unknown) => {
+    if (!value || typeof value !== "object") return;
+    const discount = value as Record<string, unknown>;
+    const title = String(discount.title || discount.code || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 160);
+    if (!title) return;
+    const minorAmount = Number(
+      discount.total_allocated_amount || discount.amount || 0,
+    );
+    const amount =
+      Number.isFinite(minorAmount) && minorAmount >= 0
+        ? Math.round(minorAmount) / 100
+        : 0;
+    discounts.set(title, (discounts.get(title) || 0) + amount);
+  };
+  (Array.isArray(cart.cart_level_discount_applications)
+    ? cart.cart_level_discount_applications
+    : []
+  ).forEach(addDiscount);
+  for (const item of Array.isArray(cart.items) ? cart.items : []) {
+    (Array.isArray(item.discounts) ? item.discounts : []).forEach(addDiscount);
+  }
+  return Array.from(discounts.entries()).map(([title, amount]) => ({
+    title,
+    amount,
+  }));
 }
 
 function fromCartMinorUnits(value: unknown) {

@@ -36,6 +36,29 @@ describe("chat catalog guard", () => {
     ).toBe(fallback);
   });
 
+  it("strips an invented product recommendation even when it has no link", () => {
+    expect(
+      sanitizeAssistantReplyToCatalog({
+        reply:
+          "Happy to help.\nThe Rocket Board would be an excellent choice for trails.",
+        userMessage: "Thanks, anything else?",
+        messageIntent: "general",
+        catalog: [catalogProduct()],
+        fallback: "fallback",
+      }),
+    ).toBe("Happy to help.");
+
+    expect(
+      sanitizeAssistantReplyToCatalog({
+        reply: "We carry the Rocket Board in blue.",
+        userMessage: "Thanks",
+        messageIntent: "general",
+        catalog: [catalogProduct()],
+        fallback: "fallback",
+      }),
+    ).toBe("fallback");
+  });
+
   it("filters blocked and unavailable products before chat sees them", () => {
     const available = catalogProduct();
     const unavailable = catalogProduct({

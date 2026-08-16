@@ -294,12 +294,14 @@ type ProductWithStats = Product & {
 
 function toCatalogProduct(product: ProductWithStats): CatalogCacheProduct {
   const metafields = asRecord(product.metafields);
-  const description = getMetafieldValue(metafields, [
-    "description",
-    "body",
-    "global.description_tag",
-    "aovboost.description",
-  ]);
+  const description = summarizeDescription(
+    getMetafieldValue(metafields, [
+      "description",
+      "body",
+      "global.description_tag",
+      "aovboost.description",
+    ]),
+  );
   const availableForSale = isCatalogProductAvailable(metafields);
   const variantId = getSafeDefaultVariantId(metafields);
   const syncedVariants = getSyncedProductVariants(metafields);
@@ -514,6 +516,29 @@ function getMetafieldValue(record: Record<string, unknown>, keys: string[]) {
     if (typeof nested.value === "string" && nested.value) return nested.value;
   }
   return "";
+}
+
+function summarizeDescription(value: unknown) {
+  const text = String(value || "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text.length <= 360) return text;
+  const shortened = text.slice(0, 360);
+  const sentenceEnd = Math.max(
+    shortened.lastIndexOf(". "),
+    shortened.lastIndexOf("! "),
+    shortened.lastIndexOf("? "),
+  );
+  return `${(sentenceEnd >= 120 ? shortened.slice(0, sentenceEnd + 1) : shortened).trim()}\u2026`;
 }
 
 function toNullableNumber(value: unknown) {

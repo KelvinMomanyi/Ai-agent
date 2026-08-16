@@ -44,6 +44,26 @@ describe("chat catalog retrieval", () => {
       }).map((item) => item.id),
     ).toEqual([current.id, cart.id, match.id]);
   });
+
+  it("keeps retrieval bounded for a large catalog", () => {
+    const products = Array.from({ length: 500 }, (_, index) =>
+      product({
+        id: `gid://shopify/Product/${index + 1}`,
+        handle: `item-${index + 1}`,
+        title: index === 347 ? "Blue Hiking Hoodie" : `Store Item ${index + 1}`,
+        tags: index === 347 ? ["blue", "hiking", "hoodie"] : [],
+      }),
+    );
+
+    const matches = pickCatalogProducts({
+      catalog: snapshot(products),
+      query: "Show me a blue hiking hoodie",
+      limit: 12,
+    });
+
+    expect(matches).toHaveLength(12);
+    expect(matches[0].title).toBe("Blue Hiking Hoodie");
+  });
 });
 
 function snapshot(products: CatalogCacheProduct[]): CatalogSnapshot {

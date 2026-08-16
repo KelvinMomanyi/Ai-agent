@@ -23,6 +23,20 @@ export type ChatProductCard = {
   variantId: string;
   imageUrl: string | null;
   price: string;
+  variants: Array<{
+    id: string;
+    title: string;
+    price: string;
+    selectedOptions: Array<{ name: string; value: string }>;
+  }>;
+  variantsTruncated: boolean;
+};
+
+export type GroundedChatAction = {
+  type: "show_products" | "add_to_cart";
+  productId: string;
+  variantId: string;
+  quantity: number;
 };
 
 export type CurrencyInfo = {
@@ -36,13 +50,21 @@ export type CurrencyInfo = {
 export type GroundedAiChatResponse = {
   reply?: unknown;
   productIds?: unknown;
+  action?: unknown;
   followUpQuestion?: unknown;
 };
 
 export type ValidatedChatResponse = {
   reply: string;
   products: CatalogProduct[];
+  action: GroundedChatAction | null;
   fallbackUsed: boolean;
+};
+
+export type RequestedCartSelection = {
+  product: CatalogProduct;
+  variant: CatalogProduct["variants"][number] | null;
+  needsSelection: boolean;
 };
 
 export type GroundedCartItem = {
@@ -63,8 +85,10 @@ export type GroundedCartContext = {
   status: "loaded" | "unavailable";
   currencyCode: string;
   itemCount: number;
+  subtotalPrice: number | null;
   totalPrice: number | null;
   totalDiscount: number | null;
+  discounts: Array<{ title: string; amount: number | null }>;
   items: GroundedCartItem[];
 };
 
@@ -155,13 +179,25 @@ export function normalizeLiveCartContext(
         : item.finalUnitPrice * item.quantity);
     return linePrice === null || sum === null ? null : sum + linePrice;
   }, 0);
+  const discounts = Array.isArray(input.discounts)
+    ? input.discounts
+        .slice(0, 20)
+        .map((value) => asRecord(value))
+        .map((discount) => ({
+          title: cleanPromptText(discount.title, 160),
+          amount: boundedMoney(discount.amount),
+        }))
+        .filter((discount) => discount.title)
+    : [];
 
   return {
     status: "loaded",
     currencyCode: normalizeCurrencyCode(input.currency, ""),
     itemCount,
+    subtotalPrice: boundedMoney(input.subtotalPrice),
     totalPrice: boundedMoney(input.totalPrice) ?? computedTotal,
     totalDiscount: boundedMoney(input.totalDiscount),
+    discounts,
     items,
   };
 }
@@ -179,6 +215,10 @@ export function formatCartContextForPrompt(
     cart.totalPrice === null
       ? "unavailable"
       : formatCartMoney(cart.totalPrice, currency);
+  const subtotal =
+    cart.subtotalPrice === null
+      ? "unavailable"
+      : formatCartMoney(cart.subtotalPrice, currency);
   const lines = cart.items.map((item) => {
     const variant = item.variantTitle ? `; option: ${item.variantTitle}` : "";
     const linePrice =
@@ -193,7 +233,17 @@ export function formatCartContextForPrompt(
 
   return [
     `Verified live Shopify cart item count: ${cart.itemCount}`,
+    `Verified cart subtotal: ${subtotal}`,
     `Verified current cart total after cart discounts: ${total}`,
+    cart.discounts.length > 0
+      ? `Applied discounts: ${cart.discounts
+          .map((discount) =>
+            discount.amount === null
+              ? discount.title
+              : `${discount.title} (${formatCartMoney(discount.amount, currency)})`,
+          )
+          .join(", ")}`
+      : "Applied discounts: none listed",
     ...lines,
   ].join("\n");
 }
@@ -208,6 +258,10 @@ export function buildCartSummaryReply(
   if (cart.itemCount === 0) return "Your cart is currently empty.";
 
   const itemLabel = cart.itemCount === 1 ? "item" : "items";
+  const subtotal =
+    cart.subtotalPrice === null
+      ? ""
+      : ` a subtotal of ${formatCartMoney(cart.subtotalPrice, currency)} and`;
   const total =
     cart.totalPrice === null
       ? "an unavailable current total"
@@ -215,6 +269,10 @@ export function buildCartSummaryReply(
   const discount =
     cart.totalDiscount !== null && cart.totalDiscount > 0
       ? ` You\u2019re currently saving ${formatCartMoney(cart.totalDiscount, currency)} through cart discounts.`
+      : "";
+  const discountNames =
+    cart.discounts.length > 0
+      ? ` Applied: ${cart.discounts.map((item) => item.title).join(", ")}.`
       : "";
   const details = cart.items
     .map((item) => {
@@ -228,7 +286,7 @@ export function buildCartSummaryReply(
     })
     .join("\n");
 
-  return `Your cart has ${cart.itemCount} ${itemLabel}, with ${total}.${discount}${details ? `\n\n${details}` : ""}`;
+  return `Your cart has ${cart.itemCount} ${itemLabel}, with${subtotal} ${total}.${discount}${discountNames}${details ? `\n\n${details}` : ""}`;
 }
 
 export function sanitizeMessageHistory(value: unknown): ChatMessageHistory {
@@ -407,13 +465,24 @@ export function validateGroundedAiChatResponse(input: {
   catalog: CatalogProduct[];
   fallback: string;
   currency: CurrencyInfo;
+  excludedProductIds?: string[];
+  userMessage?: string;
 }): ValidatedChatResponse {
   const reply =
     typeof input.value?.reply === "string"
       ? input.value.reply.trim().slice(0, 2_000)
       : "";
-  if (!reply || containsModelSuppliedPrice(reply)) {
-    return { reply: input.fallback, products: [], fallbackUsed: true };
+  if (
+    !reply ||
+    containsModelSuppliedPrice(reply) ||
+    /\/products\/[a-z0-9][a-z0-9-]*/i.test(reply)
+  ) {
+    return {
+      reply: input.fallback,
+      products: [],
+      action: null,
+      fallbackUsed: true,
+    };
   }
 
   const index = new Map<string, CatalogProduct>();
@@ -425,10 +494,16 @@ export function validateGroundedAiChatResponse(input: {
     : [];
   const products: CatalogProduct[] = [];
   const seen = new Set<string>();
+  const excluded = new Set(input.excludedProductIds || []);
   for (const requestedId of requestedIds) {
     const product = index.get(requestedId.toLowerCase());
-    if (!product) {
-      return { reply: input.fallback, products: [], fallbackUsed: true };
+    if (!product || excluded.has(product.id)) {
+      return {
+        reply: input.fallback,
+        products: [],
+        action: null,
+        fallbackUsed: true,
+      };
     }
     if (!seen.has(product.id)) {
       products.push(product);
@@ -450,15 +525,63 @@ export function validateGroundedAiChatResponse(input: {
       (product) =>
         `${product.title} (${formatPrice(product.price, input.currency)}) /products/${product.handle}`,
     );
+  const action = validateGroundedChatAction(input.value?.action, products);
+  const groundedLead =
+    products.length > 0
+      ? buildGroundedProductLead(
+          products,
+          input.userMessage || "",
+          input.currency,
+        )
+      : conversationalReply;
 
   return {
     reply:
       canonicalProducts.length > 0
-        ? `${conversationalReply}\n\n${canonicalProducts.join("\n")}`
+        ? `${groundedLead}\n\n${canonicalProducts.join("\n")}`
         : conversationalReply,
     products: products.slice(0, 4),
+    action,
     fallbackUsed: false,
   };
+}
+
+export function getCatalogProductCards(
+  products: CatalogProduct[],
+  currency: CurrencyInfo,
+  selectedVariantIds: Record<string, string> = {},
+): ChatProductCard[] {
+  return products.slice(0, 4).map((product) => {
+    const availableVariants = product.variants.filter(
+      (variant) => variant.availableForSale,
+    );
+    const renderedVariants = availableVariants.slice(0, 50);
+    const requestedVariantId = selectedVariantIds[product.id] || "";
+    const variantId =
+      renderedVariants.find((variant) => variant.id === requestedVariantId)
+        ?.id ||
+      (renderedVariants.length === 1
+        ? renderedVariants[0].id
+        : renderedVariants.length === 0
+          ? getSafeDefaultVariantId(product.metafields)
+          : "");
+
+    return {
+      productId: product.id,
+      title: product.title,
+      handle: product.handle,
+      variantId,
+      imageUrl: product.imageUrl || product.image || null,
+      price: formatPrice(product.price, currency),
+      variants: renderedVariants.map((variant) => ({
+        id: variant.id,
+        title: variant.title,
+        price: formatPrice(variant.price, currency),
+        selectedOptions: variant.selectedOptions,
+      })),
+      variantsTruncated: availableVariants.length > renderedVariants.length,
+    };
+  });
 }
 
 export function getReplyProductCards(
@@ -484,21 +607,75 @@ export function getReplyProductCards(
   });
   const seen = new Set<string>();
 
-  return [...linkedProducts, ...namedProducts]
+  const products = [...linkedProducts, ...namedProducts]
     .filter((product) => {
       if (seen.has(product.id)) return false;
       seen.add(product.id);
       return true;
     })
-    .slice(0, 4)
-    .map((product) => ({
-      productId: product.id,
-      title: product.title,
-      handle: product.handle,
-      variantId: getSafeDefaultVariantId(product.metafields),
-      imageUrl: product.imageUrl || product.image || null,
-      price: formatPrice(product.price, currency),
-    }));
+    .slice(0, 4);
+  return getCatalogProductCards(products, currency);
+}
+
+export function resolveRequestedCartSelection(
+  userMessage: string,
+  history: ChatMessageHistory | undefined,
+  catalogProducts: CatalogProduct[],
+): RequestedCartSelection | null {
+  const product = findRequestedCartProduct(
+    userMessage,
+    history,
+    catalogProducts,
+  );
+  if (!product) return null;
+
+  const availableVariants = product.variants.filter(
+    (variant) => variant.availableForSale,
+  );
+  if (availableVariants.length === 0) {
+    return { product, variant: null, needsSelection: true };
+  }
+  if (availableVariants.length === 1) {
+    return { product, variant: availableVariants[0], needsSelection: false };
+  }
+
+  const message = normalizeComparableText(userMessage);
+  const requestedOptions = new Map<string, string>();
+  for (const variant of availableVariants) {
+    for (const option of variant.selectedOptions) {
+      if (containsComparablePhrase(message, option.value)) {
+        requestedOptions.set(
+          normalizeComparableText(option.name),
+          normalizeComparableText(option.value),
+        );
+      }
+    }
+  }
+  const exactTitleMatches = availableVariants.filter((variant) => {
+    const title = normalizeComparableText(variant.title);
+    return title.length >= 2 && containsComparablePhrase(message, title);
+  });
+  if (exactTitleMatches.length === 1) {
+    return {
+      product,
+      variant: exactTitleMatches[0],
+      needsSelection: false,
+    };
+  }
+
+  const matches = availableVariants.filter((variant) =>
+    Array.from(requestedOptions.entries()).every(([name, value]) =>
+      variant.selectedOptions.some(
+        (option) =>
+          normalizeComparableText(option.name) === name &&
+          normalizeComparableText(option.value) === value,
+      ),
+    ),
+  );
+  if (requestedOptions.size > 0 && matches.length === 1) {
+    return { product, variant: matches[0], needsSelection: false };
+  }
+  return { product, variant: null, needsSelection: true };
 }
 
 export function findRequestedCartProduct(
@@ -506,6 +683,16 @@ export function findRequestedCartProduct(
   history: ChatMessageHistory | undefined,
   catalogProducts: CatalogProduct[],
 ) {
+  if (
+    /\b(?:don['\u2019]?t|do not|never|stop|cancel|not now)\b[^.!?]*\b(?:add|buy|purchase)\b/i.test(
+      userMessage,
+    ) ||
+    /\b(?:add|buy|purchase)\b[^.!?]*\b(?:don['\u2019]?t|do not|never|stop|cancel|not now)\b/i.test(
+      userMessage,
+    )
+  ) {
+    return null;
+  }
   const recentAssistantMessages = (history || [])
     .filter((message) => message.role === "assistant")
     .slice(-3)
@@ -569,6 +756,20 @@ export function normalizeCurrencyCode(value: unknown, fallback = "USD") {
 }
 
 export function classifyMessageIntent(value: string) {
+  const declinedCartAction =
+    /\b(?:don['\u2019]?t|do not|never|stop|cancel|not now)\b[^.!?]*\b(?:add|buy|purchase)\b/i.test(
+      value,
+    );
+  if (
+    !declinedCartAction &&
+    (/\b(?:add|buy|purchase|get|take)\b.*\b(?:cart|bag|it|this|one|item|product)\b/i.test(
+      value,
+    ) ||
+      /\badd to (?:my |the )?(?:cart|bag)\b/i.test(value))
+  ) {
+    return "cart_action";
+  }
+
   if (
     /\b(cart|bag|basket)\b/i.test(value) ||
     /\b(?:what(?:'s| is)|how much)\b.*\b(?:my\s+)?(?:total|subtotal)\b/i.test(
@@ -623,7 +824,7 @@ export function classifyMessageIntent(value: string) {
   }
 
   if (
-    /\b(recommend|suggest|show me|find me|looking for|i need|what do you sell)\b/i.test(
+    /\b(recommend|suggest|show me|find me|looking for|i need|what do you sell|pair(?:s|ed)? with|go(?:es)? with|complement(?:ary)?|accessor(?:y|ies)|add-on)\b/i.test(
       value,
     )
   ) {
@@ -666,12 +867,109 @@ function findProductMention(
   );
 }
 
+function validateGroundedChatAction(
+  value: unknown,
+  products: CatalogProduct[],
+): GroundedChatAction | null {
+  const action = asRecord(value);
+  if (action.type !== "show_products" && action.type !== "add_to_cart") {
+    return null;
+  }
+  const productId = String(action.productId || "");
+  const product = products.find((candidate) => candidate.id === productId);
+  if (!product) return null;
+
+  if (action.type === "show_products") {
+    return {
+      type: "show_products",
+      productId: product.id,
+      variantId: "",
+      quantity: 1,
+    };
+  }
+
+  const variantId = String(action.variantId || "");
+  const variant = product.variants.find(
+    (candidate) => candidate.id === variantId && candidate.availableForSale,
+  );
+  const quantity = boundedInteger(action.quantity, 1, 10);
+  if (!variant || quantity === null) return null;
+  return {
+    type: "add_to_cart",
+    productId: product.id,
+    variantId: variant.id,
+    quantity,
+  };
+}
+
+function buildGroundedProductLead(
+  products: CatalogProduct[],
+  userMessage: string,
+  currency: CurrencyInfo,
+) {
+  const message = normalizeComparableText(userMessage);
+  if (products.length === 1) {
+    const product = products[0];
+    const requestedOptions = new Map<string, string>();
+    for (const variant of product.variants.filter(
+      (candidate) => candidate.availableForSale,
+    )) {
+      for (const option of variant.selectedOptions) {
+        if (containsComparablePhrase(message, option.value)) {
+          requestedOptions.set(option.name, option.value);
+        }
+      }
+    }
+    if (requestedOptions.size > 0) {
+      const labels = Array.from(requestedOptions.entries())
+        .map(([name, value]) => `${name}: ${value}`)
+        .join(", ");
+      return `${product.title} has a currently sellable variant with ${labels}.`;
+    }
+    return "I found one verified in-store option that matches your request:";
+  }
+
+  if (/\b(compare|versus|vs|difference)\b/i.test(userMessage)) {
+    const comparisons = products
+      .slice(0, 4)
+      .map((product) => {
+        const options = getAvailableProductOptionSummary(product);
+        return `${product.title}: ${formatPrice(product.price, currency)}${options ? `; options: ${options}` : ""}`;
+      })
+      .join(" | ");
+    return `Here are the verified differences I can confirm: ${comparisons}.`;
+  }
+  return `I found ${products.length} verified in-store options that match your request:`;
+}
+
+function getAvailableProductOptionSummary(product: CatalogProduct) {
+  const groups = new Map<string, Set<string>>();
+  for (const variant of product.variants.filter(
+    (candidate) => candidate.availableForSale,
+  )) {
+    for (const option of variant.selectedOptions) {
+      const values = groups.get(option.name) || new Set<string>();
+      values.add(option.value);
+      groups.set(option.name, values);
+    }
+  }
+  return Array.from(groups.entries())
+    .map(([name, values]) => `${name}: ${Array.from(values).join("/")}`)
+    .join("; ");
+}
+
 function normalizeComparableText(value: unknown) {
   return String(value || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function containsComparablePhrase(textValue: string, phraseValue: string) {
+  const textTokens = ` ${normalizeComparableText(textValue)} `;
+  const phrase = normalizeComparableText(phraseValue);
+  return Boolean(phrase) && textTokens.includes(` ${phrase} `);
 }
 
 function scoreProduct(product: CatalogProduct, queryTokens: string[]) {
@@ -730,8 +1028,10 @@ function unavailableCartContext(): GroundedCartContext {
     status: "unavailable",
     currencyCode: "",
     itemCount: 0,
+    subtotalPrice: null,
     totalPrice: null,
     totalDiscount: null,
+    discounts: [],
     items: [],
   };
 }

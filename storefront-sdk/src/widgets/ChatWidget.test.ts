@@ -41,6 +41,7 @@ describe("ChatWidget", () => {
             JSON.stringify({
               currency: "KES",
               item_count: 2,
+              items_subtotal_price: 99800,
               total_price: 99800,
               total_discount: 0,
               items: [
@@ -139,6 +140,7 @@ describe("ChatWidget", () => {
         status: "loaded",
         currency: "KES",
         itemCount: 2,
+        subtotalPrice: 998,
         totalPrice: 998,
         totalDiscount: 0,
         items: [
@@ -207,5 +209,111 @@ describe("ChatWidget", () => {
       expect(root?.textContent).toContain('<img src=x onerror="alert(1)">');
     });
     expect(root?.querySelector(".bubble.assistant img")).toBeNull();
+  });
+
+  it("renders variant chips and adds the selected variant with an inline confirmation", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, _init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/cart.js") {
+          return new Response(
+            JSON.stringify({
+              currency: "KES",
+              item_count: 0,
+              total_price: 0,
+              total_discount: 0,
+              items: [],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url === "/apps/aovboost/chat") {
+          return new Response(
+            `data: ${JSON.stringify({
+              delta: "Choose your preferred options.",
+              productCards: [
+                {
+                  productId: "gid://shopify/Product/2",
+                  title: "Hiking Hoodie",
+                  handle: "hiking-hoodie",
+                  variantId: "",
+                  imageUrl: "https://cdn.example.test/hoodie.jpg",
+                  price: "KSh8,000.00",
+                  variants: [
+                    {
+                      id: "gid://shopify/ProductVariant/21",
+                      title: "Red / Small",
+                      price: "KSh8,000.00",
+                      selectedOptions: [
+                        { name: "Color", value: "Red" },
+                        { name: "Size", value: "Small" },
+                      ],
+                    },
+                    {
+                      id: "gid://shopify/ProductVariant/22",
+                      title: "Blue / Medium",
+                      price: "KSh8,500.00",
+                      selectedOptions: [
+                        { name: "Color", value: "Blue" },
+                        { name: "Size", value: "Medium" },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            })}\n\ndata: [DONE]\n\n`,
+            { status: 200 },
+          );
+        }
+        if (url === "/cart/add.js") {
+          return new Response(JSON.stringify({ id: 22 }), { status: 200 });
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const widget = new ChatWidget({ copy: { greeting: "Hello" } });
+    widget.mount();
+    const root = document.querySelector(
+      "[data-aovboost-widget='chat']",
+    )?.shadowRoot;
+    (root?.querySelector("[data-expand]") as HTMLButtonElement).click();
+    const input = root?.querySelector("[data-input]") as HTMLInputElement;
+    input.value = "Add the hiking hoodie";
+    (root?.querySelector("[data-send]") as HTMLButtonElement).click();
+
+    await vi.waitFor(() => {
+      expect(root?.querySelectorAll("[data-chat-option]")).toHaveLength(4);
+    });
+    const addButton = root?.querySelector(
+      "[data-chat-add]",
+    ) as HTMLButtonElement;
+    expect(addButton.disabled).toBe(true);
+    const chips = Array.from(
+      root?.querySelectorAll("[data-chat-option]") || [],
+    ) as HTMLButtonElement[];
+    chips.find((chip) => chip.dataset.optionValue === "Blue")?.click();
+    chips.find((chip) => chip.dataset.optionValue === "Medium")?.click();
+
+    expect(addButton.disabled).toBe(false);
+    expect(addButton.dataset.chatAdd).toBe("gid://shopify/ProductVariant/22");
+    expect(root?.querySelector("[data-product-price]")?.textContent).toBe(
+      "KSh8,500.00",
+    );
+    addButton.click();
+
+    await vi.waitFor(() => {
+      expect(root?.querySelector("[data-cart-confirmation]")?.textContent).toBe(
+        "Added to your cart.",
+      );
+    });
+    const addCall = fetchMock.mock.calls.find(
+      ([url]) => String(url) === "/cart/add.js",
+    );
+    expect(JSON.parse(String(addCall?.[1]?.body))).toMatchObject({
+      id: "22",
+      quantity: 1,
+    });
   });
 });

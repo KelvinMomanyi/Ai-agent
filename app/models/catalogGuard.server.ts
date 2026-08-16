@@ -168,7 +168,43 @@ export function sanitizeAssistantReplyToCatalog(input: {
     return input.fallback;
   }
 
-  return input.reply;
+  const groundedLines = input.reply
+    .split("\n")
+    .filter((line) => {
+      if (!looksLikeProductClaim(line) || isGroundedCatalogDenial(line)) {
+        return true;
+      }
+      return Array.from(
+        line.matchAll(/\/products\/([a-z0-9][a-z0-9-]*)/gi),
+      ).some((match) => allowedHandles.has(match[1].toLowerCase()));
+    })
+    .join("\n")
+    .trim();
+
+  return groundedLines || input.fallback;
+}
+
+function looksLikeProductClaim(value: string) {
+  return (
+    /\b(?:we|this store)\s+(?:have|has|carry|carries|sell|sells|stock|stocks|offer|offers)\b/i.test(
+      value,
+    ) ||
+    /\b(?:in stock|sold out|available in|comes? in|pairs? (?:well )?with|goes? (?:well )?with|you (?:may|might|would) (?:also )?like)\b/i.test(
+      value,
+    ) ||
+    /\b(?:recommend|suggest)\b[^.!?]*\b(?:product|item|option|choice|pick|this|that|the)\b/i.test(
+      value,
+    ) ||
+    /\b(?:is|are|would be|makes?)\s+(?:a|an|the)?\s*(?:great|good|best|ideal|perfect|excellent|popular)\s+(?:choice|option|pick|fit|match|product|item)\b/i.test(
+      value,
+    )
+  );
+}
+
+function isGroundedCatalogDenial(value: string) {
+  return /\b(?:can(?:not|'t|\u2019t) verify|could(?: not|n't|n\u2019t) find|do not see|don't see|don\u2019t see|won't guess|won\u2019t guess|not in (?:the|this) (?:catalog|store)|no exact match)\b/i.test(
+    value,
+  );
 }
 
 type CatalogIndex = {

@@ -11,6 +11,7 @@ import {
   formatPrice,
   getReplyProductCards,
   normalizeLiveCartContext,
+  resolveRequestedCartSelection,
   sanitizeMessageHistory,
   validateGroundedAiChatResponse,
 } from "./chatResponse";
@@ -43,6 +44,9 @@ describe("chat response contract", () => {
       "cart_summary",
     );
     expect(classifyMessageIntent("Is my bag empty?")).toBe("cart_summary");
+    expect(classifyMessageIntent("Add a blue hiking hoodie to my cart")).toBe(
+      "cart_action",
+    );
     expect(classifyMessageIntent("Hello there")).toBe("general");
   });
 
@@ -52,8 +56,10 @@ describe("chat response contract", () => {
         status: "loaded",
         currency: "KES",
         itemCount: 2,
+        subtotalPrice: 998,
         totalPrice: 898,
         totalDiscount: 100,
+        discounts: [{ title: "TRAIL10", amount: 100 }],
         items: [
           {
             productId: "1",
@@ -76,8 +82,10 @@ describe("chat response contract", () => {
       status: "loaded",
       currencyCode: "KES",
       itemCount: 2,
+      subtotalPrice: 998,
       totalPrice: 898,
       totalDiscount: 100,
+      discounts: [{ title: "TRAIL10", amount: 100 }],
       items: [
         {
           productId: "gid://shopify/Product/1",
@@ -90,8 +98,10 @@ describe("chat response contract", () => {
     });
     const reply = buildCartSummaryReply(cart, kes);
     expect(reply).toContain("2 items");
+    expect(reply).toContain("subtotal of KSh998.00");
     expect(reply).toContain("current total of KSh898.00");
     expect(reply).toContain("saving KSh100.00");
+    expect(reply).toContain("Applied: TRAIL10");
     expect(reply).toContain("2 × Trail Board — KSh898.00");
     expect(reply).not.toContain("Tampered title");
   });
@@ -192,6 +202,25 @@ describe("chat response contract", () => {
     ).toBe("The Trail Board is KSh499.00.");
   });
 
+  it("rejects model-supplied product links so the server renders them", () => {
+    expect(
+      validateGroundedAiChatResponse({
+        value: {
+          reply: "Try /products/trail-board.",
+          productIds: ["gid://shopify/Product/1"],
+        },
+        catalog: [product()],
+        fallback: "fallback",
+        currency: kes,
+      }),
+    ).toEqual({
+      reply: "fallback",
+      products: [],
+      action: null,
+      fallbackUsed: true,
+    });
+  });
+
   it("does not recommend unrelated products when no catalog item matches", () => {
     expect(
       buildCatalogFallbackReply(
@@ -235,7 +264,9 @@ describe("chat response contract", () => {
     expect(validated.reply).toContain(
       "Trail Board (KSh499.00) /products/trail-board",
     );
+    expect(validated.reply).not.toContain("trail riding");
     expect(validated.products).toEqual(catalog);
+    expect(validated.action).toBeNull();
 
     expect(
       validateGroundedAiChatResponse({
@@ -247,7 +278,36 @@ describe("chat response contract", () => {
         fallback: "fallback",
         currency: kes,
       }),
-    ).toEqual({ reply: "fallback", products: [], fallbackUsed: true });
+    ).toEqual({
+      reply: "fallback",
+      products: [],
+      action: null,
+      fallbackUsed: true,
+    });
+  });
+
+  it("rejects a recommendation for a product that is already in the cart", () => {
+    expect(
+      validateGroundedAiChatResponse({
+        value: {
+          reply: "You may also like this.",
+          productIds: ["gid://shopify/Product/1"],
+          action: {
+            type: "show_products",
+            productId: "gid://shopify/Product/1",
+          },
+        },
+        catalog: [product()],
+        excludedProductIds: ["gid://shopify/Product/1"],
+        fallback: "I don’t see another verified match to suggest.",
+        currency: kes,
+      }),
+    ).toEqual({
+      reply: "I don’t see another verified match to suggest.",
+      products: [],
+      action: null,
+      fallbackUsed: true,
+    });
   });
 
   it("gives the model exact descriptions, variants, and currency context", () => {
@@ -272,6 +332,28 @@ describe("chat response contract", () => {
           type: "single_line_text_field",
         },
       },
+      variants: [
+        {
+          id: "gid://shopify/ProductVariant/21",
+          title: "Small",
+          sku: "COMPLETE-S",
+          price: "499.00",
+          compareAtPrice: null,
+          quantityAvailable: 4,
+          availableForSale: true,
+          selectedOptions: [{ name: "Size", value: "Small" }],
+        },
+        {
+          id: "gid://shopify/ProductVariant/22",
+          title: "Large",
+          sku: "COMPLETE-L",
+          price: "529.00",
+          compareAtPrice: null,
+          quantityAvailable: 3,
+          availableForSale: true,
+          selectedOptions: [{ name: "Size", value: "Large" }],
+        },
+      ],
     });
     const cards = getReplyProductCards(
       "Trail Board /products/trail-board and Complete Board /products/complete-board; Trail Board again.",
@@ -312,6 +394,121 @@ describe("chat response contract", () => {
         catalog,
       ),
     ).toMatchObject({ handle: "trail-board" });
+  });
+
+  it("resolves an explicitly requested variant and otherwise requires inline selection", () => {
+    const hoodie = product({
+      title: "Hiking Hoodie",
+      handle: "hiking-hoodie",
+      variants: [
+        {
+          id: "gid://shopify/ProductVariant/21",
+          title: "Red / Small",
+          sku: "HOOD-RED-S",
+          price: "80",
+          compareAtPrice: null,
+          quantityAvailable: 4,
+          availableForSale: true,
+          selectedOptions: [
+            { name: "Color", value: "Red" },
+            { name: "Size", value: "Small" },
+          ],
+        },
+        {
+          id: "gid://shopify/ProductVariant/22",
+          title: "Blue / Medium",
+          sku: "HOOD-BLUE-M",
+          price: "85",
+          compareAtPrice: null,
+          quantityAvailable: 2,
+          availableForSale: true,
+          selectedOptions: [
+            { name: "Color", value: "Blue" },
+            { name: "Size", value: "Medium" },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      resolveRequestedCartSelection(
+        "Add the blue Hiking Hoodie in medium to my cart",
+        [],
+        [hoodie],
+      ),
+    ).toMatchObject({
+      variant: { id: "gid://shopify/ProductVariant/22" },
+      needsSelection: false,
+    });
+    expect(
+      resolveRequestedCartSelection(
+        "Add the Hiking Hoodie to my cart",
+        [],
+        [hoodie],
+      ),
+    ).toMatchObject({ variant: null, needsSelection: true });
+  });
+
+  it("accepts only allowlisted structured actions with sellable variants", () => {
+    const catalog = [product()];
+    const validated = validateGroundedAiChatResponse({
+      value: {
+        reply: "I found a verified match.",
+        productIds: [catalog[0].id],
+        action: {
+          type: "add_to_cart",
+          productId: catalog[0].id,
+          variantId: "gid://shopify/ProductVariant/11",
+          quantity: 1,
+        },
+      },
+      catalog,
+      fallback: "fallback",
+      currency: kes,
+    });
+
+    expect(validated.action).toEqual({
+      type: "add_to_cart",
+      productId: catalog[0].id,
+      variantId: "gid://shopify/ProductVariant/11",
+      quantity: 1,
+    });
+  });
+
+  it("answers a follow-up option question from canonical variant data", () => {
+    const hoodie = product({
+      title: "Hiking Hoodie",
+      handle: "hiking-hoodie",
+      variants: [
+        {
+          id: "gid://shopify/ProductVariant/22",
+          title: "Blue / Medium",
+          sku: "HOOD-BLUE-M",
+          price: "85",
+          compareAtPrice: null,
+          quantityAvailable: 2,
+          availableForSale: true,
+          selectedOptions: [
+            { name: "Color", value: "Blue" },
+            { name: "Size", value: "Medium" },
+          ],
+        },
+      ],
+    });
+    const validated = validateGroundedAiChatResponse({
+      value: {
+        reply: "A verified option is available.",
+        productIds: [hoodie.id],
+      },
+      catalog: [hoodie],
+      fallback: "fallback",
+      currency: kes,
+      userMessage: "Do you have that in blue?",
+    });
+
+    expect(validated.reply).toContain(
+      "Hiking Hoodie has a currently sellable variant with Color: Blue.",
+    );
   });
 });
 
