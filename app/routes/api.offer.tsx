@@ -77,7 +77,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       cacheKeys.offerRateLimit(sessionId),
       60,
     );
-    if (requestCount > 10) {
+    const cartUpsellTrigger =
+      body.trigger === "cart_item_added" || body.trigger === "add_to_cart";
+    if (requestCount > 30 || (requestCount > 10 && !cartUpsellTrigger)) {
       return json(
         { widgetType: null, payload: {}, reason: "rate_limited" },
         { status: 429, headers: withCors({ "Retry-After": "60" }) },
@@ -95,11 +97,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         : body.cartItems?.length ||
           requestCartVariantIds.length ||
           requestCartProductIds.length;
+    const triggerProductId = toProductGid(body.triggerPayload?.productId);
     const cacheKey = cacheKeys.offer(
       sessionId,
       [
-        "v2",
+        "v3",
         body.currentProductId || "none",
+        triggerProductId || "no-trigger-product",
         body.trigger || "manual",
         requestCartProductIds.join(",") ||
           requestCartVariantIds.join(",") ||
@@ -158,6 +162,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       shop,
       session: decisionSession,
       currentProductId: body.currentProductId,
+      sourceProductId: triggerProductId,
       excludeProductIds: settings.blockedProductIds,
     });
     const rawDecision = await getOfferDecision({
@@ -395,6 +400,15 @@ function toVariantLookupKeys(value: unknown) {
 
 function toStringArray(value: unknown) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
+function toProductGid(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const id = text.split("?")[0].split("/").filter(Boolean).pop() || text;
+  return text.startsWith("gid://shopify/Product/")
+    ? text
+    : `gid://shopify/Product/${id}`;
 }
 
 function uniqueStrings(values: unknown[]) {

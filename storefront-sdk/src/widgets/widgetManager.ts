@@ -47,9 +47,18 @@ export class WidgetManager {
   mountDecision(decision: OfferDecision): void {
     if (!decision.widgetType) return;
     if (!isWidgetEnabled(decision.widgetType, this.settings)) return;
-    if (this.getDismissedWidgets().includes(decision.widgetType)) return;
-
     const payload = decision.payload || {};
+    const requiredCartUpsell =
+      decision.widgetType === "upsell_drawer" &&
+      (payload.triggerType === "cart_item_added" ||
+        payload.triggerType === "add_to_cart");
+    if (
+      this.getDismissedWidgets().includes(decision.widgetType) &&
+      !requiredCartUpsell
+    ) {
+      return;
+    }
+
     const offerId = String(payload.offerId || "");
     const nextKey = `${decision.widgetType}:${getWidgetIdentity(
       decision.widgetType,
@@ -96,7 +105,7 @@ export class WidgetManager {
     }
 
     if (
-      this.overlayWidget?.widget.getWidgetType() === decision.widgetType &&
+      this.overlayWidget?.key === nextKey &&
       this.overlayWidget.widget.isMounted()
     ) {
       return;

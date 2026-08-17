@@ -9,9 +9,6 @@ import {
 } from "./BaseWidget";
 
 export class UpsellDrawer extends BaseWidget {
-  private timer: number | undefined;
-  private deadline = Date.now() + 8000;
-
   getWidgetType(): string {
     return "upsell_drawer";
   }
@@ -19,6 +16,10 @@ export class UpsellDrawer extends BaseWidget {
   render(): void {
     const products = getProducts(this.payload).slice(0, 3);
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
+    if (products.length === 0) {
+      this.destroy();
+      return;
+    }
 
     this.html(`
       <style>
@@ -37,19 +38,19 @@ export class UpsellDrawer extends BaseWidget {
         }
         @keyframes drawer-in { to { transform: translateX(0); } }
         .head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
-        .timer { height: 4px; border-radius: 999px; overflow: hidden; background: #e5e7eb; margin: 12px 0; }
-        .timer span { display: block; height: 100%; width: 100%; background: var(--aovboost-accent); transform-origin: left; }
+        .added-note { margin: 12px 0; border-radius: 8px; background: #ecfdf5; color: #047857; font-size: 13px; font-weight: 700; padding: 9px 11px; }
+        .status { min-height: 16px; color: var(--aovboost-accent); font-size: 12px; font-weight: 650; }
       </style>
       <div class="backdrop" data-dismiss></div>
       <aside class="drawer" aria-label="Add-to-cart upsell">
         <div class="head">
           <div>
             <h3 class="title">${text(copy.headline || "Great choice. Complete the set")}</h3>
-            <p class="body">People who bought this also love:</p>
+            <p class="body">Verified complementary products from this store:</p>
           </div>
           <button type="button" class="icon" data-dismiss aria-label="Close">x</button>
         </div>
-        <div class="timer"><span data-timer></span></div>
+        <div class="added-note">Your selected item was added to the cart.</div>
         <div class="product-grid">
           ${products
             .map(
@@ -72,6 +73,7 @@ export class UpsellDrawer extends BaseWidget {
                           ? `<a class="primary" href="/products/${text(product.handle)}">View product</a>`
                           : ""
                     }
+                    <span class="status" data-status="${index}" aria-live="polite"></span>
                   </div>
                 </article>
               `,
@@ -101,34 +103,33 @@ export class UpsellDrawer extends BaseWidget {
     });
     this.root.querySelectorAll("[data-add]").forEach((button) => {
       button.addEventListener("click", async () => {
-        const index = Number((button as HTMLElement).dataset.productIndex);
+        const element = button as HTMLButtonElement;
+        const index = Number(element.dataset.productIndex);
         const product = products[index];
         const variant = product
           ? resolveProductVariant(this.root, product, `upsell-${index}`)
           : null;
         if (!variant) return;
+        const status = this.root.querySelector(`[data-status="${index}"]`);
+        element.disabled = true;
+        element.textContent = "Adding…";
         this.trackClick("add_upsell");
-        await addVariantToCart(variant.id, 1, this.payload.offerId);
+        try {
+          const added = await addVariantToCart(
+            variant.id,
+            1,
+            this.payload.offerId,
+          );
+          if (!added) throw new Error("Cart add failed");
+          element.textContent = "Added ✓";
+          if (status) status.textContent = "Added to your cart";
+        } catch {
+          element.disabled = false;
+          element.textContent = "Try again";
+          if (status) status.textContent = "Could not add this item";
+        }
       });
     });
-
-    this.startCountdown();
-  }
-
-  destroy(): void {
-    if (this.timer) window.clearInterval(this.timer);
-    super.destroy();
-  }
-
-  private startCountdown() {
-    if (this.timer) window.clearInterval(this.timer);
-    this.deadline = Date.now() + 8000;
-    this.timer = window.setInterval(() => {
-      const remaining = Math.max(this.deadline - Date.now(), 0);
-      const bar = this.root.querySelector("[data-timer]") as HTMLElement | null;
-      if (bar) bar.style.transform = `scaleX(${remaining / 8000})`;
-      if (remaining <= 0) this.dismiss();
-    }, 120);
   }
 
   private dismiss() {

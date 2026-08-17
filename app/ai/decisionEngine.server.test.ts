@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildHeuristicOfferDecision } from "./decisionEngine.server";
+import {
+  buildGeneratedCatalogBundlePayload,
+  buildHeuristicOfferDecision,
+} from "./decisionEngine.server";
 import type { DecisionInput } from "./types";
 
 describe("revenue widget routing", () => {
@@ -9,14 +12,14 @@ describe("revenue widget routing", () => {
     ).toBe("chat");
   });
 
-  it("shows catalog-backed recommendations on eligible landing pages", () => {
+  it("shows a catalog-backed complementary bundle on product pages", () => {
     expect(
       decision({
         currentPageType: "product",
         currentProductId: "gid://shopify/Product/1",
         trigger: trigger("initial"),
       }).widgetType,
-    ).toBe("rec_strip");
+    ).toBe("bundle");
   });
 
   it("prioritizes an upsell drawer after a live cart addition", () => {
@@ -28,6 +31,37 @@ describe("revenue widget routing", () => {
         trigger: trigger("cart_item_added", { cartValue: 80 }),
       }).widgetType,
     ).toBe("upsell_drawer");
+  });
+
+  it("builds a no-fake-discount bundle from verified catalog products", () => {
+    const source = catalogProduct("1", "Trail Board");
+    const complement = catalogProduct("2", "Trail Pack");
+    const payload = buildGeneratedCatalogBundlePayload(
+      {},
+      {
+        sourceProduct: source,
+        currentProductId: source.id,
+        affinities: [
+          {
+            targetId: complement.id,
+            target: complement,
+            reason: "Same catalog category.",
+          },
+        ],
+      },
+    );
+
+    expect(payload).toMatchObject({
+      bundle: {
+        discountType: "none",
+        discountValue: "0",
+        generatedFromCatalog: true,
+      },
+      currentProductId: source.id,
+    });
+    expect((payload as any).products.map((item: any) => item.productId)).toEqual(
+      [source.id, complement.id],
+    );
   });
 
   it("requires a verified future end time for countdown urgency", () => {
@@ -121,4 +155,50 @@ function decision(overrides: Partial<DecisionInput> = {}) {
 
 function trigger(type: string, payload: Record<string, unknown> = {}) {
   return { type, payload };
+}
+
+function catalogProduct(id: string, title: string) {
+  const productId = `gid://shopify/Product/${id}`;
+  const variantId = `gid://shopify/ProductVariant/${id}1`;
+  const variant = {
+    id: variantId,
+    title: "Default",
+    sku: "",
+    price: "20.00",
+    compareAtPrice: null,
+    quantityAvailable: 10,
+    availableForSale: true,
+    selectedOptions: [],
+  };
+  return {
+    id: productId,
+    handle: title.toLowerCase().replace(/\s+/g, "-"),
+    title,
+    name: title,
+    description: "",
+    vendor: "",
+    productType: "Accessories",
+    category: "Accessories",
+    tags: ["trail"],
+    price: "20.00",
+    compareAtPrice: null,
+    priceRegular: "20.00",
+    priceSale: null,
+    image: null,
+    imageUrl: null,
+    imageAlt: title,
+    inventory: 10,
+    availableForSale: true,
+    defaultVariantId: variantId,
+    variants: [variant],
+    searchText: title.toLowerCase(),
+    metafields: {
+      "aovboost.availableForSale": { value: "true", type: "boolean" },
+      "aovboost.defaultVariantId": {
+        value: variantId,
+        type: "single_line_text_field",
+      },
+      "aovboost.variants": [variant],
+    },
+  };
 }

@@ -23,6 +23,8 @@ export class EventBus {
   private flushTimer: number | undefined;
   private scrollDepths = new Set<number>();
   private originalFetch: typeof window.fetch | null = null;
+  private originalXhrOpen: typeof XMLHttpRequest.prototype.open | null = null;
+  private originalXhrSend: typeof XMLHttpRequest.prototype.send | null = null;
   private authFlushInFlight = false;
 
   constructor(private options: EventBusOptions) {}
@@ -30,7 +32,7 @@ export class EventBus {
   init(): void {
     this.installNavigationTracking();
     this.installCartFetchTracking();
-    this.installCartDomTracking();
+    this.installCartXhrTracking();
     this.installScrollTracking();
     this.installHoverTracking();
     this.installSearchTracking();
@@ -203,12 +205,17 @@ export class EventBus {
       const response = await this.originalFetch!(...args);
 
       try {
-        if (isCartAddUrl(requestUrl)) {
-          this.track("add_to_cart", {
-            ...getCartPayload(init?.body),
-            requestUrl,
+        if (isCartAddUrl(requestUrl) && response.ok) {
+          const requestPayload = getCartPayload(init?.body);
+          void readCartAddResponse(response).then((responsePayload) => {
+            this.track("add_to_cart", {
+              ...requestPayload,
+              ...responsePayload,
+              source: "verified_fetch_response",
+              requestUrl,
+            });
           });
-        } else if (isCartChangeUrl(requestUrl)) {
+        } else if (isCartChangeUrl(requestUrl) && response.ok) {
           this.track("remove_from_cart", {
             ...getCartPayload(init?.body),
             requestUrl,
@@ -227,47 +234,70 @@ export class EventBus {
     };
   }
 
-  private installCartDomTracking(): void {
-    document.addEventListener(
-      "submit",
-      (event) => {
-        const form = event.target as HTMLFormElement | null;
-        if (!form || !isCartAddUrl(form.action || "")) return;
+  private installCartXhrTracking(): void {
+    if (
+      typeof XMLHttpRequest === "undefined" ||
+      this.originalXhrOpen ||
+      this.originalXhrSend
+    ) {
+      return;
+    }
 
-        try {
-          this.track("add_to_cart", {
-            ...getCartPayload(new FormData(form)),
-            source: "cart_form_submit",
-            requestUrl: form.action,
-          });
-        } catch {
-          this.track("add_to_cart", {
-            source: "cart_form_submit",
-            requestUrl: form.action,
-          });
-        }
-      },
-      true,
-    );
+    const trackVerifiedAdd = (payload: EventPayload) =>
+      this.track("add_to_cart", payload);
+    const prototype = XMLHttpRequest.prototype;
+    this.originalXhrOpen = prototype.open;
+    this.originalXhrSend = prototype.send;
+    const originalOpen = this.originalXhrOpen;
+    const originalSend = this.originalXhrSend;
 
-    document.addEventListener(
-      "click",
-      (event) => {
-        const target = event.target as HTMLElement | null;
-        const button = target?.closest?.(
-          "button[name='add'], [type='submit'][name='add'], [data-add-to-cart]",
-        ) as HTMLElement | null;
-        if (!button) return;
-        const form = button.closest("form") as HTMLFormElement | null;
-        if (form && !isCartAddUrl(form.action || "")) return;
+    prototype.open = function (
+      method: string,
+      url: string | URL,
+      async?: boolean,
+      username?: string | null,
+      password?: string | null,
+    ) {
+      (this as XMLHttpRequest & { __aovboostUrl?: string }).__aovboostUrl =
+        String(url || "");
+      if (typeof async === "boolean") {
+        return (originalOpen as any).call(
+          this,
+          method,
+          url,
+          async,
+          username,
+          password,
+        );
+      }
+      return (originalOpen as any).call(this, method, url);
+    };
 
-        this.track("add_to_cart", {
-          source: "add_button_click",
-          requestUrl: form?.action || "",
-        });
-      },
-      true,
-    );
+    prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
+      const requestUrl =
+        (this as XMLHttpRequest & { __aovboostUrl?: string }).__aovboostUrl ||
+        "";
+      const requestPayload = getCartPayload(body as BodyInit | null);
+      if (isCartAddUrl(requestUrl)) {
+        this.addEventListener(
+          "load",
+          () => {
+            if (this.status < 200 || this.status >= 300) return;
+            const responsePayload = parseCartAddResponse(
+              this.responseType === "json" ? this.response : this.responseText,
+            );
+            trackVerifiedAdd({
+              ...requestPayload,
+              ...responsePayload,
+              source: "verified_xhr_response",
+              requestUrl,
+            });
+          },
+          { once: true },
+        );
+      }
+      return originalSend.call(this, body);
+    };
   }
 
   private installScrollTracking(): void {
@@ -431,10 +461,52 @@ function getCartPayload(body: BodyInit | null | undefined) {
   }
 }
 
+async function readCartAddResponse(response: Response) {
+  try {
+    return parseCartAddResponse(await response.clone().json());
+  } catch {
+    return {};
+  }
+}
+
+function parseCartAddResponse(value: unknown) {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return {};
+    }
+  }
+  const record = normalizePayload(parsed);
+  const firstItem = Array.isArray(record.items)
+    ? normalizePayload(record.items[0])
+    : record;
+  return {
+    productId: toProductGid(
+      firstItem.product_id ||
+        firstItem.productId ||
+        normalizePayload(firstItem.product).id,
+    ),
+    variantId: toVariantGid(
+      firstItem.variant_id || firstItem.variantId || firstItem.id,
+    ),
+    quantity: Number(firstItem.quantity || 1),
+  };
+}
+
 function toProductGid(value: unknown) {
   const text = String(value || "");
   if (!text) return "";
   return text.startsWith("gid://shopify/Product/")
     ? text
     : `gid://shopify/Product/${text}`;
+}
+
+function toVariantGid(value: unknown) {
+  const text = String(value || "");
+  if (!text) return "";
+  return text.startsWith("gid://shopify/ProductVariant/")
+    ? text
+    : `gid://shopify/ProductVariant/${text}`;
 }

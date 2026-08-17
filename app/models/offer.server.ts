@@ -17,9 +17,11 @@ export async function buildOfferCandidates(input: {
   shop: string;
   session: ShopperSessionSnapshot;
   currentProductId?: string;
+  sourceProductId?: string;
   excludeProductIds?: string[];
 }): Promise<OfferCandidate[]> {
   const recommendationSourceProductId =
+    input.sourceProductId ||
     input.currentProductId ||
     input.session.cartProductIds[0] ||
     input.session.viewedProductIds.at(-1);

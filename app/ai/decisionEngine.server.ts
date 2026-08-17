@@ -38,7 +38,9 @@ export async function getOfferDecision(
   const cartItemCount = Number(
     input.cartItemCount ?? input.session.context.cartItemCount ?? 0,
   );
+  const triggerProductId = toProductGid(input.trigger?.payload?.productId);
   const recommendationSourceProductId =
+    triggerProductId ||
     input.currentProductId ||
     input.cartProductIds[0] ||
     input.session.viewedProductIds.at(-1);
@@ -147,13 +149,23 @@ export async function getOfferDecision(
 
   if (!decision.widgetType)
     return noOffer(decision.reasoning, decision.aiProvider);
-  if (input.recentlyDismissedWidgets.includes(decision.widgetType)) {
+  const requiredCartUpsell =
+    decision.widgetType === "upsell_drawer" &&
+    (input.trigger?.type === "cart_item_added" ||
+      input.trigger?.type === "add_to_cart");
+  if (
+    input.recentlyDismissedWidgets.includes(decision.widgetType) &&
+    !requiredCartUpsell
+  ) {
     return noOffer("Widget was recently dismissed.", decision.aiProvider);
   }
 
   const enrichedPayload = enrichPayload(decision.widgetType, decision.payload, {
     bundles,
     affinities,
+    sourceProduct: input.currentProductId
+      ? catalog.byId[input.currentProductId]
+      : undefined,
     currentProductId: input.currentProductId,
     cartProductIds: input.cartProductIds,
     cartHasItems:
@@ -186,6 +198,8 @@ export async function getOfferDecision(
         "navigation",
         "assistant_bootstrap",
         "social_proof",
+        "cart_item_added",
+        "add_to_cart",
       ].includes(input.trigger?.type || ""),
     },
   );
@@ -499,13 +513,17 @@ export function buildHeuristicOfferDecision(
   if (
     input.currentPageType === "product" &&
     input.settings.bundlesEnabled &&
-    activeBundleCount > 0 &&
+    input.currentProductId &&
+    (activeBundleCount > 0 || hasProductCandidates(input)) &&
     isProductPageBundleTrigger(triggerType)
   ) {
     return {
       widgetType: "bundle",
       payload: { currentProductId: input.currentProductId },
-      reasoning: "Product page has an active triggered bundle.",
+      reasoning:
+        activeBundleCount > 0
+          ? "Product page has an active merchant-configured bundle."
+          : "Product page has verified catalog products for a complementary bundle.",
       confidence: 0.72,
       aiProvider: "heuristic",
     };
@@ -725,6 +743,7 @@ function enrichPayload(
   context: {
     bundles: unknown[];
     affinities: unknown[];
+    sourceProduct?: CatalogCacheProduct;
     currentProductId?: string;
     cartProductIds: string[];
     cartHasItems: boolean;
@@ -735,7 +754,9 @@ function enrichPayload(
 ) {
   if (widgetType === "bundle") {
     const bundle = context.bundles[0] as Record<string, unknown> | undefined;
-    if (!bundle) return null;
+    if (!bundle) {
+      return buildGeneratedCatalogBundlePayload(payload, context);
+    }
 
     const products = getProductsFromBundle(bundle);
     if (products.length === 0) return null;
@@ -772,6 +793,7 @@ function enrichPayload(
       products:
         widgetType === "post_purchase" ? products.slice(0, 1) : products,
       cartProductIds: context.cartProductIds,
+      triggerType: context.triggerType,
     };
   }
 
@@ -808,6 +830,54 @@ function enrichPayload(
   }
 
   return payload;
+}
+
+export function buildGeneratedCatalogBundlePayload(
+  payload: Record<string, unknown>,
+  context: {
+    sourceProduct?: CatalogCacheProduct;
+    affinities: unknown[];
+    currentProductId?: string;
+  },
+) {
+  if (!context.sourceProduct) return null;
+
+  const sourceProduct = catalogProductToWidgetProduct(context.sourceProduct);
+  const complementaryProducts = getProductsFromAffinities(context.affinities)
+    .filter((item) => item.productId !== sourceProduct.id)
+    .slice(0, 2);
+  if (complementaryProducts.length === 0) return null;
+
+  const products = [
+    {
+      productId: sourceProduct.id,
+      targetId: sourceProduct.id,
+      variantId: sourceProduct.variantId,
+      quantity: 1,
+      reason: "The product you are viewing.",
+      product: sourceProduct,
+      target: sourceProduct,
+    },
+    ...complementaryProducts,
+  ];
+  const bundle = {
+    id: `catalog:${sourceProduct.id}`,
+    name: "Complete the set",
+    description:
+      "A complementary pairing selected from products currently available in this store.",
+    discountType: "none",
+    discountValue: "0",
+    generatedFromCatalog: true,
+    items: products,
+  };
+
+  return {
+    ...omitUnsafeProductPayload(payload),
+    bundle,
+    bundles: [],
+    products,
+    currentProductId: context.currentProductId,
+  };
 }
 
 function getProductsFromBundle(bundle: Record<string, unknown>) {
@@ -875,6 +945,15 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function toStringArray(value: unknown) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
+function toProductGid(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const id = text.split("?")[0].split("/").filter(Boolean).pop() || text;
+  return text.startsWith("gid://shopify/Product/")
+    ? text
+    : `gid://shopify/Product/${id}`;
 }
 
 function noOffer(

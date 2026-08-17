@@ -110,8 +110,15 @@ export class BundleWidget extends BaseWidget {
     this.root
       .querySelector("[data-add]")
       ?.addEventListener("click", async () => {
+        const button = this.root.querySelector(
+          "[data-add]",
+        ) as HTMLButtonElement | null;
+        if (button) {
+          button.disabled = true;
+          button.textContent = "Adding bundle…";
+        }
         this.trackClick("add_bundle");
-        await addManyToCart(
+        const added = await addManyToCart(
           products.map((product, index) => ({
             variantId: resolveProductVariant(
               this.root,
@@ -128,6 +135,14 @@ export class BundleWidget extends BaseWidget {
               }
             : undefined,
         );
+        if (!added) {
+          if (button) {
+            button.disabled = false;
+            button.textContent = "Try again";
+          }
+          return;
+        }
+        if (button) button.textContent = "Bundle added ✓";
         document.dispatchEvent(
           new CustomEvent("add-to-cart", {
             detail: { source: "bundle_widget" },

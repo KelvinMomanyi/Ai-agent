@@ -122,6 +122,44 @@ describe("isWidgetEnabled", () => {
     expect(mount?.nextElementSibling?.id).toBe("product-grid");
     expect(manager.getStatus().mountedWidgetTypes).toContain("rec_strip");
   });
+
+  it("always refreshes the verified upsell after a new cart addition", () => {
+    localStorage.setItem(
+      "aovboost_dismissed_widgets",
+      JSON.stringify([
+        { widgetType: "upsell_drawer", dismissedAt: Date.now() },
+      ]),
+    );
+    const manager = new WidgetManager({ upsellEnabled: true });
+
+    manager.mountDecision({
+      widgetType: "upsell_drawer",
+      payload: {
+        offerId: "upsell-1",
+        triggerType: "cart_item_added",
+        products: [widgetProduct("2", "First complement")],
+      },
+    });
+    manager.mountDecision({
+      widgetType: "upsell_drawer",
+      payload: {
+        offerId: "upsell-2",
+        triggerType: "cart_item_added",
+        products: [widgetProduct("3", "Second complement")],
+      },
+    });
+
+    const drawers = document.querySelectorAll(
+      "[data-aovboost-widget='upsell_drawer']",
+    );
+    expect(drawers).toHaveLength(1);
+    expect((drawers[0] as HTMLElement).shadowRoot?.textContent).toContain(
+      "Second complement",
+    );
+    expect(
+      (drawers[0] as HTMLElement).shadowRoot?.querySelector("[data-timer]"),
+    ).toBeNull();
+  });
 });
 
 function activeWidgetTypes() {
@@ -132,18 +170,18 @@ function activeWidgetTypes() {
     .sort();
 }
 
-function widgetProduct() {
+function widgetProduct(id = "2", title = "Verified Add-on") {
   return {
-    id: "gid://shopify/Product/2",
-    productId: "gid://shopify/Product/2",
-    variantId: "gid://shopify/ProductVariant/22",
-    title: "Verified Add-on",
-    handle: "verified-add-on",
+    id: `gid://shopify/Product/${id}`,
+    productId: `gid://shopify/Product/${id}`,
+    variantId: `gid://shopify/ProductVariant/${id}2`,
+    title,
+    handle: title.toLowerCase().replace(/\s+/g, "-"),
     imageUrl: "",
     price: "20.00",
     variants: [
       {
-        id: "gid://shopify/ProductVariant/22",
+        id: `gid://shopify/ProductVariant/${id}2`,
         title: "Default",
         sku: "ADD-ON",
         price: "20.00",
