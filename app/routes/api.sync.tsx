@@ -1,5 +1,5 @@
 import { data as json, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
-import prisma from "../db.server";
+import { getCatalogReadiness } from "../models/catalogCache.server";
 import {
   getCatalogSyncProgress,
   processCatalogSyncChunk,
@@ -48,15 +48,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 async function getCatalogSyncStatus(shop: string) {
-  const [durableProgress, cachedProgress, productCount] = await Promise.all([
+  const [durableProgress, cachedProgress, catalogReadiness] = await Promise.all([
     getCatalogSyncProgress(shop),
     getJsonCache(cacheKeys.syncProgress(shop)),
-    prisma.product.count({ where: { shop } }),
+    getCatalogReadiness(shop),
   ]);
 
   return {
     progress: durableProgress || cachedProgress,
-    productCount,
+    productCount: catalogReadiness.storedProductCount,
+    catalogReadiness,
     progressKey: cacheKeys.syncProgress(shop),
   };
 }

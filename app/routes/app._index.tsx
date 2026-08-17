@@ -1,11 +1,13 @@
 import { data as json, type LoaderFunctionArgs, useFetcher, useLoaderData } from "react-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Badge, BlockStack, Card, InlineStack, Layout, Page, Text } from "@shopify/polaris";
 import { AovMetricCard } from "../components/dashboard/AovMetricCard";
 import { RevenueChart } from "../components/dashboard/RevenueChart";
 import { WidgetPerformanceTable } from "../components/dashboard/WidgetPerformanceTable";
 import prisma from "../db.server";
 import { getDashboardMetrics } from "../models/analytics.server";
+import { getCatalogReadiness } from "../models/catalogCache.server";
+import type { CatalogReadiness } from "../models/productCatalogMapping";
 import { cacheKeys, getJsonCache } from "../redis.server";
 import { authenticate } from "../shopify.server";
 
@@ -21,13 +23,15 @@ type SyncResponse = {
   continue?: boolean;
   progress?: SyncProgress;
   productCount?: number;
+  catalogReadiness?: CatalogReadiness;
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
-  const [metrics, productCount, syncProgress, currencyResponse] = await Promise.all([
+  const [metrics, catalogReadiness, activeBundleCount, syncProgress, currencyResponse] = await Promise.all([
     getDashboardMetrics(session.shop),
-    prisma.product.count({ where: { shop: session.shop } }),
+    getCatalogReadiness(session.shop),
+    prisma.bundle.count({ where: { shop: session.shop, isActive: true } }),
     getJsonCache<SyncProgress>(cacheKeys.syncProgress(session.shop)),
     admin.graphql(`#graphql\nquery AOVBoostShopCurrency { shop { currencyCode } }`),
   ]);
@@ -38,7 +42,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return json({
     metrics,
-    productCount,
+    productCount: catalogReadiness.storedProductCount,
+    catalogReadiness,
+    activeBundleCount,
     syncProgress,
     currencyCode,
     providers: {
@@ -49,11 +55,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function AovBoostDashboard() {
-  const { metrics, providers, productCount, syncProgress, currencyCode } =
+  const { metrics, providers, productCount, catalogReadiness, activeBundleCount, syncProgress, currencyCode } =
     useLoaderData<typeof loader>();
   const syncFetcher = useFetcher<SyncResponse>();
+  const automaticRepairStarted = useRef(false);
   const currentProgress = syncFetcher.data?.progress ?? syncProgress;
   const currentProductCount = syncFetcher.data?.productCount ?? productCount;
+  const currentReadiness =
+    syncFetcher.data?.catalogReadiness ?? catalogReadiness;
   const syncShouldContinue = Boolean(
     currentProgress?.status &&
       currentProgress.status !== "complete" &&
@@ -71,6 +80,22 @@ export default function AovBoostDashboard() {
     );
   }, [syncFetcher, syncShouldContinue]);
 
+  useEffect(() => {
+    const repairCanStart =
+      currentReadiness.resyncRequired &&
+      !syncFailed &&
+      !syncShouldContinue &&
+      syncFetcher.state === "idle" &&
+      !automaticRepairStarted.current;
+    if (!repairCanStart) return;
+
+    automaticRepairStarted.current = true;
+    syncFetcher.submit(
+      { intent: "restart" },
+      { method: "post", action: "/api/sync" },
+    );
+  }, [currentReadiness.resyncRequired, syncFailed, syncShouldContinue, syncFetcher]);
+
   return (
     <Page
       title="AOVBoost Dashboard"
@@ -78,6 +103,8 @@ export default function AovBoostDashboard() {
       primaryAction={{
         content: syncIsSubmitting
           ? "Syncing products"
+          : currentReadiness.resyncRequired
+            ? "Repair catalog sync"
           : currentProductCount > 0
             ? "Resync products"
             : "Sync products",
@@ -165,8 +192,11 @@ export default function AovBoostDashboard() {
                 Product catalog
               </Text>
               <InlineStack gap="200">
-                <Badge tone={currentProductCount > 0 ? "success" : "critical"}>
-                  {`${currentProductCount.toLocaleString()} synced`}
+                <Badge tone={currentReadiness.actionableProductCount > 0 ? "success" : "critical"}>
+                  {`${currentReadiness.actionableProductCount.toLocaleString()} storefront-ready`}
+                </Badge>
+                <Badge tone="info">
+                  {`${currentProductCount.toLocaleString()} stored`}
                 </Badge>
                 {currentProgress?.status ? (
                   <Badge tone={syncFailed ? "critical" : "info"}>
@@ -175,7 +205,28 @@ export default function AovBoostDashboard() {
                 ) : null}
               </InlineStack>
               <Text as="p" tone={syncFailed ? "critical" : "subdued"}>
-                {getCatalogStatusText(currentProductCount, currentProgress, syncFailed)}
+                {getCatalogStatusText(currentReadiness, currentProgress, syncFailed)}
+              </Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section variant="oneThird">
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">
+                Storefront merchandising
+              </Text>
+              <InlineStack gap="200">
+                <Badge tone={activeBundleCount > 0 ? "success" : "attention"}>
+                  {`${activeBundleCount.toLocaleString()} active bundles`}
+                </Badge>
+                <Badge tone={currentReadiness.actionableProductCount > 1 ? "success" : "critical"}>
+                  {`${currentReadiness.actionableProductCount.toLocaleString()} recommendation-ready`}
+                </Badge>
+              </InlineStack>
+              <Text as="p" tone="subdued">
+                {getMerchandisingStatusText(activeBundleCount, currentReadiness)}
               </Text>
             </BlockStack>
           </Card>
@@ -209,7 +260,7 @@ export default function AovBoostDashboard() {
 }
 
 function getCatalogStatusText(
-  productCount: number,
+  readiness: CatalogReadiness,
   progress: SyncProgress,
   failed: boolean,
 ) {
@@ -222,10 +273,29 @@ function getCatalogStatusText(
     const count = total > 0 ? `${done.toLocaleString()} of ${total.toLocaleString()}` : done.toLocaleString();
     return `Catalog sync is ${formatStatus(progress.status).toLowerCase()} (${count}).`;
   }
-  if (productCount > 0) {
-    return "Chat and widgets can now recommend exact products from this store.";
+  if (readiness.resyncRequired) {
+    return `${readiness.missingVariantDataCount.toLocaleString()} stored products are missing current variant data. Use Repair catalog sync so recommendations and add-to-cart actions can render safely.`;
+  }
+  if (readiness.actionableProductCount > 0) {
+    return "The catalog has verified, sellable variants for chat and storefront recommendations.";
   }
   return "No products are synced yet. Sync before storefront chat can recommend exact items.";
+}
+
+function getMerchandisingStatusText(
+  activeBundleCount: number,
+  readiness: CatalogReadiness,
+) {
+  if (activeBundleCount === 0 && readiness.actionableProductCount < 2) {
+    return "No active bundle or usable recommendation pool exists yet. Repair the catalog, then create a bundle if you want a bundle card on product pages.";
+  }
+  if (activeBundleCount === 0) {
+    return "Catalog-backed recommendation strips are ready. Create an active bundle to show bundle cards on matching product pages.";
+  }
+  if (readiness.actionableProductCount < 2) {
+    return "Bundles exist, but the recommendation catalog needs repair before product cards can be safely added to cart.";
+  }
+  return "Active bundles and catalog-backed recommendation strips are ready for eligible storefront pages.";
 }
 
 function formatStatus(status: string) {

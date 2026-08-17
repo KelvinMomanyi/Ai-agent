@@ -5,6 +5,7 @@ import {
   getSafeDefaultVariantId,
   getSyncedProductVariants,
   isCatalogProductAvailable,
+  summarizeCatalogReadiness,
 } from "./productCatalogMapping";
 
 export type CatalogCacheProduct = {
@@ -58,6 +59,14 @@ const HOT_CATALOG_TTL_SECONDS = 4 * 60 * 60;
 const CATEGORY_CATALOG_TTL_SECONDS = 60 * 60;
 const HOT_PRODUCT_LIMIT = 500;
 const CATEGORY_PRODUCT_LIMIT = 250;
+
+export async function getCatalogReadiness(shop: string) {
+  const products = await prisma.product.findMany({
+    where: { shop },
+    select: { metafields: true },
+  });
+  return summarizeCatalogReadiness(products);
+}
 
 export async function getCatalogSnapshot(shop: string) {
   const cached = await getJsonCache<CatalogSnapshot>(catalogKey(shop));

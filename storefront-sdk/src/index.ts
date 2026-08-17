@@ -40,6 +40,7 @@ declare global {
         trigger?: string,
         payload?: Record<string, unknown>,
       ) => Promise<unknown>;
+      diagnose: () => unknown;
       destroy: () => void;
     };
   }
@@ -101,6 +102,7 @@ async function start(): Promise<void> {
       trigger: (type, payload = {}) => triggerRouter.trigger(type, payload),
       requestOffer: (trigger = "global", payload = {}) =>
         offerPoller.requestOffer(trigger, payload),
+      diagnose: () => offerPoller.getStatus(),
       destroy: () => {
         liveUpdates.destroy();
         triggerRouter.destroy();

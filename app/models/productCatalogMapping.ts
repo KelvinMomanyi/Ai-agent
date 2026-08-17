@@ -31,6 +31,15 @@ export type SyncedProductVariant = {
   selectedOptions: Array<{ name: string; value: string }>;
 };
 
+export type CatalogReadiness = {
+  storedProductCount: number;
+  availableProductCount: number;
+  actionableProductCount: number;
+  missingVariantDataCount: number;
+  unavailableProductCount: number;
+  resyncRequired: boolean;
+};
+
 type VariantMappingOptions = {
   variantOrderCounts?: ReadonlyMap<string, number>;
 };
@@ -283,6 +292,47 @@ export function isCatalogProductAvailable(metafields: unknown) {
     variants.length === 0 ||
     variants.some((variant) => variant.availableForSale)
   );
+}
+
+export function summarizeCatalogReadiness(
+  products: Array<{ metafields: unknown }>,
+): CatalogReadiness {
+  let availableProductCount = 0;
+  let actionableProductCount = 0;
+  let missingVariantDataCount = 0;
+
+  for (const product of products) {
+    const variants = getSyncedProductVariants(product.metafields);
+    const available = isCatalogProductAvailable(product.metafields);
+    if (variants.length === 0) missingVariantDataCount += 1;
+    if (available) availableProductCount += 1;
+    if (
+      available &&
+      variants.some(
+        (variant) => variant.availableForSale && Boolean(variant.id),
+      )
+    ) {
+      actionableProductCount += 1;
+    }
+  }
+
+  const storedProductCount = products.length;
+  return {
+    storedProductCount,
+    availableProductCount,
+    actionableProductCount,
+    missingVariantDataCount,
+    unavailableProductCount: Math.max(
+      storedProductCount - availableProductCount,
+      0,
+    ),
+    // Current catalog writes always include canonical variant data. Rows
+    // without it came from an older/incomplete sync and cannot power direct
+    // add-to-cart actions safely.
+    resyncRequired:
+      storedProductCount > 0 &&
+      (missingVariantDataCount > 0 || actionableProductCount === 0),
+  };
 }
 
 export function getSyncedProductVariants(

@@ -21,6 +21,15 @@ type PendingOfferRequest = {
   queuedAt: number;
 };
 
+export type OfferRuntimeEntry = {
+  trigger: string;
+  outcome: "mounted" | "local_fallback" | "no_offer" | "request_failed";
+  widgetType: string | null;
+  reasoning: string;
+  httpStatus?: number;
+  timestamp: number;
+};
+
 const OFFER_REQUEST_TIMEOUT_MS = 8_000;
 const STOREFRONT_READ_TIMEOUT_MS = 1_500;
 
@@ -30,6 +39,7 @@ export class OfferPoller {
   private stopped = false;
   private startupTimers = new Set<number>();
   private pendingRequests = new Map<string, PendingOfferRequest>();
+  private runtimeHistory: OfferRuntimeEntry[] = [];
   private abortController = new AbortController();
   private options: OfferPollerOptions;
 
@@ -69,6 +79,15 @@ export class OfferPoller {
     this.startupTimers.forEach((timer) => window.clearTimeout(timer));
     this.startupTimers.clear();
     this.pendingRequests.clear();
+  }
+
+  getStatus() {
+    return {
+      inFlight: this.inFlight,
+      pendingTriggers: Array.from(this.pendingRequests.keys()),
+      recentDecisions: [...this.runtimeHistory],
+      widgets: this.options.widgetManager.getStatus(),
+    };
   }
 
   async requestOffer(
@@ -117,7 +136,11 @@ export class OfferPoller {
             : snapshot.cartValue;
       const auth = await this.options.sessionManager.getSignedAuthPayload();
       if (!auth) {
-        return this.mountLocalFallback(trigger, triggerPayload);
+        return this.mountLocalFallback(
+          trigger,
+          triggerPayload,
+          "Storefront session unavailable; catalog-backed widgets require the app proxy connection.",
+        );
       }
       const currency = getStorefrontCurrency();
       const currentProductId = await getCurrentProductId();
@@ -150,22 +173,50 @@ export class OfferPoller {
         const refreshedAuth =
           await this.options.sessionManager.getSignedAuthPayload();
         if (!refreshedAuth) {
-          return this.mountLocalFallback(trigger, triggerPayload);
+          return this.mountLocalFallback(
+            trigger,
+            triggerPayload,
+            "Storefront authentication could not be refreshed.",
+            response.status,
+          );
         }
         response = await this.postOffer({ ...body, ...refreshedAuth });
       }
 
-      if (!response.ok) return this.mountLocalFallback(trigger, triggerPayload);
+      if (!response.ok) {
+        return this.mountLocalFallback(
+          trigger,
+          triggerPayload,
+          `Offer request failed with HTTP ${response.status}.`,
+          response.status,
+        );
+      }
 
       const decision = (await response.json()) as OfferDecision;
       if (!decision.widgetType) {
-        return this.mountLocalFallback(trigger, triggerPayload);
+        return this.mountLocalFallback(
+          trigger,
+          triggerPayload,
+          decision.reasoning || "The server found no eligible offer.",
+          response.status,
+        );
       }
 
       this.options.widgetManager.mountDecision(decision);
+      this.recordRuntime({
+        trigger,
+        outcome: "mounted",
+        widgetType: decision.widgetType,
+        reasoning: decision.reasoning || "Server decision mounted.",
+        httpStatus: response.status,
+      });
       return decision;
-    } catch {
-      return this.mountLocalFallback(trigger, triggerPayload);
+    } catch (error) {
+      return this.mountLocalFallback(
+        trigger,
+        triggerPayload,
+        error instanceof Error ? error.message : "Offer request failed.",
+      );
     } finally {
       this.inFlight = false;
       this.drainPendingRequest();
@@ -255,6 +306,8 @@ export class OfferPoller {
   private mountLocalFallback(
     trigger: string,
     triggerPayload: Record<string, unknown>,
+    reasoning = "Server decision unavailable.",
+    httpStatus?: number,
   ): OfferDecision | null {
     const settings = this.options.sessionManager.getSettings();
     const decision = buildLocalFallbackDecision(trigger, {
@@ -264,10 +317,39 @@ export class OfferPoller {
           ? settings.discountThreshold
           : triggerPayload.threshold,
     });
-    if (!decision) return null;
+    if (!decision) {
+      this.recordRuntime({
+        trigger,
+        outcome:
+          typeof httpStatus === "number" && httpStatus >= 400
+            ? "request_failed"
+            : "no_offer",
+        widgetType: null,
+        reasoning,
+        httpStatus,
+      });
+      return null;
+    }
 
     this.options.widgetManager.mountDecision(decision);
+    this.recordRuntime({
+      trigger,
+      outcome: "local_fallback",
+      widgetType: decision.widgetType,
+      reasoning,
+      httpStatus,
+    });
     return decision;
+  }
+
+  private recordRuntime(
+    entry: Omit<OfferRuntimeEntry, "timestamp">,
+  ) {
+    const runtimeEntry = { ...entry, timestamp: Date.now() };
+    this.runtimeHistory = [...this.runtimeHistory.slice(-9), runtimeEntry];
+    document.dispatchEvent(
+      new CustomEvent("aovboost:offer-status", { detail: runtimeEntry }),
+    );
   }
 }
 

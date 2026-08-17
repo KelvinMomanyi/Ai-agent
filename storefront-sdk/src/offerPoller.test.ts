@@ -49,6 +49,7 @@ describe("OfferPoller", () => {
       widgetManager: {
         mountDecision,
         getDismissedWidgets: () => [],
+        getStatus: () => ({ mountedWidgetTypes: [] }),
       } as any,
     });
 
@@ -72,7 +73,51 @@ describe("OfferPoller", () => {
       "assistant_bootstrap",
     ]);
     expect(mountDecision).toHaveBeenCalledTimes(2);
+    expect(poller.getStatus().recentDecisions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          trigger: "initial",
+          outcome: "mounted",
+          widgetType: "rec_strip",
+        }),
+      ]),
+    );
     poller.destroy();
+  });
+
+  it("reports why a catalog-backed startup offer did not render", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL) => {
+        if (String(input) === "/cart.js") {
+          return jsonResponse({ items: [], item_count: 0, total_price: 0 });
+        }
+        return jsonResponse({
+          widgetType: null,
+          payload: {},
+          reasoning: "No catalog-backed products were available for this widget.",
+        });
+      },
+    );
+    const poller = new OfferPoller({
+      shop: "example.myshopify.com",
+      apiBase: "/apps/aovboost",
+      eventBus: {} as any,
+      sessionManager: sessionManagerStub() as any,
+      widgetManager: {
+        mountDecision: vi.fn(),
+        getDismissedWidgets: () => [],
+        getStatus: () => ({ mountedWidgetTypes: [] }),
+      } as any,
+    });
+
+    await expect(poller.requestOffer("initial")).resolves.toBeNull();
+    expect(poller.getStatus().recentDecisions.at(-1)).toMatchObject({
+      trigger: "initial",
+      outcome: "no_offer",
+      widgetType: null,
+      reasoning: "No catalog-backed products were available for this widget.",
+      httpStatus: 200,
+    });
   });
 });
 

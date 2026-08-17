@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { isWidgetEnabled, WidgetManager } from "./widgetManager";
+
+afterEach(() => {
+  document.body.innerHTML = "";
+  window.history.replaceState({}, "", "/");
+});
 
 describe("isWidgetEnabled", () => {
   it("honors merchant settings for every configurable widget family", () => {
@@ -97,6 +102,25 @@ describe("isWidgetEnabled", () => {
 
     manager.destroyActive();
     expect(activeWidgetTypes()).toEqual([]);
+  });
+
+  it("places collection recommendations before the product grid", () => {
+    localStorage.clear();
+    window.history.replaceState({}, "", "/collections/all");
+    document.body.innerHTML =
+      "<main><h1>All products</h1><ul id='product-grid'></ul></main>";
+    const manager = new WidgetManager({ upsellEnabled: true });
+
+    manager.mountDecision({
+      widgetType: "rec_strip",
+      payload: { offerId: "rec-collection", products: [widgetProduct()] },
+    });
+
+    const mount = document.querySelector(
+      "[data-aovboost-mount='collection-recommendations']",
+    );
+    expect(mount?.nextElementSibling?.id).toBe("product-grid");
+    expect(manager.getStatus().mountedWidgetTypes).toContain("rec_strip");
   });
 });
 

@@ -146,24 +146,63 @@ export class WidgetManager {
     }
   }
 
+  getStatus() {
+    const mountedWidgetTypes = [
+      this.chatWidget?.widget,
+      this.bannerWidget?.widget,
+      this.overlayWidget?.widget,
+      ...Array.from(this.inlineWidgets.values()).map((entry) => entry.widget),
+    ]
+      .filter((widget): widget is BaseWidget => Boolean(widget?.isMounted()))
+      .map((widget) => widget.getWidgetType())
+      .sort();
+
+    return {
+      mountedWidgetTypes,
+      dismissedWidgetTypes: this.getDismissedWidgets(),
+      settings: { ...this.settings },
+    };
+  }
+
   private resolveTarget(widgetType: string): HTMLElement {
     if (widgetType === "bundle") {
-      return createMountAfter(".product-form, [data-product-form]");
+      return createMountAfter(
+        "product-form, .product-form, [data-product-form], form[action*='/cart/add']",
+        "product-bundle",
+      );
     }
 
     if (widgetType === "rec_strip") {
-      return createMountAfter(
-        ".product__description, [data-product-description], #ProductGridContainer, [data-product-grid], .collection .product-grid, .collection__product-grid",
+      const pageType = getCurrentPageType();
+      if (pageType === "product") {
+        return createMountAfter(
+          ".product__description, [data-product-description], product-info, .product__info-container, product-form, .product-form, form[action*='/cart/add']",
+          "product-recommendations",
+        );
+      }
+      if (pageType === "collection") {
+        return createMountBefore(
+          "#product-grid, #ProductGridContainer, [data-product-grid], .collection__product-grid, .product-grid",
+          "collection-recommendations",
+        );
+      }
+      return createVisibleMainMount(
+        ".featured-collection, [data-section-type='featured-collection'], main section, #MainContent > *",
+        "home-recommendations",
       );
     }
 
     if (widgetType === "social_proof") {
-      return createMountAfter(".product-form__submit, [data-add-to-cart]");
+      return createMountAfter(
+        ".product-form__submit, [data-add-to-cart], button[name='add']",
+        "product-social-proof",
+      );
     }
 
     if (widgetType === "inline_alert") {
       return createMountAfter(
-        "[data-price], .product__price, .price, .product-form, [data-product-form]",
+        "[data-price], .product__price, .price, product-form, .product-form, [data-product-form]",
+        "product-alert",
       );
     }
 
@@ -237,16 +276,80 @@ function createWidget(widgetType: string, payload: WidgetPayload) {
   }
 }
 
-function createMountAfter(selector: string): HTMLElement {
+function createMountAfter(selector: string, key: string): HTMLElement {
+  return createAdjacentMount(selector, key, "afterend");
+}
+
+function createMountBefore(selector: string, key: string): HTMLElement {
+  return createAdjacentMount(selector, key, "beforebegin");
+}
+
+function createAdjacentMount(
+  selector: string,
+  key: string,
+  position: "beforebegin" | "afterend",
+): HTMLElement {
+  const existing = findMount(key);
+  if (existing) return existing;
   const anchor = document.querySelector(selector);
-  const target = document.createElement("div");
-  target.setAttribute("data-aovboost-mount", selector);
+  const target = createMount(key);
 
   if (anchor?.parentElement) {
-    anchor.insertAdjacentElement("afterend", target);
+    anchor.insertAdjacentElement(position, target);
     return target;
   }
 
-  document.body.appendChild(target);
+  return prependToMain(target);
+}
+
+function createVisibleMainMount(selector: string, key: string) {
+  const existing = findMount(key);
+  if (existing) return existing;
+  const target = createMount(key);
+  const anchor = document.querySelector(selector);
+  if (anchor?.parentElement) {
+    anchor.insertAdjacentElement("beforebegin", target);
+    return target;
+  }
+  return prependToMain(target);
+}
+
+function prependToMain(target: HTMLElement) {
+  const main = document.querySelector("main, #MainContent, [role='main']");
+  if (main) {
+    main.prepend(target);
+  } else {
+    document.body.prepend(target);
+  }
   return target;
+}
+
+function createMount(key: string) {
+  const target = document.createElement("div");
+  target.setAttribute("data-aovboost-mount", key);
+  return target;
+}
+
+function findMount(key: string) {
+  const mount = document.querySelector<HTMLElement>(
+    `[data-aovboost-mount='${key}']`,
+  );
+  return mount?.isConnected ? mount : null;
+}
+
+function getCurrentPageType() {
+  const pathname = window.location.pathname;
+  const template = String(
+    (window as any).ShopifyAnalytics?.meta?.page?.pageType ||
+      document.body?.dataset?.template ||
+      "",
+  ).toLowerCase();
+  if (pathname === "/") return "home";
+  if (/\/collections(?:\/|$)/.test(pathname) || template.includes("collection")) {
+    return "collection";
+  }
+  if (/\/products(?:\/|$)/.test(pathname) || template.includes("product")) {
+    return "product";
+  }
+  return "other";
 }

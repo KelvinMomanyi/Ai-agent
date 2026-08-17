@@ -5,6 +5,7 @@ import {
   mapAdminCatalogProductNode,
   mapProductWebhook,
   selectDefaultVariant,
+  summarizeCatalogReadiness,
 } from "./productCatalogMapping";
 
 describe("Shopify catalog safety mapping", () => {
@@ -226,6 +227,42 @@ describe("Shopify catalog safety mapping", () => {
     });
     expect(unavailable?.metafields).toMatchObject({
       "aovboost.availableForSale": { value: "false" },
+    });
+  });
+
+  it("flags legacy catalog rows without variant data for repair", () => {
+    const legacyProduct = {
+      metafields: {
+        "aovboost.availableForSale": { value: "true", type: "boolean" },
+      },
+    };
+    const currentProduct = mapAdminCatalogProductNode(adminProduct());
+
+    expect(
+      summarizeCatalogReadiness([
+        legacyProduct,
+        { metafields: currentProduct?.metafields || {} },
+      ]),
+    ).toMatchObject({
+      storedProductCount: 2,
+      availableProductCount: 2,
+      actionableProductCount: 1,
+      missingVariantDataCount: 1,
+      resyncRequired: true,
+    });
+  });
+
+  it("marks a fully variant-backed catalog ready for storefront actions", () => {
+    const product = mapAdminCatalogProductNode(adminProduct());
+    expect(
+      summarizeCatalogReadiness([
+        { metafields: product?.metafields || {} },
+      ]),
+    ).toMatchObject({
+      storedProductCount: 1,
+      actionableProductCount: 1,
+      missingVariantDataCount: 0,
+      resyncRequired: false,
     });
   });
 });
