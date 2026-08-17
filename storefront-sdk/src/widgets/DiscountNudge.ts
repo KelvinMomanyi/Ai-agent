@@ -1,13 +1,22 @@
 import { BaseWidget, money, text } from "./BaseWidget";
 
 export class DiscountNudge extends BaseWidget {
+  private handleCartChange = () => {
+    void this.refreshCartValue();
+  };
+
   getWidgetType(): string {
     return "discount_nudge";
   }
 
   render(): void {
     this.draw();
-    document.addEventListener("add-to-cart", () => this.draw());
+    document.addEventListener("add-to-cart", this.handleCartChange);
+  }
+
+  destroy(): void {
+    document.removeEventListener("add-to-cart", this.handleCartChange);
+    super.destroy();
   }
 
   private draw(): void {
@@ -39,12 +48,10 @@ export class DiscountNudge extends BaseWidget {
         <div class="label">
           <span>${
             remaining > 0
-              ? text(
-                  copy.progressLabel ||
-                    `You're ${money(remaining)} away from your cart goal`,
-                )
+              ? `${text(copy.progressLabel || "Cart goal")}: ${text(money(remaining))} to go`
               : text(copy.rewardDescription || "Cart goal reached")
           }</span>
+          <button type="button" class="secondary" data-cta>${text(copy.ctaText || "View picks")}</button>
           <button type="button" class="icon" data-dismiss aria-label="Close">x</button>
         </div>
         <div class="track" aria-hidden="true"><span></span></div>
@@ -55,9 +62,34 @@ export class DiscountNudge extends BaseWidget {
       this.trackDismiss();
       this.destroy();
     });
+    this.root.querySelector("[data-cta]")?.addEventListener("click", () => {
+      this.trackClick("view_cart_goal_picks");
+      document.dispatchEvent(
+        new CustomEvent("aovboost:open-chat", {
+          detail: { source: "discount_nudge" },
+        }),
+      );
+    });
 
     if (remaining <= 0) {
       window.setTimeout(() => this.destroy(), 3000);
+    }
+  }
+
+  private async refreshCartValue() {
+    try {
+      const response = await fetch("/cart.js", {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const cart = await response.json();
+      const value = Number(cart.total_price);
+      if (!Number.isFinite(value) || value < 0) return;
+      this.payload.cartValue = value / 100;
+      this.draw();
+    } catch {
+      // Keep the last verified progress if Shopify's cart is briefly unavailable.
     }
   }
 }

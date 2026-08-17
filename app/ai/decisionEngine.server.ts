@@ -109,7 +109,7 @@ export async function getOfferDecision(
     },
   };
 
-  const fallbackDecision = heuristicFallback(
+  const fallbackDecision = buildHeuristicOfferDecision(
     {
       ...input,
       cartVariantIds,
@@ -156,6 +156,10 @@ export async function getOfferDecision(
     affinities,
     currentProductId: input.currentProductId,
     cartProductIds: input.cartProductIds,
+    cartHasItems:
+      input.cartProductIds.length > 0 ||
+      cartVariantIds.length > 0 ||
+      cartItemCount > 0,
     discountThreshold: input.settings.discountThreshold.toString(),
     triggerType: input.trigger?.type,
     triggerPayload: input.trigger?.payload || {},
@@ -176,6 +180,14 @@ export async function getOfferDecision(
     },
     enrichedPayload,
     input.settings,
+    {
+      useAI: ![
+        "initial",
+        "navigation",
+        "assistant_bootstrap",
+        "social_proof",
+      ].includes(input.trigger?.type || ""),
+    },
   );
 
   return {
@@ -231,7 +243,11 @@ function shouldAskAi(
   _triggerType: string | undefined,
   fallbackDecision: OfferDecision,
 ) {
-  if (fallbackDecision.widgetType === "bundle") return false;
+  // Trigger routing is a product decision, not a copywriting decision. Once a
+  // verified deterministic intervention is eligible, keep that widget type and
+  // let the AI gateway personalize its copy below. This prevents a cart upsell
+  // or product-page recommendation from being replaced by generic chat.
+  if (fallbackDecision.widgetType) return false;
   return process.env.AOVBOOST_DISABLE_AI !== "true";
 }
 
@@ -341,7 +357,7 @@ function catalogProductToAffinity(
     reason: source
       ? `Catalog match for ${source.title}.`
       : "Catalog-backed recommendation.",
-    orderCount: 0,
+    orderCount: Math.max(0, Number(product.orderCount || 0)),
   };
 }
 
@@ -378,7 +394,7 @@ function getTriggerQuery(payload?: Record<string, unknown>) {
     .join(" ");
 }
 
-function heuristicFallback(
+export function buildHeuristicOfferDecision(
   input: DecisionInput,
   activeBundleCount: number,
 ): OfferDecision {
@@ -400,6 +416,16 @@ function heuristicFallback(
     cartItemCount > 0;
   const threshold = Number(input.settings.discountThreshold || 0);
 
+  if (triggerType === "assistant_bootstrap" && input.settings.chatEnabled) {
+    return {
+      widgetType: "chat",
+      payload: { greeting: input.settings.chatGreeting },
+      reasoning: "The enabled store assistant should remain available.",
+      confidence: 0.9,
+      aiProvider: "heuristic",
+    };
+  }
+
   if (triggerType === "exit_intent" && input.settings.exitIntentEnabled) {
     return {
       widgetType: "exit_intent",
@@ -417,6 +443,13 @@ function heuristicFallback(
     triggerType === "flash_sale_window" ||
     triggerType === "seasonal_calendar"
   ) {
+    const endsAt = Date.parse(String(triggerPayload.endsAt || ""));
+    if (!Number.isFinite(endsAt) || endsAt <= Date.now()) {
+      return noOffer(
+        "A countdown requires a verified future campaign end time.",
+        "heuristic",
+      );
+    }
     return {
       widgetType: "countdown_banner",
       payload: {
@@ -557,7 +590,7 @@ function heuristicFallback(
     (triggerType === "search_query" ||
       triggerType === "cart_item_removed" ||
       triggerType === "repeated_product_view") &&
-    input.candidates.length > 0
+    hasProductCandidates(input)
   ) {
     return {
       widgetType: "rec_strip",
@@ -565,6 +598,41 @@ function heuristicFallback(
       reasoning:
         "Search, remove, or repeated-view intent is suited to related products.",
       confidence: 0.61,
+      aiProvider: "heuristic",
+    };
+  }
+
+  if (
+    triggerType === "social_proof" &&
+    input.settings.upsellEnabled &&
+    input.currentPageType === "product" &&
+    hasSocialProofCandidates(input)
+  ) {
+    return {
+      widgetType: "social_proof",
+      payload: {},
+      reasoning: "Verified product-order history supports a factual signal.",
+      confidence: 0.65,
+      aiProvider: "heuristic",
+    };
+  }
+
+  if (
+    input.settings.upsellEnabled &&
+    hasProductCandidates(input) &&
+    (triggerType === "initial" ||
+      triggerType === "navigation" ||
+      triggerType === "manual") &&
+    (input.currentPageType === "home" ||
+      input.currentPageType === "collection" ||
+      input.currentPageType === "product")
+  ) {
+    return {
+      widgetType: "rec_strip",
+      payload: {},
+      reasoning:
+        "The current storefront page has verified complementary catalog products.",
+      confidence: 0.66,
       aiProvider: "heuristic",
     };
   }
@@ -609,14 +677,26 @@ function heuristicFallback(
     return {
       widgetType: "discount_nudge",
       payload: { threshold: threshold.toString(), cartValue },
-      reasoning:
-        "Cart value is within 20% of the configured cart-value goal.",
+      reasoning: "Cart value is within 20% of the configured cart-value goal.",
       confidence: 0.55,
       aiProvider: "heuristic",
     };
   }
 
   return noOffer("No deterministic intervention matched.", "heuristic");
+}
+
+function hasProductCandidates(input: DecisionInput) {
+  return input.candidates.some(
+    (candidate) => candidate.type === "product" && candidate.productId,
+  );
+}
+
+function hasSocialProofCandidates(input: DecisionInput) {
+  return input.candidates.some((candidate) => {
+    const affinity = asRecord(candidate.payload.affinity);
+    return Number(affinity.orderCount || 0) > 0;
+  });
 }
 
 function isRecoveryOrThresholdTrigger(triggerType: string) {
@@ -647,6 +727,7 @@ function enrichPayload(
     affinities: unknown[];
     currentProductId?: string;
     cartProductIds: string[];
+    cartHasItems: boolean;
     discountThreshold: string;
     triggerType?: string;
     triggerPayload: Record<string, unknown>;
@@ -710,13 +791,19 @@ function enrichPayload(
     return {
       ...payload,
       immediate: payload.immediate || context.triggerPayload.immediate,
+      cartHasItems: context.cartHasItems,
     };
   }
 
   if (widgetType === "countdown_banner") {
+    const endsAt = payload.endsAt || context.triggerPayload.endsAt;
+    const endTimestamp = Date.parse(String(endsAt || ""));
+    if (!Number.isFinite(endTimestamp) || endTimestamp <= Date.now()) {
+      return null;
+    }
     return {
       ...payload,
-      endsAt: payload.endsAt || context.triggerPayload.endsAt,
+      endsAt,
     };
   }
 

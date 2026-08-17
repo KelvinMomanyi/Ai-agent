@@ -7,7 +7,8 @@ export class ToastNudge extends BaseWidget {
 
   render(): void {
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
-    const headline = copy.headline || this.payload.headline || "A better option is available";
+    const headline =
+      copy.headline || this.payload.headline || "A better option is available";
     const body =
       copy.subheadline ||
       copy.offerLine ||
@@ -20,7 +21,7 @@ export class ToastNudge extends BaseWidget {
         .toast {
           position: fixed;
           right: 18px;
-          bottom: 18px;
+          bottom: 88px;
           z-index: 9999;
           width: min(340px, calc(100vw - 36px));
           transform: translateY(16px);
@@ -51,11 +52,8 @@ export class ToastNudge extends BaseWidget {
     this.root.querySelector("[data-chat]")?.addEventListener("click", () => {
       this.trackClick("open_assistant");
       document.dispatchEvent(
-        new CustomEvent("aovboost:trigger", {
-          detail: {
-            type: "long_product_dwell",
-            source: "toast",
-          },
+        new CustomEvent("aovboost:open-chat", {
+          detail: { source: "toast" },
         }),
       );
       this.destroy();

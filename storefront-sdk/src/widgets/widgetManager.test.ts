@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it } from "vitest";
-import { isWidgetEnabled } from "./widgetManager";
+import { isWidgetEnabled, WidgetManager } from "./widgetManager";
 
 describe("isWidgetEnabled", () => {
   it("honors merchant settings for every configurable widget family", () => {
@@ -16,6 +18,7 @@ describe("isWidgetEnabled", () => {
     expect(isWidgetEnabled("bundle", settings)).toBe(false);
     expect(isWidgetEnabled("upsell_drawer", settings)).toBe(false);
     expect(isWidgetEnabled("rec_strip", settings)).toBe(false);
+    expect(isWidgetEnabled("social_proof", settings)).toBe(false);
     expect(isWidgetEnabled("discount_nudge", settings)).toBe(false);
     expect(isWidgetEnabled("countdown_banner", settings)).toBe(false);
     expect(isWidgetEnabled("exit_intent", settings)).toBe(false);
@@ -26,4 +29,106 @@ describe("isWidgetEnabled", () => {
     expect(isWidgetEnabled("chat", {})).toBe(true);
     expect(isWidgetEnabled("inline_alert", { chatEnabled: false })).toBe(true);
   });
+
+  it("keeps chat, merchandising, banner, and overlay slots active together", () => {
+    localStorage.clear();
+    document.body.innerHTML =
+      "<main><div data-product-description></div></main>";
+    const manager = new WidgetManager({
+      chatEnabled: true,
+      upsellEnabled: true,
+      discountNudgeEnabled: true,
+    });
+
+    manager.mountDecision({
+      widgetType: "chat",
+      payload: { offerId: "chat-1", greeting: "Can I help?" },
+    });
+    manager.mountDecision({
+      widgetType: "rec_strip",
+      payload: { offerId: "rec-1", products: [widgetProduct()] },
+    });
+    manager.mountDecision({
+      widgetType: "social_proof",
+      payload: { offerId: "proof-1", products: [widgetProduct()] },
+    });
+    manager.mountDecision({
+      widgetType: "discount_nudge",
+      payload: { offerId: "goal-1", threshold: 100, cartValue: 82 },
+    });
+    manager.mountDecision({
+      widgetType: "toast",
+      payload: { offerId: "toast-1", headline: "Complete the set" },
+    });
+
+    expect(activeWidgetTypes()).toEqual([
+      "chat",
+      "discount_nudge",
+      "rec_strip",
+      "social_proof",
+      "toast",
+    ]);
+    expect(
+      document.querySelector<HTMLElement>(
+        "[data-aovboost-widget='social_proof']",
+      )?.shadowRoot?.textContent,
+    ).toContain("12 verified orders include Verified Add-on");
+    document.dispatchEvent(new CustomEvent("aovboost:open-chat"));
+    expect(
+      document
+        .querySelector<HTMLElement>("[data-aovboost-widget='chat']")
+        ?.shadowRoot?.querySelector("[data-input]"),
+    ).not.toBeNull();
+
+    manager.mountDecision({
+      widgetType: "upsell_drawer",
+      payload: { offerId: "upsell-1", products: [widgetProduct()] },
+    });
+    expect(activeWidgetTypes()).toEqual([
+      "chat",
+      "discount_nudge",
+      "rec_strip",
+      "social_proof",
+      "upsell_drawer",
+    ]);
+
+    manager.resetPageContext();
+    expect(activeWidgetTypes()).toEqual(["chat", "discount_nudge"]);
+
+    manager.destroyActive();
+    expect(activeWidgetTypes()).toEqual([]);
+  });
 });
+
+function activeWidgetTypes() {
+  return Array.from(
+    document.querySelectorAll<HTMLElement>("[data-aovboost-widget]"),
+  )
+    .map((element) => element.dataset.aovboostWidget)
+    .sort();
+}
+
+function widgetProduct() {
+  return {
+    id: "gid://shopify/Product/2",
+    productId: "gid://shopify/Product/2",
+    variantId: "gid://shopify/ProductVariant/22",
+    title: "Verified Add-on",
+    handle: "verified-add-on",
+    imageUrl: "",
+    price: "20.00",
+    variants: [
+      {
+        id: "gid://shopify/ProductVariant/22",
+        title: "Default",
+        sku: "ADD-ON",
+        price: "20.00",
+        compareAtPrice: null,
+        quantityAvailable: 10,
+        availableForSale: true,
+        selectedOptions: [],
+      },
+    ],
+    orderCount: 12,
+  };
+}

@@ -183,6 +183,12 @@ irreversible, so verify database backups first.
   unavailable rather than incorrectly described as empty. Cart items are
   matched back to the same shop's synced catalog and cannot be repeated as
   cross-sell recommendations.
+- Storefront widgets use independent assistant, inline-merchandising, banner,
+  and overlay slots. Deterministic trigger routing activates catalog-backed
+  recommendations, bundles, upsells, cart-goal nudges, verified social proof,
+  scheduled campaigns, and recovery UI without replacing persistent chat.
+  Requests that arrive during another offer decision are queued by sales
+  priority rather than silently dropped.
 - Product relationships use `(shop, productId)` keys to preserve tenant
   isolation.
 - Bundle widgets display Shopify's actual product prices. Only the signed

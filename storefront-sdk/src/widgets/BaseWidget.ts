@@ -57,6 +57,10 @@ export abstract class BaseWidget {
     this.container.remove();
   }
 
+  isMounted(): boolean {
+    return this.container.isConnected;
+  }
+
   mount(target = document.body): void {
     target.appendChild(this.container);
     this.render();
@@ -337,7 +341,9 @@ export function getProducts(payload: WidgetPayload): WidgetProduct[] {
       reason: String(
         item.reason || item.affinity?.reason || item.reasoning || "",
       ),
-      orderCount: Number(item.orderCount || item.affinity?.orderCount || 0),
+      orderCount: Number(
+        product.orderCount || item.orderCount || item.affinity?.orderCount || 0,
+      ),
       variants,
     };
   });

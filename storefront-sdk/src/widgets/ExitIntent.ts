@@ -21,6 +21,7 @@ export class ExitIntent extends BaseWidget {
 
   render(): void {
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
+    const hasCart = this.payload.cartHasItems === true;
     this.html(`
       <style>
         .backdrop { position: fixed; inset: 0; z-index: 9998; background: rgba(17, 24, 39, .38); }
@@ -32,7 +33,7 @@ export class ExitIntent extends BaseWidget {
         <p class="body">${text(copy.offerLine || this.payload.offerLine || "Your cart has a relevant offer available.")}</p>
         ${this.payload.discountCode ? `<p class="body"><strong>${text(this.payload.discountCode)}</strong></p>` : ""}
         <div class="actions">
-          <button type="button" class="primary" data-claim>${text(copy.ctaText || "Claim offer")}</button>
+          <button type="button" class="primary" data-claim>${text(hasCart ? "Review cart" : "Open assistant")}</button>
           <button type="button" class="secondary" data-dismiss>${text(copy.dismissText || "No thanks")}</button>
         </div>
       </section>
@@ -40,6 +41,15 @@ export class ExitIntent extends BaseWidget {
 
     this.root.querySelector("[data-claim]")?.addEventListener("click", () => {
       this.trackClick("claim_exit_offer");
+      if (hasCart) {
+        window.location.assign("/cart");
+      } else {
+        document.dispatchEvent(
+          new CustomEvent("aovboost:open-chat", {
+            detail: { source: "exit_intent" },
+          }),
+        );
+      }
       this.destroy();
     });
     this.root.querySelectorAll("[data-dismiss]").forEach((element) => {

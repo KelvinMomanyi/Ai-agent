@@ -67,6 +67,7 @@ export class ChatWidget extends BaseWidget {
   constructor(payload: WidgetPayload) {
     super(payload);
     this.root.addEventListener("click", this.handleProductCardClick);
+    document.addEventListener("aovboost:open-chat", this.handleOpenChat);
     const copy = payload.copy as Record<string, unknown> | undefined;
     this.messages.push({
       role: "assistant",
@@ -84,6 +85,7 @@ export class ChatWidget extends BaseWidget {
 
   destroy(): void {
     this.root.removeEventListener("click", this.handleProductCardClick);
+    document.removeEventListener("aovboost:open-chat", this.handleOpenChat);
     super.destroy();
   }
 
@@ -228,6 +230,15 @@ export class ChatWidget extends BaseWidget {
       </div>
     `;
   }
+
+  private handleOpenChat = () => {
+    if (!this.isMounted()) return;
+    this.expanded = true;
+    this.render();
+    window.setTimeout(() => {
+      this.root.querySelector<HTMLInputElement>("[data-input]")?.focus();
+    }, 0);
+  };
 
   private renderMessage(message: Message) {
     return `

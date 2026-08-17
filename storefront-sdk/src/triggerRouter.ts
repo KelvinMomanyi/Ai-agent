@@ -115,6 +115,7 @@ const TRIGGERS = {
     category: "customer_profile_loyalty",
     widgetHint: "chat",
     oncePerSession: true,
+    requestOffer: false,
   },
   flash_sale_window: {
     category: "time_based",
@@ -384,9 +385,7 @@ export class TriggerRouter {
       "focusin",
       (event) => {
         const target = event.target as
-          | HTMLInputElement
-          | HTMLTextAreaElement
-          | null;
+          HTMLInputElement | HTMLTextAreaElement | null;
         if (!target || !isCouponField(target)) return;
         this.fire("coupon_field_focus", {
           fieldName: target.name || target.id || "",

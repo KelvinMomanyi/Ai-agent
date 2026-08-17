@@ -26,6 +26,7 @@ export type CatalogCacheProduct = {
   imageAlt: string;
   inventory: number | null;
   availableForSale: boolean;
+  orderCount?: number;
   defaultVariantId: string;
   variants: Array<{
     id: string;
@@ -345,6 +346,7 @@ function toCatalogProduct(product: ProductWithStats): CatalogCacheProduct {
     imageAlt: product.title,
     inventory,
     availableForSale,
+    orderCount: Math.max(0, Number(product.orderStats?.orderCount || 0)),
     defaultVariantId: variantId,
     variants:
       syncedVariants.length > 0

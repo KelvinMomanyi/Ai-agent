@@ -27,7 +27,9 @@ const INLINE_WIDGET_TYPES = new Set([
   "rec_strip",
   "inline_alert",
   "social_proof",
+  "post_purchase",
 ]);
+const BANNER_WIDGET_TYPES = new Set(["countdown_banner", "discount_nudge"]);
 
 type MountedWidget = {
   key: string;
@@ -35,9 +37,9 @@ type MountedWidget = {
 };
 
 export class WidgetManager {
-  private activeWidget: BaseWidget | null = null;
-  private activeKey = "";
-  private activeWidgetType = "";
+  private chatWidget: MountedWidget | null = null;
+  private bannerWidget: MountedWidget | null = null;
+  private overlayWidget: MountedWidget | null = null;
   private inlineWidgets = new Map<string, MountedWidget>();
 
   constructor(private settings: StorefrontSettings = {}) {}
@@ -69,34 +71,57 @@ export class WidgetManager {
       return;
     }
 
-    if (decision.widgetType === "chat" && this.activeWidgetType === "chat") {
-      return;
-    }
-    if (nextKey === this.activeKey) return;
-
-    this.destroyFloatingWidget();
-
     const widget = createWidget(decision.widgetType, payload);
     if (!widget) return;
 
-    const target = this.resolveTarget(decision.widgetType);
-    widget.mount(target);
-    this.activeWidget = widget;
-    this.activeKey = nextKey;
-    this.activeWidgetType = decision.widgetType;
+    if (decision.widgetType === "chat") {
+      if (this.chatWidget?.widget.isMounted()) return;
+      this.chatWidget?.widget.destroy();
+      widget.mount(this.resolveTarget(decision.widgetType));
+      this.chatWidget = { key: nextKey, widget };
+      return;
+    }
+
+    if (BANNER_WIDGET_TYPES.has(decision.widgetType)) {
+      if (
+        this.bannerWidget?.key === nextKey &&
+        this.bannerWidget.widget.isMounted()
+      ) {
+        return;
+      }
+      this.bannerWidget?.widget.destroy();
+      widget.mount(this.resolveTarget(decision.widgetType));
+      this.bannerWidget = { key: nextKey, widget };
+      return;
+    }
+
+    if (
+      this.overlayWidget?.widget.getWidgetType() === decision.widgetType &&
+      this.overlayWidget.widget.isMounted()
+    ) {
+      return;
+    }
+    this.overlayWidget?.widget.destroy();
+    widget.mount(this.resolveTarget(decision.widgetType));
+    this.overlayWidget = { key: nextKey, widget };
   }
 
   destroyActive(): void {
-    this.destroyFloatingWidget();
+    this.chatWidget?.widget.destroy();
+    this.chatWidget = null;
+    this.bannerWidget?.widget.destroy();
+    this.bannerWidget = null;
+    this.overlayWidget?.widget.destroy();
+    this.overlayWidget = null;
     this.inlineWidgets.forEach((mounted) => mounted.widget.destroy());
     this.inlineWidgets.clear();
   }
 
-  private destroyFloatingWidget(): void {
-    this.activeWidget?.destroy();
-    this.activeWidget = null;
-    this.activeKey = "";
-    this.activeWidgetType = "";
+  resetPageContext(): void {
+    this.overlayWidget?.widget.destroy();
+    this.overlayWidget = null;
+    this.inlineWidgets.forEach((mounted) => mounted.widget.destroy());
+    this.inlineWidgets.clear();
   }
 
   getDismissedWidgets(): string[] {
@@ -128,7 +153,7 @@ export class WidgetManager {
 
     if (widgetType === "rec_strip") {
       return createMountAfter(
-        ".product__description, [data-product-description]",
+        ".product__description, [data-product-description], #ProductGridContainer, [data-product-grid], .collection .product-grid, .collection__product-grid",
       );
     }
 
@@ -152,14 +177,19 @@ export function isWidgetEnabled(
 ) {
   if (widgetType === "chat") return settings.chatEnabled !== false;
   if (widgetType === "bundle") return settings.bundlesEnabled !== false;
-  if (widgetType === "upsell_drawer" || widgetType === "rec_strip") {
+  if (
+    widgetType === "upsell_drawer" ||
+    widgetType === "rec_strip" ||
+    widgetType === "social_proof"
+  ) {
     return settings.upsellEnabled !== false;
   }
   if (widgetType === "discount_nudge" || widgetType === "countdown_banner") {
     return settings.discountNudgeEnabled !== false;
   }
   if (widgetType === "exit_intent") return settings.exitIntentEnabled !== false;
-  if (widgetType === "post_purchase") return settings.postPurchaseEnabled !== false;
+  if (widgetType === "post_purchase")
+    return settings.postPurchaseEnabled !== false;
   return true;
 }
 

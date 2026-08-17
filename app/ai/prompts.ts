@@ -61,5 +61,5 @@ Offer details: {offerDetails}.
 
 Return JSON only (no markdown fences):
 { "headline": string, "subheadline": string, "ctaText": string, "dismissText": string, "socialProofLine": string | null }
-Rules: headline 8 words, CTA 4 words, no exclamation marks in headline, no fake urgency.
+Rules: headline 8 words, CTA 4 words, no exclamation marks in headline, no fake urgency, and no discount, reward, promotion, scarcity, review, or social-proof claim unless that exact fact is present in the offer details.
 `;

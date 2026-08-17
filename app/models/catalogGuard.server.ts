@@ -22,6 +22,7 @@ type ProductWidgetSource = {
   tags?: string[] | null;
   metafields?: unknown;
   variants?: unknown;
+  orderCount?: number;
 };
 
 type WidgetProduct = ReturnType<typeof catalogProductToWidgetProduct>;
@@ -105,6 +106,7 @@ export function catalogProductToWidgetProduct(product: ProductWidgetSource) {
     variants,
     defaultVariantId: variantId,
     hasMultipleVariants: variants.length > 1,
+    orderCount: Math.max(0, Number(product.orderCount || 0)),
   };
 }
 

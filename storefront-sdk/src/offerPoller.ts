@@ -15,10 +15,22 @@ type OfferPollerOptions = {
   pollMs?: number;
 };
 
+type PendingOfferRequest = {
+  trigger: string;
+  triggerPayload: Record<string, unknown>;
+  queuedAt: number;
+};
+
+const OFFER_REQUEST_TIMEOUT_MS = 8_000;
+const STOREFRONT_READ_TIMEOUT_MS = 1_500;
+
 export class OfferPoller {
   private timer: number | undefined;
   private inFlight = false;
   private stopped = false;
+  private startupTimers = new Set<number>();
+  private pendingRequests = new Map<string, PendingOfferRequest>();
+  private abortController = new AbortController();
   private options: OfferPollerOptions;
 
   constructor(options: OfferPollerOptions) {
@@ -26,7 +38,11 @@ export class OfferPoller {
   }
 
   init(): void {
-    window.setTimeout(() => this.requestOffer("initial"), 1200);
+    this.scheduleStartupRequest("initial", 650);
+    if (getCurrentPageType() === "product") {
+      this.scheduleStartupRequest("social_proof", 950);
+    }
+    this.scheduleStartupRequest("assistant_bootstrap", 1300);
     if (this.options.pollMs) {
       this.timer = window.setInterval(
         () => this.requestOffer("poll"),
@@ -34,24 +50,36 @@ export class OfferPoller {
       );
     }
 
-    document.addEventListener("aovboost:request-offer", () => {
-      this.requestOffer("manual");
-    });
-    window.addEventListener("popstate", () => {
-      window.setTimeout(() => this.requestOffer("navigation"), 300);
+    document.addEventListener(
+      "aovboost:request-offer",
+      () => {
+        this.requestOffer("manual");
+      },
+      { signal: this.abortController.signal },
+    );
+    document.addEventListener("aovboost:event", this.handleNavigationEvent, {
+      signal: this.abortController.signal,
     });
   }
 
   destroy(): void {
     this.stopped = true;
+    this.abortController.abort();
     if (this.timer) window.clearInterval(this.timer);
+    this.startupTimers.forEach((timer) => window.clearTimeout(timer));
+    this.startupTimers.clear();
+    this.pendingRequests.clear();
   }
 
   async requestOffer(
     trigger = "manual",
     triggerPayload: Record<string, unknown> = {},
   ): Promise<OfferDecision | null> {
-    if (this.inFlight || this.stopped) return null;
+    if (this.stopped) return null;
+    if (this.inFlight) {
+      this.enqueuePendingRequest(trigger, triggerPayload);
+      return null;
+    }
     this.inFlight = true;
 
     try {
@@ -113,18 +141,7 @@ export class OfferPoller {
         triggerPayload,
       };
 
-      let response = await fetch(this.endpoint("/offer"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-AOVBoost-Shop": this.options.shop,
-        },
-        body: JSON.stringify({
-          ...body,
-          ...auth,
-        }),
-        keepalive: true,
-      });
+      let response = await this.postOffer({ ...body, ...auth });
 
       if (response.status === 401) {
         const recovered =
@@ -135,18 +152,7 @@ export class OfferPoller {
         if (!refreshedAuth) {
           return this.mountLocalFallback(trigger, triggerPayload);
         }
-        response = await fetch(this.endpoint("/offer"), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-AOVBoost-Shop": this.options.shop,
-          },
-          body: JSON.stringify({
-            ...body,
-            ...refreshedAuth,
-          }),
-          keepalive: true,
-        });
+        response = await this.postOffer({ ...body, ...refreshedAuth });
       }
 
       if (!response.ok) return this.mountLocalFallback(trigger, triggerPayload);
@@ -162,18 +168,102 @@ export class OfferPoller {
       return this.mountLocalFallback(trigger, triggerPayload);
     } finally {
       this.inFlight = false;
+      this.drainPendingRequest();
     }
+  }
+
+  private scheduleStartupRequest(trigger: string, delayMs: number) {
+    const timer = window.setTimeout(() => {
+      this.startupTimers.delete(timer);
+      void this.requestOffer(trigger);
+    }, delayMs);
+    this.startupTimers.add(timer);
+  }
+
+  private handleNavigationEvent = (event: Event) => {
+    const detail = (event as CustomEvent).detail as
+      Record<string, unknown> | undefined;
+    if (detail?.type !== "page_view") return;
+    this.options.widgetManager.resetPageContext();
+    this.scheduleStartupRequest("navigation", 300);
+    if (getCurrentPageType() === "product") {
+      this.scheduleStartupRequest("social_proof", 600);
+    }
+  };
+
+  private enqueuePendingRequest(
+    trigger: string,
+    triggerPayload: Record<string, unknown>,
+  ) {
+    this.pendingRequests.set(trigger, {
+      trigger,
+      triggerPayload,
+      queuedAt: Date.now(),
+    });
+
+    if (this.pendingRequests.size <= 6) return;
+    const lowestPriority = Array.from(this.pendingRequests.values()).sort(
+      (left, right) =>
+        getTriggerPriority(left.trigger) - getTriggerPriority(right.trigger) ||
+        left.queuedAt - right.queuedAt,
+    )[0];
+    if (lowestPriority) this.pendingRequests.delete(lowestPriority.trigger);
+  }
+
+  private drainPendingRequest() {
+    if (this.stopped || this.inFlight || this.pendingRequests.size === 0) {
+      return;
+    }
+    const next = Array.from(this.pendingRequests.values()).sort(
+      (left, right) =>
+        getTriggerPriority(right.trigger) - getTriggerPriority(left.trigger) ||
+        left.queuedAt - right.queuedAt,
+    )[0];
+    if (!next) return;
+    this.pendingRequests.delete(next.trigger);
+    window.setTimeout(() => {
+      void this.requestOffer(next.trigger, next.triggerPayload);
+    }, 0);
   }
 
   private endpoint(path: string): string {
     return `${this.options.apiBase.replace(/\/$/, "")}${path}`;
   }
 
+  private async postOffer(body: Record<string, unknown>) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      OFFER_REQUEST_TIMEOUT_MS,
+    );
+    try {
+      return await fetch(this.endpoint("/offer"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AOVBoost-Shop": this.options.shop,
+        },
+        body: JSON.stringify(body),
+        keepalive: true,
+        signal: controller.signal,
+      });
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
   private mountLocalFallback(
     trigger: string,
     triggerPayload: Record<string, unknown>,
   ): OfferDecision | null {
-    const decision = buildLocalFallbackDecision(trigger, triggerPayload);
+    const settings = this.options.sessionManager.getSettings();
+    const decision = buildLocalFallbackDecision(trigger, {
+      ...triggerPayload,
+      threshold:
+        triggerPayload.threshold === undefined
+          ? settings.discountThreshold
+          : triggerPayload.threshold,
+    });
     if (!decision) return null;
 
     this.options.widgetManager.mountDecision(decision);
@@ -188,6 +278,7 @@ function buildLocalFallbackDecision(
   const cartValue = Number(payload.cartValue || 0);
 
   switch (trigger) {
+    case "assistant_bootstrap":
     case "first_time_visitor":
     case "long_product_dwell":
     case "scroll_depth_interest":
@@ -235,15 +326,21 @@ function buildLocalFallbackDecision(
 
     case "cart_value_threshold":
     case "cart_abandoned":
+      if (
+        !Number.isFinite(Number(payload.threshold)) ||
+        Number(payload.threshold) <= 0
+      ) {
+        return null;
+      }
       return {
         widgetType: "discount_nudge",
         payload: {
           offerId: `local:${trigger}`,
           cartValue,
-          threshold: Number(payload.threshold || 50),
+          threshold: Number(payload.threshold),
           copy: {
-            progressLabel: "You are close to a reward",
-            rewardDescription: "Add one more item to unlock the offer.",
+            progressLabel: "You are close to your cart goal",
+            rewardDescription: "Your cart goal is reached.",
             ctaText: "View picks",
           },
         },
@@ -254,6 +351,7 @@ function buildLocalFallbackDecision(
 
     case "flash_sale_window":
     case "seasonal_calendar":
+      if (!isFutureDate(payload.endsAt)) return null;
       return {
         widgetType: "countdown_banner",
         payload: {
@@ -329,6 +427,37 @@ function buildLocalFallbackDecision(
   }
 }
 
+function getTriggerPriority(trigger: string) {
+  if (trigger === "cart_item_added" || trigger === "checkout_started") {
+    return 100;
+  }
+  if (trigger === "exit_intent" || trigger === "payment_failure") return 95;
+  if (
+    trigger === "cart_value_threshold" ||
+    trigger === "cart_abandoned" ||
+    trigger === "coupon_field_focus"
+  ) {
+    return 85;
+  }
+  if (
+    trigger === "search_query" ||
+    trigger === "repeated_product_view" ||
+    trigger === "cart_item_removed"
+  ) {
+    return 70;
+  }
+  if (trigger === "initial" || trigger === "navigation") return 60;
+  if (trigger === "social_proof") return 55;
+  if (trigger === "assistant_bootstrap") return 50;
+  if (trigger === "poll") return 10;
+  return 40;
+}
+
+function isFutureDate(value: unknown) {
+  const timestamp = Date.parse(String(value || ""));
+  return Number.isFinite(timestamp) && timestamp > Date.now();
+}
+
 function getToastHeadline(trigger: string) {
   if (trigger === "cart_item_added") return "Complete the set";
   if (trigger === "coupon_field_focus") return "Looking for a code?";
@@ -394,24 +523,39 @@ async function getCurrentProductId() {
   const handle = window.location.pathname.match(/\/products\/([^/?#]+)/)?.[1];
   if (!handle) return undefined;
 
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    STOREFRONT_READ_TIMEOUT_MS,
+  );
   try {
     const response = await fetch(`/products/${handle}.js`, {
       headers: { Accept: "application/json" },
       keepalive: true,
+      signal: controller.signal,
     });
     if (!response.ok) return undefined;
     const storefrontProduct = await response.json();
     return toProductGid(storefrontProduct.id);
   } catch {
     return undefined;
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
 async function readCart() {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    STOREFRONT_READ_TIMEOUT_MS,
+  );
   try {
     const response = await fetch("/cart.js", {
       headers: { Accept: "application/json" },
       keepalive: true,
+      cache: "no-store",
+      signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Cart read failed: ${response.status}`);
     const cart = await response.json();
@@ -452,6 +596,8 @@ async function readCart() {
       cartValue: 0,
       currency: "",
     };
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 

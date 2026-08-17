@@ -9,7 +9,8 @@ export class CountdownBanner extends BaseWidget {
 
   render(): void {
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
-    const headline = copy.headline || this.payload.headline || "Limited-time offer";
+    const headline =
+      copy.headline || this.payload.headline || "Limited-time offer";
     const body =
       copy.subheadline ||
       copy.offerLine ||
@@ -23,7 +24,7 @@ export class CountdownBanner extends BaseWidget {
           top: 0;
           z-index: 9998;
           display: grid;
-          grid-template-columns: minmax(0, 1fr) auto auto;
+          grid-template-columns: minmax(0, 1fr) auto auto auto;
           align-items: center;
           gap: 12px;
           min-height: 48px;
@@ -46,6 +47,7 @@ export class CountdownBanner extends BaseWidget {
           <p class="body">${text(body)}</p>
         </div>
         <strong class="timer" data-countdown></strong>
+        <button type="button" class="secondary" data-cta>${text(copy.ctaText || "View picks")}</button>
         <button type="button" class="icon" data-dismiss aria-label="Close">x</button>
       </aside>
     `);
@@ -53,6 +55,14 @@ export class CountdownBanner extends BaseWidget {
     this.root.querySelector("[data-dismiss]")?.addEventListener("click", () => {
       this.trackDismiss();
       this.destroy();
+    });
+    this.root.querySelector("[data-cta]")?.addEventListener("click", () => {
+      this.trackClick("view_campaign_picks");
+      document.dispatchEvent(
+        new CustomEvent("aovboost:open-chat", {
+          detail: { source: "countdown_banner" },
+        }),
+      );
     });
     this.tick();
     this.timer = window.setInterval(() => this.tick(), 1000);

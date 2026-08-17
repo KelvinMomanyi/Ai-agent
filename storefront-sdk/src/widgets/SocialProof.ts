@@ -13,11 +13,12 @@ export class SocialProof extends BaseWidget {
       .filter((product) => Number(product.orderCount || 0) > 0)
       .map(
         (product) =>
-          `${Number(product.orderCount)} people bought this with ${product.title}`,
+          `${Number(product.orderCount)} verified orders include ${product.title}`,
       );
 
     if (messages.length === 0) {
-      messages.push("Frequently bought together");
+      this.destroy();
+      return;
     }
 
     this.html(`

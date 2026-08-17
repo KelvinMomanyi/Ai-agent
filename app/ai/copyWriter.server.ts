@@ -13,8 +13,15 @@ export async function generateWidgetCopy(
   productContext: Record<string, unknown>,
   offerDetails: Record<string, unknown>,
   settings: CopySettings,
+  options: { useAI?: boolean } = {},
 ): Promise<WidgetCopy> {
-  const fallback = buildFallbackCopy(widgetType, productContext, offerDetails, settings);
+  const fallback = buildFallbackCopy(
+    widgetType,
+    productContext,
+    offerDetails,
+    settings,
+  );
+  if (options.useAI === false) return fallback;
   const brandVoiceSection = settings.brandVoice
     ? `Brand Voice:\n${settings.brandVoice}`
     : "";
@@ -47,23 +54,62 @@ export async function generateWidgetCopy(
 function getSchemaHint(widgetType: string) {
   switch (widgetType) {
     case "chat":
-      return { greeting: "string", assistantIntro: "string", ctaAccept: "string", ctaDecline: "string" };
+      return {
+        greeting: "string",
+        assistantIntro: "string",
+        ctaAccept: "string",
+        ctaDecline: "string",
+      };
     case "toast":
-      return { headline: "string", subheadline: "string", ctaText: "string", dismissText: "string" };
+      return {
+        headline: "string",
+        subheadline: "string",
+        ctaText: "string",
+        dismissText: "string",
+      };
     case "countdown_banner":
       return { headline: "string", subheadline: "string", ctaText: "string" };
     case "inline_alert":
-      return { headline: "string", subheadline: "string", dismissText: "string" };
+      return {
+        headline: "string",
+        subheadline: "string",
+        dismissText: "string",
+      };
     case "bundle":
-      return { headline: "string", itemList: ["string"], totalSavings: "string", ctaText: "string" };
+      return {
+        headline: "string",
+        itemList: ["string"],
+        totalSavings: "string",
+        ctaText: "string",
+      };
     case "discount_nudge":
-      return { progressLabel: "string", rewardDescription: "string", ctaText: "string" };
+      return {
+        progressLabel: "string",
+        rewardDescription: "string",
+        ctaText: "string",
+      };
     case "exit_intent":
-      return { headline: "string", offerLine: "string", ctaText: "string", dismissText: "string" };
+      return {
+        headline: "string",
+        offerLine: "string",
+        ctaText: "string",
+        dismissText: "string",
+      };
     case "post_purchase":
-      return { headline: "string", productName: "string", oneLineReason: "string", ctaText: "string" };
+      return {
+        headline: "string",
+        productName: "string",
+        oneLineReason: "string",
+        ctaText: "string",
+      };
     default:
-      return { headline: "string", productName: "string", whyThisGoes: "string", ctaText: "string", dismissText: "string" };
+      return {
+        headline: "string",
+        productName: "string",
+        whyThisGoes: "string",
+        ctaText: "string",
+        dismissText: "string",
+      };
   }
 }
 
@@ -76,13 +122,22 @@ function normalizeCopy(
 
   if (widgetType === "chat") {
     return {
-      greeting: stringOr(parsed.greeting ?? parsed.headline, (fallback as any).greeting),
+      greeting: stringOr(
+        parsed.greeting ?? parsed.headline,
+        (fallback as any).greeting,
+      ),
       assistantIntro: stringOr(
         parsed.assistantIntro ?? parsed.subheadline,
         (fallback as any).assistantIntro,
       ),
-      ctaAccept: stringOr(parsed.ctaAccept ?? parsed.ctaText, (fallback as any).ctaAccept),
-      ctaDecline: stringOr(parsed.ctaDecline ?? parsed.dismissText, (fallback as any).ctaDecline),
+      ctaAccept: stringOr(
+        parsed.ctaAccept ?? parsed.ctaText,
+        (fallback as any).ctaAccept,
+      ),
+      ctaDecline: stringOr(
+        parsed.ctaDecline ?? parsed.dismissText,
+        (fallback as any).ctaDecline,
+      ),
     };
   }
 
@@ -92,14 +147,20 @@ function normalizeCopy(
       itemList: Array.isArray(parsed.itemList)
         ? parsed.itemList.map(String).filter(Boolean)
         : (fallback as any).itemList,
-      totalSavings: stringOr(parsed.totalSavings ?? parsed.subheadline, (fallback as any).totalSavings),
+      totalSavings: stringOr(
+        parsed.totalSavings ?? parsed.subheadline,
+        (fallback as any).totalSavings,
+      ),
       ctaText: stringOr(parsed.ctaText, (fallback as any).ctaText),
     };
   }
 
   if (widgetType === "discount_nudge") {
     return {
-      progressLabel: stringOr(parsed.progressLabel ?? parsed.headline, (fallback as any).progressLabel),
+      progressLabel: stringOr(
+        parsed.progressLabel ?? parsed.headline,
+        (fallback as any).progressLabel,
+      ),
       rewardDescription: stringOr(
         parsed.rewardDescription ?? parsed.subheadline,
         (fallback as any).rewardDescription,
@@ -127,7 +188,10 @@ function normalizeCopy(
   if (widgetType === "exit_intent") {
     return {
       headline: stringOr(parsed.headline, (fallback as any).headline),
-      offerLine: stringOr(parsed.offerLine ?? parsed.subheadline, (fallback as any).offerLine),
+      offerLine: stringOr(
+        parsed.offerLine ?? parsed.subheadline,
+        (fallback as any).offerLine,
+      ),
       ctaText: stringOr(parsed.ctaText, (fallback as any).ctaText),
       dismissText: stringOr(parsed.dismissText, (fallback as any).dismissText),
     };
@@ -180,7 +244,9 @@ function buildFallbackCopy(
       return {
         headline: "Complete the set",
         itemList: Array.isArray(offerDetails.items)
-          ? offerDetails.items.map((item) => String((item as any).title || item)).filter(Boolean)
+          ? offerDetails.items
+              .map((item) => String((item as any).title || item))
+              .filter(Boolean)
           : [productName],
         totalSavings: stringOr(offerDetails.totalSavings, "Bundle value"),
         ctaText: "Add bundle",
@@ -213,14 +279,17 @@ function buildFallbackCopy(
     case "inline_alert":
       return {
         headline: stringOr(offerDetails.headline, "Product update"),
-        subheadline: stringOr(offerDetails.body, "A relevant product update is available."),
+        subheadline: stringOr(
+          offerDetails.body,
+          "A relevant product update is available.",
+        ),
         dismissText: "Dismiss",
       };
     case "exit_intent":
       return {
         headline: "Wait before you go",
-        offerLine: "Your cart has a relevant offer available.",
-        ctaText: "Claim offer",
+        offerLine: "Review your cart or ask the store assistant for help.",
+        ctaText: "Review cart",
         dismissText: "No thanks",
       };
     case "post_purchase":

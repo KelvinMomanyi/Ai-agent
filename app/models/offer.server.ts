@@ -1,5 +1,9 @@
 import type { Prisma } from "@prisma/client";
-import type { OfferDecision, OfferCandidate, ShopperSessionSnapshot } from "../ai/types";
+import type {
+  OfferDecision,
+  OfferCandidate,
+  ShopperSessionSnapshot,
+} from "../ai/types";
 import { catalogProductToWidgetProduct } from "./catalogGuard.server";
 import prisma from "../db.server";
 import { getActiveBundlesForProduct } from "./bundle.server";
@@ -54,24 +58,38 @@ export async function buildOfferCandidates(input: {
     },
   }));
 
-  const affinityCandidates: OfferCandidate[] = catalogProducts.map((product, index) => ({
-    id: product.id,
-    type: "product",
-    widgetType:
-      input.session.cartProductIds.length > 0 ? "upsell_drawer" : "rec_strip",
-    productId: product.id,
-    title: product.title,
-    score: scoreCatalogCandidate(product, index, recommendationSourceProductId),
-    affinityScore: scoreCatalogCandidate(product, index, recommendationSourceProductId),
-    payload: {
-      product: catalogProductToWidgetProduct(product),
-      affinity: {
-        score: scoreCatalogCandidate(product, index, recommendationSourceProductId),
-        reason: "Selected from the synced store catalog.",
-        orderCount: 0,
+  const affinityCandidates: OfferCandidate[] = catalogProducts.map(
+    (product, index) => ({
+      id: product.id,
+      type: "product",
+      widgetType:
+        input.session.cartProductIds.length > 0 ? "upsell_drawer" : "rec_strip",
+      productId: product.id,
+      title: product.title,
+      score: scoreCatalogCandidate(
+        product,
+        index,
+        recommendationSourceProductId,
+      ),
+      affinityScore: scoreCatalogCandidate(
+        product,
+        index,
+        recommendationSourceProductId,
+      ),
+      payload: {
+        product: catalogProductToWidgetProduct(product),
+        affinity: {
+          score: scoreCatalogCandidate(
+            product,
+            index,
+            recommendationSourceProductId,
+          ),
+          reason: "Selected from the synced store catalog.",
+          orderCount: Math.max(0, Number(product.orderCount || 0)),
+        },
       },
-    },
-  }));
+    }),
+  );
 
   return [...bundleCandidates, ...affinityCandidates].sort(
     (left, right) => right.score - left.score,
@@ -84,7 +102,8 @@ function scoreCatalogCandidate(
   sourceProductId?: string,
 ) {
   const sourceBoost = sourceProductId ? 0.2 : 0;
-  const categoryBoost = product.category && product.category !== "uncategorized" ? 0.1 : 0;
+  const categoryBoost =
+    product.category && product.category !== "uncategorized" ? 0.1 : 0;
   return Math.max(0.25, 0.72 + sourceBoost + categoryBoost - index * 0.04);
 }
 
