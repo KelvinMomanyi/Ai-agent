@@ -69,14 +69,21 @@ export class ChatWidget extends BaseWidget {
     this.root.addEventListener("click", this.handleProductCardClick);
     document.addEventListener("aovboost:open-chat", this.handleOpenChat);
     const copy = payload.copy as Record<string, unknown> | undefined;
+    const greeting = String(
+      copy?.greeting ||
+        payload.greeting ||
+        "Welcome! I’m here to help you discover the best products in our store.",
+    ).trim();
+    const assistantIntro = String(
+      copy?.assistantIntro || payload.assistantIntro || "",
+    ).trim();
     this.messages.push({
       role: "assistant",
-      content: String(
-        copy?.greeting ||
-          payload.greeting ||
-          "Hi. Can I help you find the perfect product today?",
-      ),
+      content: greeting,
     });
+    if (assistantIntro && assistantIntro !== greeting) {
+      this.messages.push({ role: "assistant", content: assistantIntro });
+    }
   }
 
   getWidgetType(): string {
@@ -95,8 +102,8 @@ export class ChatWidget extends BaseWidget {
       (window as any).AOVBoost?.shopName || "",
     ).trim();
     const assistantLabel = configuredShopName
-      ? `${configuredShopName} assistant`
-      : "Store assistant";
+      ? `${configuredShopName} sales assistant`
+      : "Personal shopping assistant";
 
     this.html(`
       <style>
@@ -188,7 +195,7 @@ export class ChatWidget extends BaseWidget {
             ? this.renderChatUi()
             : `<p class="body">${text(copy.greeting || this.messages[0].content)}</p>
               <div class="actions">
-                <button type="button" class="primary" data-expand>${text(copy.ctaAccept || "Chat with store assistant")}</button>
+                <button type="button" class="primary" data-expand>${text(copy.ctaAccept || "Explore with me")}</button>
                 <button type="button" class="secondary" data-dismiss>${text(copy.ctaDecline || "Browse myself")}</button>
               </div>`
         }
@@ -225,7 +232,7 @@ export class ChatWidget extends BaseWidget {
         ${this.messages.map((message) => this.renderMessage(message)).join("")}
       </div>
       <div class="compose">
-        <input type="text" placeholder="Ask me anything" aria-label="Chat message" autocomplete="off" data-input>
+        <input type="text" placeholder="Ask about any product" aria-label="Chat message" autocomplete="off" data-input>
         <button type="button" class="primary" data-send>Send</button>
       </div>
     `;

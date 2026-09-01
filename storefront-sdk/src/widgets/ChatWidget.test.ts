@@ -97,17 +97,24 @@ describe("ChatWidget", () => {
 
     const widget = new ChatWidget({
       offerId: "offer-1",
-      copy: { greeting: "How can I help?" },
+      copy: {
+        greeting: "Welcome to Teretret Outdoors.",
+        assistantIntro:
+          "We carry trail boards, hiking hoodies, and outdoor accessories. Tell me what you need and I’ll help you choose.",
+      },
     });
     widget.mount();
 
     const root = document.querySelector(
       "[data-aovboost-widget='chat']",
     )?.shadowRoot;
-    expect(root?.textContent).toContain("How can I help?");
-    expect(root?.textContent).toContain("Teretret Outdoors assistant");
+    expect(root?.textContent).toContain("Welcome to Teretret Outdoors.");
+    expect(root?.textContent).toContain("Teretret Outdoors sales assistant");
 
     (root?.querySelector("[data-expand]") as HTMLButtonElement).click();
+    expect(root?.textContent).toContain(
+      "We carry trail boards, hiking hoodies, and outdoor accessories",
+    );
     const input = root?.querySelector("[data-input]") as HTMLInputElement;
     input.value = "Show me a trail board";
     (root?.querySelector("[data-send]") as HTMLButtonElement).click();
@@ -161,7 +168,12 @@ describe("ChatWidget", () => {
     });
     expect(requestBody.cartContext.capturedAt).toEqual(expect.any(Number));
     expect(requestBody.messageHistory).toEqual([
-      { role: "assistant", content: "How can I help?" },
+      { role: "assistant", content: "Welcome to Teretret Outdoors." },
+      {
+        role: "assistant",
+        content:
+          "We carry trail boards, hiking hoodies, and outdoor accessories. Tell me what you need and I’ll help you choose.",
+      },
     ]);
 
     (root?.querySelector("[data-chat-add]") as HTMLButtonElement).click();

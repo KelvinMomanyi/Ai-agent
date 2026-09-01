@@ -28,5 +28,10 @@ describe("sales agent prompt", () => {
     expect(prompt).toContain(
       "Never return an ID that is absent from [ALLOWED PRODUCTS]",
     );
+    expect(prompt).toContain(
+      "welcome people warmly, confidently explain what the store sells",
+    );
+    expect(prompt).toContain("Make recommendations convincing and decisive");
+    expect(prompt).toContain("Answer the shopper’s question directly");
   });
 });

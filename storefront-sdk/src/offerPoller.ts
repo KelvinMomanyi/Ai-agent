@@ -342,9 +342,7 @@ export class OfferPoller {
     return decision;
   }
 
-  private recordRuntime(
-    entry: Omit<OfferRuntimeEntry, "timestamp">,
-  ) {
+  private recordRuntime(entry: Omit<OfferRuntimeEntry, "timestamp">) {
     const runtimeEntry = { ...entry, timestamp: Date.now() };
     this.runtimeHistory = [...this.runtimeHistory.slice(-9), runtimeEntry];
     document.dispatchEvent(
@@ -374,11 +372,13 @@ function buildLocalFallbackDecision(
         payload: {
           offerId: `local:${trigger}`,
           greeting:
-            "Hi. I can help you compare products and find useful add-ons.",
+            "Welcome! Let’s find something you’ll love from this store.",
           copy: {
             greeting:
-              "Hi. I can help you compare products and find useful add-ons.",
-            ctaAccept: "Chat with AI",
+              "Welcome! Let’s find something you’ll love from this store.",
+            assistantIntro:
+              "I can show you what’s available, recommend the strongest match for your needs, compare options, and answer any product question.",
+            ctaAccept: "Explore with me",
             ctaDecline: "Browse myself",
           },
         },

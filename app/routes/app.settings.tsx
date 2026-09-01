@@ -300,11 +300,13 @@ export default function Settings() {
             <BlockStack gap="400">
               <BlockStack gap="200">
                 <Text as="h2" variant="headingMd">
-                  AI Chat Widget & Personality
+                  AI Sales Assistant & Personality
                 </Text>
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  Customize the first greeting and voice style of the storefront
-                  shopping companion.
+                  Customize the welcome and voice of the storefront sales
+                  assistant. It automatically introduces verified catalog
+                  products, recommends strong matches, and answers shopper
+                  questions.
                 </Text>
               </BlockStack>
 
@@ -316,7 +318,7 @@ export default function Settings() {
                     setFormState({ ...formState, chatGreeting: value })
                   }
                   autoComplete="off"
-                  helpText="The welcome message showing up when the chatbot initializes."
+                  helpText="The first welcome message. A verified catalog introduction follows when the shopper opens the chat."
                 />
 
                 <Select

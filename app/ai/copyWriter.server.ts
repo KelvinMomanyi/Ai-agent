@@ -127,7 +127,10 @@ function normalizeCopy(
         (fallback as any).greeting,
       ),
       assistantIntro: stringOr(
-        parsed.assistantIntro ?? parsed.subheadline,
+        // The fallback is assembled exclusively from verified catalog data.
+        // Keep the opening product overview deterministic so generated copy
+        // cannot introduce products or categories the merchant does not sell.
+        (fallback as any).assistantIntro,
         (fallback as any).assistantIntro,
       ),
       ctaAccept: stringOr(
@@ -236,8 +239,8 @@ function buildFallbackCopy(
     case "chat":
       return {
         greeting: settings.chatGreeting,
-        assistantIntro: "I can help compare products and find useful add-ons.",
-        ctaAccept: "Chat with AI",
+        assistantIntro: buildSalesAssistantIntro(productContext),
+        ctaAccept: "Explore with me",
         ctaDecline: "Browse myself",
       };
     case "bundle":
@@ -308,6 +311,64 @@ function buildFallbackCopy(
         dismissText: "No thanks",
       };
   }
+}
+
+export function buildSalesAssistantIntro(
+  productContext: Record<string, unknown>,
+) {
+  const affinities = Array.isArray(productContext.affinities)
+    ? productContext.affinities
+    : [];
+  const products = affinities
+    .map((value) => asRecord(asRecord(value).target))
+    .filter((product) => cleanCatalogLabel(product.title, 60));
+  const productNames = uniqueLabels(
+    products.map((product) => cleanCatalogLabel(product.title, 60)),
+    3,
+  );
+  const categories = uniqueLabels(
+    products.map((product) =>
+      cleanCatalogLabel(product.productType || product.category, 50),
+    ),
+    3,
+  );
+
+  if (productNames.length === 0) {
+    return "You’re in the right place. I can show you what’s in store, recommend the strongest match for your needs, compare options, and answer any question.";
+  }
+
+  const categoryLead = categories.length
+    ? `You’re in the right place for ${formatList(categories)}. `
+    : "Welcome—there’s plenty worth discovering here. ";
+  return `${categoryLead}Explore ${formatList(productNames)}, and tell me what matters most to you—I’ll help you choose the best fit or answer any question.`.slice(
+    0,
+    300,
+  );
+}
+
+function uniqueLabels(values: string[], limit: number) {
+  return Array.from(new Set(values.filter(Boolean))).slice(0, limit);
+}
+
+function formatList(values: string[]) {
+  if (values.length < 2) return values[0] || "our catalog";
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}
+
+function cleanCatalogLabel(value: unknown, maxLength: number) {
+  return String(value || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function stringOr(value: unknown, fallback: string) {
