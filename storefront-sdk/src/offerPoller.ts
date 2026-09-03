@@ -1,5 +1,5 @@
 import type { EventBus } from "./eventBus";
-import type { SessionManager } from "./sessionManager";
+import type { SessionManager, StorefrontSettings } from "./sessionManager";
 import type { OfferDecision, WidgetManager } from "./widgets/widgetManager";
 import {
   getStorefrontCurrency,
@@ -52,7 +52,6 @@ export class OfferPoller {
     if (getCurrentPageType() === "product") {
       this.scheduleStartupRequest("social_proof", 950);
     }
-    this.scheduleStartupRequest("assistant_bootstrap", 1300);
     if (this.options.pollMs) {
       this.timer = window.setInterval(
         () => this.requestOffer("poll"),
@@ -194,6 +193,16 @@ export class OfferPoller {
 
       const decision = (await response.json()) as OfferDecision;
       if (!decision.widgetType) {
+        if (decision.reasoning?.startsWith("proactive_")) {
+          this.recordRuntime({
+            trigger,
+            outcome: "no_offer",
+            widgetType: null,
+            reasoning: decision.reasoning,
+            httpStatus: response.status,
+          });
+          return null;
+        }
         return this.mountLocalFallback(
           trigger,
           triggerPayload,
@@ -317,6 +326,19 @@ export class OfferPoller {
           ? settings.discountThreshold
           : triggerPayload.threshold,
     });
+    if (
+      decision?.widgetType === "chat" &&
+      !allowLocalProactiveMessage(settings)
+    ) {
+      this.recordRuntime({
+        trigger,
+        outcome: "no_offer",
+        widgetType: null,
+        reasoning: "Local proactive chat guard blocked the fallback.",
+        httpStatus,
+      });
+      return null;
+    }
     if (!decision) {
       this.recordRuntime({
         trigger,
@@ -351,6 +373,36 @@ export class OfferPoller {
   }
 }
 
+function allowLocalProactiveMessage(settings: StorefrontSettings) {
+  if (
+    settings.chatEnabled === false ||
+    settings.proactiveMessagesEnabled === false
+  ) {
+    return false;
+  }
+  try {
+    const count = Number(
+      sessionStorage.getItem("aovboost_local_proactive_count") || 0,
+    );
+    const maximum = Math.min(
+      Math.max(Number(settings.maxProactivePrompts ?? 2), 0),
+      5,
+    );
+    const lastPromptAt = Number(
+      sessionStorage.getItem("aovboost_local_proactive_at") || 0,
+    );
+    if (count >= maximum || Date.now() - lastPromptAt < 120_000) return false;
+    sessionStorage.setItem(
+      "aovboost_local_proactive_count",
+      String(count + 1),
+    );
+    sessionStorage.setItem("aovboost_local_proactive_at", String(Date.now()));
+  } catch {
+    // Continue with the widget manager guard when browser storage is blocked.
+  }
+  return true;
+}
+
 function buildLocalFallbackDecision(
   trigger: string,
   payload: Record<string, unknown>,
@@ -359,12 +411,15 @@ function buildLocalFallbackDecision(
 
   switch (trigger) {
     case "assistant_bootstrap":
+    case "collection_dwell":
     case "first_time_visitor":
     case "long_product_dwell":
     case "scroll_depth_interest":
     case "comparison_page_visit":
+    case "repeated_product_view":
     case "inactivity_timeout":
     case "purchase_history_match":
+    case "returning_shopper":
     case "loyalty_tier_reached":
     case "crm_segment_update":
       return {
@@ -480,7 +535,6 @@ function buildLocalFallbackDecision(
     case "cart_item_added":
     case "cart_item_removed":
     case "search_query":
-    case "repeated_product_view":
     case "price_hesitation":
     case "wishlist_save":
     case "coupon_field_focus":

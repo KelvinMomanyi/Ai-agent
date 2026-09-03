@@ -1,4 +1,8 @@
-import { data as json, type LoaderFunctionArgs, useLoaderData } from "react-router";
+import {
+  data as json,
+  type LoaderFunctionArgs,
+  useLoaderData,
+} from "react-router";
 import {
   Badge,
   Banner,
@@ -11,6 +15,7 @@ import {
   Text,
 } from "@shopify/polaris";
 import { getRevenueAnalytics } from "../models/analytics.server";
+import { getSalesAnalytics } from "../models/salesAnalytics.server";
 import { authenticate } from "../shopify.server";
 import UpsellChart from "./components/UpsellChart";
 import UpsellTimeSeriesChart from "./components/UpsellTimeSeriesChart";
@@ -20,8 +25,9 @@ const WINDOW_DAYS = 30;
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const from = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  const [report, shopResponse] = await Promise.all([
+  const [report, sales, shopResponse] = await Promise.all([
     getRevenueAnalytics(session.shop, from),
+    getSalesAnalytics(session.shop, from),
     admin.graphql(`#graphql
       query AOVBoostAnalyticsCurrency {
         shop { currencyCode }
@@ -33,11 +39,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ? shopJson.data.shop.currencyCode
     : "USD";
 
-  return json({ report, currencyCode, windowDays: WINDOW_DAYS });
+  return json({ report, sales, currencyCode, windowDays: WINDOW_DAYS });
 };
 
 export default function RevenueDashboard() {
-  const { report, currencyCode, windowDays } = useLoaderData<typeof loader>();
+  const { report, sales, currencyCode, windowDays } =
+    useLoaderData<typeof loader>();
   const { dashboard, funnel } = report;
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat("en-US", {
@@ -167,6 +174,59 @@ export default function RevenueDashboard() {
               </Card>
             ))}
           </div>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">
+                AI sales funnel
+              </Text>
+              <DataTable
+                columnContentTypes={["text", "numeric", "numeric", "numeric"]}
+                headings={["Stage", "Volume", "Rate", "Revenue / AOV"]}
+                rows={[
+                  [
+                    "Chat",
+                    `${sales.chatImpressions.toLocaleString()} impressions / ${sales.chatOpens.toLocaleString()} opens`,
+                    sales.chatImpressions
+                      ? formatPercent(sales.chatOpens / sales.chatImpressions)
+                      : "Not available",
+                    `${sales.customerMessages.toLocaleString()} shopper messages`,
+                  ],
+                  [
+                    "Recommendations",
+                    `${sales.recommendationsShown.toLocaleString()} shown`,
+                    `${formatPercent(sales.recommendationClickRate)} clicked / ${formatPercent(sales.recommendationAddToCartRate)} added`,
+                    `${sales.aiAssistedAddToCart.toLocaleString()} AI-assisted adds`,
+                  ],
+                  [
+                    "Upsells",
+                    `${sales.upsellsShown.toLocaleString()} shown`,
+                    formatPercent(sales.upsellAcceptanceRate),
+                    "Fit-ranked add-ons only",
+                  ],
+                  [
+                    "Orders",
+                    `${sales.aiAssistedOrders.toLocaleString()} AI-assisted / ${sales.orders.toLocaleString()} total`,
+                    `${formatPercent(sales.aiEngagedConversionRate)} engaged conversion`,
+                    `${formatCurrency(sales.aiAttributedRevenue)} attributed / ${formatCurrency(sales.aiAssistedAov)} assisted AOV`,
+                  ],
+                  [
+                    "Trust and proactive",
+                    `${sales.checkoutStarted.toLocaleString()} checkouts`,
+                    `${formatPercent(sales.objectionToPurchaseRate)} objection-to-order`,
+                    `${formatPercent(sales.proactiveMessageConversionRate)} proactive conversion`,
+                  ],
+                ]}
+              />
+              <Text as="p" variant="bodySm" tone="subdued">
+                An order is AI-assisted only when an engaged session clicked or
+                added a recommendation that appears in the signed Shopify order.
+                Widget visibility alone is not attributed.
+              </Text>
+            </BlockStack>
+          </Card>
         </Layout.Section>
 
         <Layout.Section>

@@ -4,14 +4,13 @@ import {
   type StorefrontEvent,
   upsertShopperSessionFromEvents,
 } from "./session.server";
-import {
-  markOfferClick,
-  markOfferImpression,
-} from "./offer.server";
+import { markOfferClick, markOfferImpression } from "./offer.server";
+import { applyRecommendationEvents } from "./recommendationOutcome.server";
 
 export async function ingestStorefrontEvents(input: {
   shop: string;
   sessionId: string;
+  customerId?: string | null;
   events: StorefrontEvent[];
 }) {
   const session = await upsertShopperSessionFromEvents(input);
@@ -32,6 +31,11 @@ export async function ingestStorefrontEvents(input: {
   }
 
   await updateOfferTracking(input.shop, input.events);
+  await applyRecommendationEvents({
+    shop: input.shop,
+    sessionId: session.id,
+    events: input.events,
+  });
 
   return session;
 }

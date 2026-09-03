@@ -35,6 +35,12 @@ import {
   logStorefrontAuthError,
 } from "../utils/storefrontAuth.server";
 import { getStorefrontSessionRecovery } from "../utils/storefrontSessionRecovery.server";
+import {
+  evaluateProactiveMessage,
+  getProactiveMessage,
+} from "../sales/proactiveEngine";
+import { normalizeSalesState } from "../sales/salesStateMachine";
+import { toMerchantSalesSettings } from "../sales/settings";
 
 type OfferBody = {
   sessionId?: string;
@@ -64,7 +70,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const body = (await request.json()) as OfferBody;
     const auth = authenticateStorefrontRequest(request, body);
-    const { shop, sessionId } = auth;
+    const { shop, sessionId, customerId } = auth;
 
     if (!shop || !(await isInstalledShop(shop))) {
       return json(
@@ -126,6 +132,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return upsertShopperSessionFromEvents({
         shop,
         sessionId,
+        customerId,
         events: [
           {
             type: "session_sync",
@@ -158,40 +165,123 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             : (snapshot.context as Record<string, unknown>).cartValue,
       },
     };
-    const candidates = await buildOfferCandidates({
-      shop,
-      session: decisionSession,
-      currentProductId: body.currentProductId,
-      sourceProductId: triggerProductId,
-      excludeProductIds: settings.blockedProductIds,
-    });
-    const rawDecision = await getOfferDecision({
-      shop,
-      session: decisionSession,
-      currentProductId: body.currentProductId,
-      currentPageType: normalizePageType(body.currentPageType),
-      cartProductIds: requestCartProductIds,
-      cartVariantIds: requestCartVariantIds,
-      cartItemCount: requestCartItemCount,
-      recentlyDismissedWidgets: body.dismissedWidgets || [],
-      settings,
-      candidates,
-      trigger: {
-        type: body.trigger || "manual",
-        category: body.triggerCategory,
-        widgetHint:
-          typeof body.triggerPayload?.widgetHint === "string"
-            ? body.triggerPayload.widgetHint
-            : undefined,
-        payload: {
-          ...(body.triggerPayload || {}),
-          cartValue: body.cartValue,
+    const proactiveTrigger = isProactiveChatTrigger(body);
+    const sessionContext = asRecord(snapshot.context);
+    const proactiveDecision = proactiveTrigger
+      ? evaluateProactiveMessage({
+          triggerType: body.trigger || "manual",
+          pageType: normalizePageType(body.currentPageType),
+          dwellSeconds: Number(
+            body.triggerPayload?.dwellSeconds || snapshot.sessionDuration || 0,
+          ),
+          scrollDepth: Number(
+            body.triggerPayload?.depth || sessionContext.maxScrollDepth || 0,
+          ),
+          intentScore: snapshot.intentScore,
+          hesitationScore: snapshot.hesitationScore,
+          salesState: normalizeSalesState(snapshot.salesState),
+          promptCount: Number(sessionContext.proactivePromptCount || 0),
+          dismissed: (body.dismissedWidgets || []).includes("chat"),
+          lastPromptAt: parsePromptTimestamp(
+            sessionContext.lastProactivePromptAt,
+          ),
+          settings: toMerchantSalesSettings(settings),
+        })
+      : null;
+    if (proactiveDecision && !proactiveDecision.allowed) {
+      return json(
+        {
+          widgetType: null,
+          payload: {},
+          reasoning: `proactive_${proactiveDecision.reason}`,
+          confidence: 0,
+        },
+        { headers: withCors() },
+      );
+    }
+
+    const candidates = proactiveDecision
+      ? []
+      : await buildOfferCandidates({
+          shop,
+          session: decisionSession,
+          currentProductId: body.currentProductId,
+          sourceProductId: triggerProductId,
+          excludeProductIds: settings.blockedProductIds,
+        });
+    const rawDecision: OfferDecision = proactiveDecision
+      ? {
+          widgetType: "chat",
+          payload: {
+            triggerType: body.trigger,
+            proactive: true,
+            greeting: getProactiveMessage(proactiveDecision.messageType),
+            copy: {
+              greeting: getProactiveMessage(proactiveDecision.messageType),
+              ctaAccept: "Let me help",
+              ctaDecline: "Not now",
+            },
+          },
+          reasoning: `proactive_${proactiveDecision.messageType}`,
+          confidence: proactiveDecision.confidence,
+          aiProvider: "heuristic",
+        }
+      : await getOfferDecision({
+          shop,
+          session: decisionSession,
+          currentProductId: body.currentProductId,
+          currentPageType: normalizePageType(body.currentPageType),
+          cartProductIds: requestCartProductIds,
           cartVariantIds: requestCartVariantIds,
           cartItemCount: requestCartItemCount,
-          cartItems: body.cartItems || [],
+          recentlyDismissedWidgets: body.dismissedWidgets || [],
+          settings,
+          candidates,
+          trigger: {
+            type: body.trigger || "manual",
+            category: body.triggerCategory,
+            widgetHint:
+              typeof body.triggerPayload?.widgetHint === "string"
+                ? body.triggerPayload.widgetHint
+                : undefined,
+            payload: {
+              ...(body.triggerPayload || {}),
+              cartValue: body.cartValue,
+              cartVariantIds: requestCartVariantIds,
+              cartItemCount: requestCartItemCount,
+              cartItems: body.cartItems || [],
+            },
+          },
+        });
+    if (
+      rawDecision.widgetType === "chat" &&
+      !proactiveDecision &&
+      body.trigger !== "manual"
+    ) {
+      return json(
+        {
+          widgetType: null,
+          payload: {},
+          reasoning: "proactive_not_eligible",
+          confidence: 0,
         },
-      },
-    });
+        { headers: withCors() },
+      );
+    }
+    if (proactiveDecision) {
+      await prisma.shopperSession.update({
+        where: { id: session.id },
+        data: {
+          context: {
+            ...sessionContext,
+            proactivePromptCount:
+              Number(sessionContext.proactivePromptCount || 0) + 1,
+            lastProactivePromptAt: new Date().toISOString(),
+            lastProactiveMessageType: proactiveDecision.messageType,
+          },
+        },
+      });
+    }
     const catalogGuardedDecision = await enforceCatalogBackedDecision({
       shop,
       decision: rawDecision,
@@ -296,6 +386,28 @@ function normalizePageType(value?: string): CurrentPageType {
     return value;
   }
   return "other";
+}
+
+function isProactiveChatTrigger(body: OfferBody) {
+  if (body.trigger === "manual") return false;
+  if (body.triggerPayload?.widgetHint === "chat") return true;
+  return [
+    "long_product_dwell",
+    "collection_dwell",
+    "repeated_product_view",
+    "scroll_depth_interest",
+    "comparison_page_visit",
+    "inactivity_timeout",
+    "purchase_history_match",
+    "returning_shopper",
+    "crm_segment_update",
+  ].includes(String(body.trigger || ""));
+}
+
+function parsePromptTimestamp(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const timestamp = Date.parse(String(value || ""));
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function hash(value: string) {

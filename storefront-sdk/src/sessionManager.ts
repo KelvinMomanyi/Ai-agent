@@ -45,6 +45,15 @@ export type StorefrontSettings = {
   exitIntentEnabled?: boolean;
   postPurchaseEnabled?: boolean;
   liveEventsEnabled?: boolean;
+  proactiveMessagesEnabled?: boolean;
+  proactiveDelaySeconds?: number;
+  maxProactivePrompts?: number;
+  maxProductRecommendations?: number;
+  minimumProactiveConfidence?: number;
+  minimumUpsellIntentScore?: number;
+  hesitationDetectionEnabled?: boolean;
+  bundleSupportEnabled?: boolean;
+  analyticsEnabled?: boolean;
 };
 
 export class SessionManager {
@@ -60,6 +69,12 @@ export class SessionManager {
   private pageViews = 0;
   private maxScrollDepth = 0;
   private cartActionCount = 0;
+  private searchCount = 0;
+  private variantSelectionCount = 0;
+  private cartOpenCount = 0;
+  private cartCloseCount = 0;
+  private cartRemovalCount = 0;
+  private checkoutStarted = false;
   private cartValue = 0;
   private startedAt = Date.now();
   private lastCartActionAt = 0;
@@ -92,7 +107,11 @@ export class SessionManager {
 
     if (event.type === "page_view") this.pageViews += 1;
 
-    if (event.type === "product_view") {
+    if (
+      event.type === "product_view" ||
+      event.type === "product_viewed" ||
+      event.type === "product_revisited"
+    ) {
       const productId = getProductId(event);
       if (productId) {
         this.viewedProductIds.add(productId);
@@ -101,6 +120,16 @@ export class SessionManager {
           (this.productViewCounts.get(productId) || 0) + 1,
         );
       }
+    }
+
+    if (event.type === "search" || event.type === "search_performed") {
+      this.searchCount += 1;
+    }
+    if (event.type === "variant_selected") this.variantSelectionCount += 1;
+    if (event.type === "cart_opened") this.cartOpenCount += 1;
+    if (event.type === "cart_closed") this.cartCloseCount += 1;
+    if (event.type === "checkout_start" || event.type === "checkout_started") {
+      this.checkoutStarted = true;
     }
 
     if (event.type === "scroll_depth") {
@@ -152,6 +181,7 @@ export class SessionManager {
 
     if (event.type === "remove_from_cart") {
       this.cartActionCount += 1;
+      this.cartRemovalCount += 1;
       this.lastCartActionAt = Date.now();
       const productId = getProductId(event);
       if (productId) this.cartProductIds.delete(productId);
@@ -169,6 +199,9 @@ export class SessionManager {
     const intentScore = clamp(
       this.pageViews * 2 +
         productViews * 5 +
+        Math.min(this.searchCount, 3) * 6 +
+        Math.min(this.variantSelectionCount, 2) * 10 +
+        Math.min(this.cartOpenCount, 2) * 8 +
         (this.maxScrollDepth >= 90
           ? 10
           : this.maxScrollDepth >= 75
@@ -179,7 +212,9 @@ export class SessionManager {
                 ? 3
                 : 0) +
         Math.min(sessionDuration / 120, 1) * 30 +
-        (this.cartProductIds.size > 0 ? 30 : 0),
+        (this.cartProductIds.size > 0 ? 30 : 0) +
+        (this.checkoutStarted ? 30 : 0) -
+        Math.min(this.cartRemovalCount, 3) * 8,
       0,
       100,
     );
@@ -196,7 +231,10 @@ export class SessionManager {
       this.cartActionCount === 0 &&
       secondsSinceCartAction >= 90
         ? 55
-        : 0) + (repeatedProductWithoutCart ? 35 : 0),
+        : 0) +
+        (repeatedProductWithoutCart ? 35 : 0) +
+        Math.min(this.cartCloseCount, 2) * 12 +
+        Math.min(this.cartRemovalCount, 2) * 18,
       0,
       100,
     );
@@ -219,6 +257,12 @@ export class SessionManager {
         cartVariantIds: Array.from(this.cartVariantIds),
         cartValue: this.cartValue,
         lastEventType: this.lastEventType,
+        searchCount: this.searchCount,
+        variantSelectionCount: this.variantSelectionCount,
+        cartOpenCount: this.cartOpenCount,
+        cartCloseCount: this.cartCloseCount,
+        cartRemovalCount: this.cartRemovalCount,
+        checkoutStarted: this.checkoutStarted,
       },
     };
   }

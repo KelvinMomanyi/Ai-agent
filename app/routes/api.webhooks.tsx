@@ -4,6 +4,7 @@ import prisma from "../db.server";
 import { authenticate, sessionStorage } from "../shopify.server";
 import { extractOrderAttribution } from "../models/attribution.server";
 import { markOfferConversion } from "../models/offer.server";
+import { markPurchasedRecommendationOutcomes } from "../models/recommendationOutcome.server";
 import {
   deleteProduct,
   incrementOrderAffinities,
@@ -97,7 +98,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const knownOffers = attribution.offerIds.length
         ? await prisma.offer.findMany({
             where: { shop, id: { in: attribution.offerIds } },
-            select: { id: true },
+            select: { id: true, sessionId: true },
           })
         : [];
       const knownOfferIds = new Set(knownOffers.map(({ id }) => id));
@@ -109,6 +110,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           markOfferConversion(shop, offerId, revenue),
         ),
       );
+      const recommendationAttribution =
+        await markPurchasedRecommendationOutcomes({
+          shop,
+          sessionIds: knownOffers.map((offer) => offer.sessionId),
+          orderId,
+          orderValue: Number((payload as any).total_price || 0),
+          lineItems: attribution.lineItems,
+        });
 
       await prisma.event.upsert({
         where: {
@@ -123,6 +132,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           data: {
             line_items: attribution.lineItems,
             offerIds: attributedOffers.map(({ offerId }) => offerId),
+            aiAssisted: recommendationAttribution.outcomeCount > 0,
+            aiAttributedRevenue: recommendationAttribution.attributedRevenue,
             total_price: (payload as any).total_price,
             currency: (payload as any).currency,
           },
@@ -135,6 +146,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           data: {
             line_items: attribution.lineItems,
             offerIds: attributedOffers.map(({ offerId }) => offerId),
+            aiAssisted: recommendationAttribution.outcomeCount > 0,
+            aiAttributedRevenue: recommendationAttribution.attributedRevenue,
             total_price: (payload as any).total_price,
             currency: (payload as any).currency,
           },
@@ -191,6 +204,7 @@ async function deleteShopData(shop: string, deleteSessions: boolean) {
     prisma.offer.deleteMany({ where: { shop } }),
     prisma.shopperEvent.deleteMany({ where: { shop } }),
     prisma.chatMessage.deleteMany({ where: { shop } }),
+    prisma.recommendationOutcome.deleteMany({ where: { shop } }),
     prisma.shopperSession.deleteMany({ where: { shop } }),
     prisma.bundleItem.deleteMany({ where: { bundle: { shop } } }),
     prisma.bundle.deleteMany({ where: { shop } }),

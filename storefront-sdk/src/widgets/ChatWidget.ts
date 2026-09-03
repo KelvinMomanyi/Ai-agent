@@ -13,6 +13,11 @@ type ProductCard = {
   variantId?: string;
   imageUrl?: string | null;
   price?: string;
+  compareAtPrice?: string | null;
+  availableForSale?: boolean;
+  matchReasons?: string[];
+  recommendationType?: "primary" | "value" | "premium" | "upsell" | null;
+  rank?: number | null;
   variants?: Array<{
     id?: string;
     title?: string;
@@ -34,6 +39,8 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   productCards?: ProductCard[];
+  checkoutCta?: boolean;
+  restoredTextOnly?: boolean;
 };
 
 type LiveCartContext = {
@@ -46,6 +53,7 @@ type LiveCartContext = {
   discounts?: Array<{ title: string; amount: number | null }>;
   capturedAt: number;
   items: Array<{
+    lineId?: string;
     productId: string;
     variantId: string;
     quantity: number;
@@ -63,6 +71,7 @@ export class ChatWidget extends BaseWidget {
   private messages: Message[] = [];
   private expanded = false;
   private sending = false;
+  private initialMessageTracked = false;
 
   constructor(payload: WidgetPayload) {
     super(payload);
@@ -77,12 +86,18 @@ export class ChatWidget extends BaseWidget {
     const assistantIntro = String(
       copy?.assistantIntro || payload.assistantIntro || "",
     ).trim();
-    this.messages.push({
-      role: "assistant",
-      content: greeting,
-    });
-    if (assistantIntro && assistantIntro !== greeting) {
-      this.messages.push({ role: "assistant", content: assistantIntro });
+    const restored = this.restoreConversation();
+    if (restored.length > 0) {
+      this.messages = restored;
+    } else {
+      this.messages.push({
+        role: "assistant",
+        content: greeting,
+      });
+      if (assistantIntro && assistantIntro !== greeting) {
+        this.messages.push({ role: "assistant", content: assistantIntro });
+      }
+      this.persistConversation();
     }
   }
 
@@ -166,6 +181,12 @@ export class ChatWidget extends BaseWidget {
         .product-copy { display: grid; gap: 3px; min-width: 0; }
         .product-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .price { color: var(--aovboost-muted); font-size: 12px; font-weight: 700; }
+        .compare-price { color: var(--aovboost-muted); font-size: 11px; text-decoration: line-through; }
+        .recommendation-label { color: var(--aovboost-action); font-size: 10px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
+        .availability { color: #166534; font-size: 10px; font-weight: 700; }
+        .availability.unavailable { color: #b91c1c; }
+        .match-reasons { display: grid; gap: 2px; margin: 2px 0; padding: 0; list-style: none; color: var(--aovboost-muted); font-size: 11px; }
+        .match-reasons li::before { content: "\\2713"; color: #15803d; margin-right: 4px; }
         .variant-groups { display: grid; gap: 6px; margin: 4px 0; }
         .variant-group { display: grid; gap: 4px; }
         .variant-label { color: var(--aovboost-muted); font-size: 11px; font-weight: 700; }
@@ -184,6 +205,7 @@ export class ChatWidget extends BaseWidget {
         .variant-note { color: var(--aovboost-muted); font-size: 10px; }
         .cart-confirmation { color: #166534; font-size: 11px; font-weight: 700; }
         .cart-confirmation.error { color: #b91c1c; }
+        .checkout-link { display: inline-flex; justify-content: center; margin-top: 8px; border-radius: 7px; background: var(--aovboost-action); color: var(--aovboost-action-text); font-size: 12px; font-weight: 750; padding: 8px 10px; text-decoration: none; }
       </style>
       <aside class="wrap card" aria-label="${text(assistantLabel)}">
         <div class="head">
@@ -211,6 +233,7 @@ export class ChatWidget extends BaseWidget {
     this.root.querySelector("[data-expand]")?.addEventListener("click", () => {
       this.expanded = true;
       this.trackClick("open_chat");
+      this.track("chat_opened", { source: "proactive_bubble" });
       this.render();
     });
     this.root
@@ -224,6 +247,10 @@ export class ChatWidget extends BaseWidget {
     });
     this.hydrateProductCards(this.root);
     this.scrollToBottom();
+    if (!this.initialMessageTracked) {
+      this.initialMessageTracked = true;
+      this.track("agent_message_shown", { kind: "welcome" });
+    }
   }
 
   private renderChatUi() {
@@ -241,6 +268,7 @@ export class ChatWidget extends BaseWidget {
   private handleOpenChat = () => {
     if (!this.isMounted()) return;
     this.expanded = true;
+    this.track("chat_opened", { source: "storefront_event" });
     this.render();
     window.setTimeout(() => {
       this.root.querySelector<HTMLInputElement>("[data-input]")?.focus();
@@ -261,8 +289,11 @@ export class ChatWidget extends BaseWidget {
       ${
         message.productCards?.length
           ? this.renderProductCards(message.productCards)
-          : this.renderProductLinks(message.content)
+          : message.restoredTextOnly
+            ? ""
+            : this.renderProductLinks(message.content)
       }
+      ${message.checkoutCta ? `<a class="checkout-link" href="/checkout" data-checkout-cta>Ready to check out</a>` : ""}
     `;
   }
 
@@ -298,19 +329,30 @@ export class ChatWidget extends BaseWidget {
         ? String(product.variantId || variants[0]?.id || "")
         : "");
     return `
-      <article class="inline-product" data-product-card data-product-id="${text(productId)}" data-handle="${text(handle)}">
+      <article class="inline-product" data-product-card data-product-id="${text(productId)}" data-handle="${text(handle)}" data-recommendation-type="${text(product.recommendationType || "")}">
         ${
           product.imageUrl
             ? `<img data-product-image src="${text(product.imageUrl)}" alt="${text(title)}" loading="lazy">`
             : `<span class="image-placeholder" aria-hidden="true"></span>`
         }
         <span class="product-copy">
+          ${product.recommendationType ? `<span class="recommendation-label">${text(recommendationLabel(product.recommendationType))}</span>` : ""}
           <span class="product-name">${text(title)}</span>
           ${product.price ? `<span class="price" data-product-price>${text(selectedVariant?.price || product.price)}</span>` : ""}
+          ${product.compareAtPrice ? `<span class="compare-price">${text(product.compareAtPrice)}</span>` : ""}
+          <span class="availability${product.availableForSale === false ? " unavailable" : ""}">${product.availableForSale === false ? "Currently unavailable" : "Available"}</span>
+          ${
+            product.matchReasons?.length
+              ? `<ul class="match-reasons">${product.matchReasons
+                  .slice(0, 4)
+                  .map((reason) => `<li>${text(reason)}</li>`)
+                  .join("")}</ul>`
+              : ""
+          }
           ${this.renderVariantGroups(optionGroups, selectedVariant)}
           ${product.variantsTruncated ? `<span class="variant-note">More options are available on the product page.</span>` : ""}
           <span class="product-actions">
-            ${href ? `<a href="${href}">View product</a>` : ""}
+            ${href ? `<a href="${href}" data-chat-view>View product</a>` : ""}
             ${
               variants.length > 0 || product.variantId
                 ? `<button type="button" data-chat-add="${text(selectedVariantId)}" ${selectedVariantId ? "" : "disabled"}>${selectedVariantId ? "Add to cart" : "Choose options"}</button>`
@@ -378,12 +420,40 @@ export class ChatWidget extends BaseWidget {
 
   private handleProductCardClick = async (event: Event) => {
     const target = event.target as Element | null;
+    const viewLink = target?.closest?.(
+      "[data-chat-view]",
+    ) as HTMLAnchorElement | null;
+    if (viewLink) {
+      const card = viewLink.closest(
+        "[data-product-card]",
+      ) as HTMLElement | null;
+      this.track("recommendation_clicked", {
+        productId: card?.dataset.productId || "",
+        recommendationType: card?.dataset.recommendationType || "primary",
+      });
+      return;
+    }
+    const checkoutLink = target?.closest?.(
+      "[data-checkout-cta]",
+    ) as HTMLAnchorElement | null;
+    if (checkoutLink) {
+      this.track("checkout_clicked", { source: "chat_widget" });
+      return;
+    }
     const optionButton = target?.closest?.(
       "[data-chat-option]",
     ) as HTMLButtonElement | null;
     if (optionButton) {
       event.preventDefault();
       this.selectProductOption(optionButton);
+      const card = optionButton.closest(
+        "[data-product-card]",
+      ) as HTMLElement | null;
+      this.track("variant_selected", {
+        productId: card?.dataset.productId || "",
+        optionName: optionButton.dataset.optionName || "",
+        optionValue: optionButton.dataset.optionValue || "",
+      });
       return;
     }
     const button = target?.closest?.(
@@ -403,6 +473,17 @@ export class ChatWidget extends BaseWidget {
       if (!result) throw new Error("Cart add failed");
       button.textContent = "Added";
       this.showCartConfirmation(card, "Added to your cart.");
+      const recommendationType = card?.dataset.recommendationType || "primary";
+      this.track(
+        recommendationType === "upsell"
+          ? "upsell_added"
+          : "recommendation_added",
+        {
+          productId: card?.dataset.productId || "",
+          variantId,
+          recommendationType,
+        },
+      );
       document.dispatchEvent(
         new CustomEvent("add-to-cart", {
           detail: {
@@ -550,6 +631,7 @@ export class ChatWidget extends BaseWidget {
     if (button) button.disabled = true;
     input!.value = "";
     this.messages.push({ role: "user", content: value });
+    this.persistConversation();
     this.appendMessage({ role: "user", content: value });
     this.trackClick("send_message");
     if (isPriceSensitiveMessage(value)) {
@@ -607,6 +689,10 @@ export class ChatWidget extends BaseWidget {
               if (Array.isArray(parsed.productCards)) {
                 this.messages[assistantIndex].productCards =
                   parsed.productCards;
+                this.trackShownRecommendations(parsed.productCards);
+              }
+              if (parsed.checkoutCta === true) {
+                this.messages[assistantIndex].checkoutCta = true;
               }
               assistantEl.innerHTML = this.renderMessageContent(
                 this.messages[assistantIndex],
@@ -638,6 +724,12 @@ export class ChatWidget extends BaseWidget {
           );
         }
       }
+      this.persistConversation();
+      this.track("agent_message_shown", {
+        hasRecommendations: Boolean(
+          this.messages[assistantIndex].productCards?.length,
+        ),
+      });
     } catch {
       this.removeTyping();
       this.messages[assistantIndex].content =
@@ -646,6 +738,7 @@ export class ChatWidget extends BaseWidget {
       assistantEl.innerHTML = this.renderMessageContent(
         this.messages[assistantIndex],
       );
+      this.persistConversation();
     } finally {
       this.sending = false;
       if (button) button.disabled = false;
@@ -737,6 +830,11 @@ export class ChatWidget extends BaseWidget {
           },
         }),
       );
+      this.track("recommendation_added", {
+        productId: action.productId || "",
+        variantId: action.variantId,
+        source: "conversational_action",
+      });
     } catch {
       this.messages[assistantIndex].content =
         `I couldn't add ${action.productTitle || "that product"} to your cart. Please use the product card button or open the product page.`;
@@ -790,6 +888,18 @@ export class ChatWidget extends BaseWidget {
   }
 
   private dismiss() {
+    this.track("chat_closed", { dismissed: true });
+    const latestUpsell = this.messages
+      .flatMap((message) => message.productCards || [])
+      .slice()
+      .reverse()
+      .find((product) => product.recommendationType === "upsell");
+    if (latestUpsell?.productId) {
+      this.track("upsell_rejected", {
+        productId: latestUpsell.productId,
+        reason: "chat_dismissed",
+      });
+    }
     this.trackDismiss();
     this.container.animate(
       [{ transform: "translateY(0)" }, { transform: "translateY(120%)" }],
@@ -797,6 +907,71 @@ export class ChatWidget extends BaseWidget {
     );
     window.setTimeout(() => this.destroy(), 190);
   }
+
+  private trackShownRecommendations(products: ProductCard[]) {
+    products.slice(0, 4).forEach((product) => {
+      if (!product.productId) return;
+      const type = product.recommendationType || "primary";
+      this.track(type === "upsell" ? "upsell_shown" : "recommendation_shown", {
+        productId: product.productId,
+        variantId: product.variantId || "",
+        recommendationType: type,
+        rank: product.rank || 0,
+      });
+    });
+  }
+
+  private persistConversation() {
+    try {
+      window.sessionStorage.setItem(
+        this.conversationStorageKey(),
+        JSON.stringify(
+          this.messages.slice(-20).map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+        ),
+      );
+    } catch {
+      // The server remains the source of truth when browser storage is blocked.
+    }
+  }
+
+  private restoreConversation(): Message[] {
+    try {
+      const value = JSON.parse(
+        window.sessionStorage.getItem(this.conversationStorageKey()) || "[]",
+      );
+      if (!Array.isArray(value)) return [];
+      return value
+        .filter(
+          (message) =>
+            message &&
+            (message.role === "user" || message.role === "assistant") &&
+            typeof message.content === "string",
+        )
+        .slice(-20)
+        .map((message) => ({
+          ...message,
+          restoredTextOnly: true,
+        })) as Message[];
+    } catch {
+      return [];
+    }
+  }
+
+  private conversationStorageKey() {
+    const sdk = (window as any).AOVBoostSDK;
+    const shop = String((window as any).AOVBoost?.shop || "store");
+    return `aovboost_chat:${shop}:${String(sdk?.sessionId || "session")}`;
+  }
+}
+
+function recommendationLabel(type: ProductCard["recommendationType"]) {
+  if (type === "value") return "Best value";
+  if (type === "premium") return "Premium option";
+  if (type === "upsell") return "Completes the setup";
+  return "Best match";
 }
 
 function isPriceSensitiveMessage(value: string) {
@@ -925,6 +1100,7 @@ async function readLiveCartContext(): Promise<LiveCartContext> {
         if (!quantity || quantity < 1) return [];
         return [
           {
+            lineId: String(item.key || "").slice(0, 160),
             productId: toShopifyGid("Product", item.product_id),
             variantId: toShopifyGid(
               "ProductVariant",

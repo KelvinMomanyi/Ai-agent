@@ -17,6 +17,7 @@ export type CatalogCacheProduct = {
   vendor: string;
   productType: string;
   category: string;
+  collectionIds?: string[];
   tags: string[];
   price: string;
   compareAtPrice: string | null;
@@ -345,6 +346,7 @@ function toCatalogProduct(product: ProductWithStats): CatalogCacheProduct {
     vendor: product.vendor || "",
     productType: product.productType || "",
     category,
+    collectionIds: product.collectionIds || [],
     tags: product.tags || [],
     price,
     compareAtPrice,

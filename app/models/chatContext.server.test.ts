@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ShopperSession } from "@prisma/client";
+import { Prisma, type ShopperSession } from "@prisma/client";
 import type { CatalogCacheProduct } from "./catalogCache.server";
 import {
   buildVisitorBehaviorContext,
@@ -82,7 +82,11 @@ function session(overrides: Partial<ShopperSession> = {}): ShopperSession {
     id: "session-1",
     shop: "example.myshopify.com",
     anonymousId: "visitor-1",
+    customerId: null,
+    startedAt: new Date("2026-08-15T10:00:00.000Z"),
+    lastActivityAt: new Date("2026-08-16T12:05:00.000Z"),
     journeyStage: "comparing",
+    salesState: "CONSIDERATION",
     intentScore: 65,
     hesitationScore: 20,
     viewedProductIds: ["gid://shopify/Product/1"],
@@ -90,6 +94,12 @@ function session(overrides: Partial<ShopperSession> = {}): ShopperSession {
     chatEngaged: true,
     totalPageViews: 4,
     sessionDuration: 300,
+    shopperProfile: {},
+    checkoutStarted: false,
+    purchaseCompleted: false,
+    orderId: null,
+    orderValue: null,
+    aiAttributedRevenue: new Prisma.Decimal(0),
     context: { maxScrollDepth: 50, lastEventType: "product_view" },
     createdAt: new Date("2026-08-15T10:00:00.000Z"),
     updatedAt: new Date("2026-08-16T12:05:00.000Z"),

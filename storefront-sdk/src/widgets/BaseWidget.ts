@@ -83,6 +83,13 @@ export abstract class BaseWidget {
 
   protected trackDismiss(): void {
     this.track("widget_dismiss", {});
+    if (this.getWidgetType() === "chat") {
+      try {
+        sessionStorage.setItem("aovboost_chat_dismissed_session", "true");
+      } catch {
+        // Local storage below still provides a time-bounded fallback.
+      }
+    }
     try {
       const dismissed = JSON.parse(localStorage.getItem(DISMISSED_KEY) || "[]");
       const entries = Array.isArray(dismissed)

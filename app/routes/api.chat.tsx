@@ -39,11 +39,17 @@ import {
   type CurrencyInfo,
   type GroundedChatAction,
   type GroundedAiChatResponse,
+  type ChatProductCard,
 } from "../models/chatResponse";
 import {
   getShopperSession,
   upsertShopperSessionFromEvents,
 } from "../models/session.server";
+import {
+  getRecommendationHistory,
+  markLatestRecommendationRejected,
+  recordRecommendationOutcomes,
+} from "../models/recommendationOutcome.server";
 import { cacheKeys, incrementRateLimit } from "../redis.server";
 import {
   buildStoreKnowledgeFallbackReply,
@@ -58,6 +64,14 @@ import {
   logStorefrontAuthError,
 } from "../utils/storefrontAuth.server";
 import { getStorefrontSessionRecovery } from "../utils/storefrontSessionRecovery.server";
+import { createCommerceToolLayer } from "../sales/commerceTools.server";
+import { rankProductRecommendations } from "../sales/recommendationEngine";
+import { buildSalesContext } from "../sales/salesContext.server";
+import { normalizeSalesState } from "../sales/salesStateMachine";
+import { toMerchantSalesSettings } from "../sales/settings";
+import { normalizeShopperProfile } from "../sales/shopperProfile";
+import { rankUpsells } from "../sales/upsellEngine";
+import type { SalesState, ShopperProfile } from "../sales/types";
 
 type ChatBody = {
   sessionId?: string;
@@ -129,7 +143,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     throw error;
   }
 
-  const { shop, sessionId } = auth;
+  const { shop, sessionId, customerId } = auth;
   const userMessage =
     typeof body.message === "string" ? body.message.trim().slice(0, 1000) : "";
   const clientMessageHistory = sanitizeMessageHistory(body.messageHistory);
@@ -160,13 +174,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  const session =
+  const existingSession =
     (await getShopperSession(shop, sessionId)) ||
     (await upsertShopperSessionFromEvents({
       shop,
       sessionId,
+      customerId,
       events: [{ type: "session_sync", ts: Date.now() }],
     }));
+
+  const session = await upsertShopperSessionFromEvents({
+    shop,
+    sessionId: existingSession.anonymousId,
+    customerId,
+    events: [
+      {
+        type: "customer_message_sent",
+        ts: Date.now(),
+        message: userMessage,
+        payload: { message: userMessage, intent: messageIntent },
+      },
+    ],
+  });
 
   const [settings, storeKnowledge, urgencyLevel, contextSources] =
     await Promise.all([
@@ -196,6 +225,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       storeId: shop,
     },
   });
+  await prisma.shopperEvent.create({
+    data: {
+      shop,
+      sessionId: session.id,
+      type: "customer_message_sent",
+      payload: { message: userMessage, intent: messageIntent },
+    },
+  });
+  if (isRecommendationRejection(userMessage)) {
+    await markLatestRecommendationRejected({
+      shop,
+      sessionId: session.id,
+      reason: userMessage,
+    });
+  }
   if (messageIntent !== "general") {
     await prisma.shopperEvent.create({
       data: {
@@ -211,6 +255,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const currency = resolveCurrencyInfo(body, storeKnowledge);
+  const merchantSalesSettings = toMerchantSalesSettings(settings);
+  const shopperProfile = normalizeShopperProfile(session.shopperProfile);
+  const salesState = normalizeSalesState(session.salesState);
   const safeCatalogProducts = filterCatalogProducts(
     catalogSnapshot.products,
     settings.blockedProductIds,
@@ -240,11 +287,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     effectiveCartProductIds[0] ||
     contextSources.behavior.viewedProductIds.at(-1) ||
     session.viewedProductIds.at(-1);
-  const rawBundles = await getActiveBundlesForProduct(
-    shop,
-    recommendationSourceProductId,
-    { excludeProductIds: settings.blockedProductIds },
-  );
+  const [rawBundles, recommendationHistory, affinityRows] = await Promise.all([
+    getActiveBundlesForProduct(shop, recommendationSourceProductId, {
+      excludeProductIds: settings.blockedProductIds,
+    }),
+    getRecommendationHistory(shop, session.id),
+    effectiveCartProductIds.length > 0
+      ? prisma.productAffinity.findMany({
+          where: { shop, sourceId: { in: effectiveCartProductIds } },
+          orderBy: { score: "desc" },
+          take: 30,
+        })
+      : Promise.resolve([]),
+  ]);
   const bundles = filterBundlesToCatalog(
     rawBundles as unknown as BundleSummary[],
     safeCatalogProducts,
@@ -259,6 +314,41 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const previousUserMessage = messageHistory
     .filter((message) => message.role === "user")
     .at(-1)?.content;
+  const recommendationQuery = [
+    previousUserMessage,
+    userMessage,
+    ...contextSources.behavior.recentSearchQueries,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const rejectedProductIds = recommendationHistory
+    .filter((item) => item.rejectedAt)
+    .map((item) => item.productId);
+  const rankedRecommendations = rankProductRecommendations({
+    products: safeCatalogProducts,
+    query: recommendationQuery,
+    profile: shopperProfile,
+    settings: merchantSalesSettings,
+    cartProductIds: effectiveCartProductIds,
+    rejectedProductIds,
+  });
+  const rankedUpsells = settings.upsellEnabled
+    ? rankUpsells({
+        products: safeCatalogProducts,
+        affinities: affinityRows,
+        cartProductIds: effectiveCartProductIds,
+        rejectedProductIds,
+        profile: shopperProfile,
+        settings: merchantSalesSettings,
+        cartValue:
+          liveCart.totalPrice ??
+          Number((session.context as Record<string, unknown>).cartValue || 0),
+      })
+    : [];
+  const rankedSalesCandidates = [
+    ...rankedRecommendations,
+    ...(salesState === "CART" || salesState === "CLOSING" ? rankedUpsells : []),
+  ].slice(0, merchantSalesSettings.maxProductRecommendations);
   const catalogProducts = pickCatalogProducts({
     catalog: {
       ...catalogSnapshot,
@@ -270,6 +360,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     sourceProductId: recommendationSourceProductId,
     cartProductIds: effectiveCartProductIds,
     preferredProductIds: [
+      ...rankedSalesCandidates.map((item) => item.product.id),
       ...bundleProductIds,
       ...historyProductIds,
       ...contextSources.behavior.viewedProductIds.slice(-8),
@@ -277,13 +368,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     ],
     includeContextProducts: true,
     excludeProductIds: settings.blockedProductIds,
-    query: [
-      previousUserMessage,
-      userMessage,
-      ...contextSources.behavior.recentSearchQueries,
-    ]
-      .filter(Boolean)
-      .join("\n"),
+    query: recommendationQuery,
     limit: 12,
   });
   const requestedCartSelection = resolveRequestedCartSelection(
@@ -318,6 +403,44 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     catalogProducts,
   );
   const conversationInfo = formatConversationHistoryForPrompt(messageHistory);
+  const recentSalesEvents = await prisma.shopperEvent.findMany({
+    where: { shop, sessionId: session.id },
+    orderBy: { createdAt: "desc" },
+    take: 40,
+    select: { type: true, payload: true },
+  });
+  const salesContext = buildSalesContext({
+    session,
+    currentPage: body.storefrontContext || {},
+    cart: liveCart,
+    recentProducts: catalogProducts,
+    recentEvents: recentSalesEvents,
+    previousRecommendations: recommendationHistory,
+    settings: merchantSalesSettings,
+  });
+  const commerceTools = createCommerceToolLayer({
+    shop,
+    catalog: {
+      ...catalogSnapshot,
+      products: safeCatalogProducts,
+      byId: Object.fromEntries(
+        safeCatalogProducts.map((product) => [product.id, product]),
+      ),
+    },
+    cart: liveCart,
+    store: storeKnowledge,
+    settings: merchantSalesSettings,
+  });
+  const recommendationMetadata = Object.fromEntries(
+    rankedSalesCandidates.map((item) => [
+      item.product.id,
+      {
+        reasons: item.reasons,
+        recommendationType: item.recommendationType,
+        rank: item.rank,
+      },
+    ]),
+  );
   const systemPrompt = buildSalesAgentSystemPrompt({
     storeIdentity: storeInfo,
     allowedProducts: catalogInfo,
@@ -331,6 +454,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     urgencyLevel,
     cartValueGoal: formatPrice(settings.discountThreshold, currency),
     catalogStatus: contextSources.catalog.status,
+    salesContext,
   });
 
   const fallbackReply =
@@ -370,6 +494,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             [product],
             currency,
             variant ? { [product.id]: variant.id } : {},
+            recommendationMetadata,
           );
           const selectedOptions = variant
             ? formatSelectedVariantOptions(variant.selectedOptions)
@@ -391,6 +516,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             delta: deterministicReply,
             productCards,
             cartAction,
+            checkoutCta: salesState === "CLOSING",
+          });
+          await persistRecommendationCards({
+            shop,
+            sessionId: session.id,
+            profile: shopperProfile,
+            salesState,
+            cartValueBefore: liveCart.totalPrice,
+            primaryProductId: effectiveCartProductIds[0],
+            productCards,
           });
           await persistAssistantMessage(
             shop,
@@ -411,6 +546,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               safeCatalogProducts,
               currency,
             ),
+            checkoutCta: salesState === "CLOSING",
           });
           await persistAssistantMessage(
             shop,
@@ -443,10 +579,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           timeoutProfile:
             messageIntent === "checkout_assistance" ? "urgent" : "normal",
           fallback: JSON.stringify({
-            reply: fallbackReply,
+            message: fallbackReply,
+            intent: "support",
+            salesState,
+            profileUpdates: {},
+            objection: shopperProfile.currentObjection,
+            toolCalls: [],
+            recommendations: [],
             productIds: [],
             action: null,
             followUpQuestion: null,
+            shouldProactivelyFollowUp: false,
           }),
         });
         provider =
@@ -474,19 +617,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           fallback: fallbackReply,
         });
         finalReply = enforceReplyCurrency(finalReply, fallbackReply, currency);
-        const aiCartAction = toExecutableAiCartAction(
+        const proposedCartAction = toExecutableAiCartAction(
           validated.action,
           validated.products,
           userMessage,
         );
-        const productCards =
+        const aiCartAction = proposedCartAction
+          ? commerceTools.validateAddToCart(proposedCartAction, {
+              explicitlyRequested: isExplicitAddToCartRequest(userMessage),
+            }) || undefined
+          : undefined;
+        const productsForCards =
           validated.products.length > 0
+            ? validated.products
+            : shouldShowRankedProducts(messageIntent)
+              ? rankedSalesCandidates.map((item) => item.product)
+              : [];
+        const productCards =
+          productsForCards.length > 0
             ? getCatalogProductCards(
-                validated.products,
+                productsForCards,
                 currency,
                 aiCartAction
                   ? { [aiCartAction.productId]: aiCartAction.variantId }
                   : {},
+                recommendationMetadata,
               )
             : getReplyProductCards(finalReply, catalogProducts, currency);
         send({
@@ -494,6 +649,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           productCards,
           suggestedAction: validated.action,
           cartAction: aiCartAction,
+          checkoutCta:
+            salesState === "CLOSING" || messageIntent === "checkout_assistance",
+        });
+
+        await persistRecommendationCards({
+          shop,
+          sessionId: session.id,
+          profile: shopperProfile,
+          salesState,
+          cartValueBefore: liveCart.totalPrice,
+          primaryProductId: effectiveCartProductIds[0],
+          productCards,
         });
 
         await persistAssistantMessage(shop, session.id, finalReply, provider);
@@ -730,4 +897,52 @@ function isExplicitAddToCartRequest(value: string) {
       value,
     ) || /\badd to (?:my |the )?(?:cart|bag)\b/i.test(value)
   );
+}
+
+function shouldShowRankedProducts(messageIntent: string) {
+  return ["product_search", "price_sensitive", "comparison"].includes(
+    messageIntent,
+  );
+}
+
+function isRecommendationRejection(value: string) {
+  return /^(?:no(?: thanks)?|not that one|i don['’]?t like (?:it|that)|show (?:me )?(?:another|something else)|something else)\b/i.test(
+    value.trim(),
+  );
+}
+
+async function persistRecommendationCards(input: {
+  shop: string;
+  sessionId: string;
+  profile: ShopperProfile;
+  salesState: SalesState;
+  cartValueBefore: number | null;
+  primaryProductId?: string;
+  productCards: ChatProductCard[];
+}) {
+  const recommendations = input.productCards.flatMap((card) => {
+    if (!card.productId || !card.recommendationType) return [];
+    return [
+      {
+        productId: card.productId,
+        variantId: card.variantId || undefined,
+        primaryProductId:
+          card.recommendationType === "upsell"
+            ? input.primaryProductId
+            : undefined,
+        recommendationType: card.recommendationType,
+        reason: card.matchReasons.join("; ") || "Relevant verified match",
+        rank: card.rank || 1,
+      },
+    ];
+  });
+  if (recommendations.length === 0) return;
+  await recordRecommendationOutcomes({
+    shop: input.shop,
+    sessionId: input.sessionId,
+    profile: input.profile,
+    salesState: input.salesState,
+    cartValueBefore: input.cartValueBefore,
+    recommendations,
+  });
 }

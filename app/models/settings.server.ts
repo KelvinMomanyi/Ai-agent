@@ -10,6 +10,15 @@ export type PublicAppSettings = {
   exitIntentEnabled: boolean;
   postPurchaseEnabled: boolean;
   liveEventsEnabled: boolean;
+  proactiveMessagesEnabled: boolean;
+  proactiveDelaySeconds: number;
+  maxProactivePrompts: number;
+  maxProductRecommendations: number;
+  minimumProactiveConfidence: number;
+  minimumUpsellIntentScore: number;
+  hesitationDetectionEnabled: boolean;
+  bundleSupportEnabled: boolean;
+  analyticsEnabled: boolean;
 };
 
 export async function getAppSettings(shop: string) {
@@ -33,6 +42,15 @@ export function toPublicAppSettings(settings: AppSettings): PublicAppSettings {
     discountThreshold: Number(settings.discountThreshold),
     exitIntentEnabled: settings.exitIntentEnabled,
     postPurchaseEnabled: settings.postPurchaseEnabled,
+    proactiveMessagesEnabled: settings.proactiveMessagesEnabled,
+    proactiveDelaySeconds: settings.proactiveDelaySeconds,
+    maxProactivePrompts: settings.maxProactivePrompts,
+    maxProductRecommendations: settings.maxProductRecommendations,
+    minimumProactiveConfidence: settings.minimumProactiveConfidence,
+    minimumUpsellIntentScore: settings.minimumUpsellIntentScore,
+    hesitationDetectionEnabled: settings.hesitationDetectionEnabled,
+    bundleSupportEnabled: settings.bundleSupportEnabled,
+    analyticsEnabled: settings.analyticsEnabled,
     // Explicit opt-in: an absent, empty, or differently-cased value is off.
     liveEventsEnabled: isLiveEventsEnabled(),
   };

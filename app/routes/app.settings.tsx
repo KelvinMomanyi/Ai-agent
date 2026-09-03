@@ -55,6 +55,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           brandVoice: config.brandVoice || "",
           storeKnowledge: config.storeKnowledge || "",
           blockedProductIds: config.blockedProductIds.join(", "),
+          excludedCollectionIds: config.excludedCollectionIds.join(", "),
+          preferredProductIds: config.preferredProductIds.join(", "),
+          upsellPriorityProductIds: config.upsellPriorityProductIds.join(", "),
+          proactiveMessagesEnabled: config.proactiveMessagesEnabled,
+          proactiveDelaySeconds: String(config.proactiveDelaySeconds),
+          maxProactivePrompts: String(config.maxProactivePrompts),
+          maxProductRecommendations: String(config.maxProductRecommendations),
+          minimumProactiveConfidence: String(config.minimumProactiveConfidence),
+          minimumUpsellIntentScore: String(config.minimumUpsellIntentScore),
+          hesitationDetectionEnabled: config.hesitationDetectionEnabled,
+          discountPermission: config.discountPermission,
+          allowedDiscountCodes: config.allowedDiscountCodes.join(", "),
+          bundleSupportEnabled: config.bundleSupportEnabled,
+          analyticsEnabled: config.analyticsEnabled,
         }
       : {
           chatEnabled: true,
@@ -69,6 +83,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           brandVoice: "",
           storeKnowledge: "",
           blockedProductIds: "",
+          excludedCollectionIds: "",
+          preferredProductIds: "",
+          upsellPriorityProductIds: "",
+          proactiveMessagesEnabled: true,
+          proactiveDelaySeconds: "15",
+          maxProactivePrompts: "2",
+          maxProductRecommendations: "3",
+          minimumProactiveConfidence: "0.65",
+          minimumUpsellIntentScore: "55",
+          hesitationDetectionEnabled: true,
+          discountPermission: false,
+          allowedDiscountCodes: "",
+          bundleSupportEnabled: true,
+          analyticsEnabled: true,
         },
   });
 };
@@ -101,6 +129,54 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     .split(",")
     .map((id) => id.trim())
     .filter(Boolean);
+  const excludedCollectionIds = parseCsv(formData.get("excludedCollectionIds"));
+  const preferredProductIds = parseCsv(formData.get("preferredProductIds"));
+  const upsellPriorityProductIds = parseCsv(
+    formData.get("upsellPriorityProductIds"),
+  );
+  const proactiveMessagesEnabled = parseBoolean(
+    formData.get("proactiveMessagesEnabled"),
+  );
+  const proactiveDelaySeconds = parseBoundedNumber(
+    formData.get("proactiveDelaySeconds"),
+    15,
+    10,
+    120,
+  );
+  const maxProactivePrompts = parseBoundedNumber(
+    formData.get("maxProactivePrompts"),
+    2,
+    0,
+    5,
+  );
+  const maxProductRecommendations = parseBoundedNumber(
+    formData.get("maxProductRecommendations"),
+    3,
+    1,
+    4,
+  );
+  const minimumProactiveConfidence = parseBoundedNumber(
+    formData.get("minimumProactiveConfidence"),
+    0.65,
+    0,
+    1,
+    false,
+  );
+  const minimumUpsellIntentScore = parseBoundedNumber(
+    formData.get("minimumUpsellIntentScore"),
+    55,
+    0,
+    100,
+  );
+  const hesitationDetectionEnabled = parseBoolean(
+    formData.get("hesitationDetectionEnabled"),
+  );
+  const discountPermission = parseBoolean(formData.get("discountPermission"));
+  const allowedDiscountCodes = parseCsv(formData.get("allowedDiscountCodes"));
+  const bundleSupportEnabled = parseBoolean(
+    formData.get("bundleSupportEnabled"),
+  );
+  const analyticsEnabled = parseBoolean(formData.get("analyticsEnabled"));
 
   try {
     const config = await prisma.appSettings.upsert({
@@ -118,6 +194,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         brandVoice: brandVoice || null,
         storeKnowledge: storeKnowledge || null,
         blockedProductIds,
+        excludedCollectionIds,
+        preferredProductIds,
+        upsellPriorityProductIds,
+        proactiveMessagesEnabled,
+        proactiveDelaySeconds,
+        maxProactivePrompts,
+        maxProductRecommendations,
+        minimumProactiveConfidence,
+        minimumUpsellIntentScore,
+        hesitationDetectionEnabled,
+        discountPermission,
+        allowedDiscountCodes,
+        bundleSupportEnabled,
+        analyticsEnabled,
       },
       create: {
         shop: session.shop,
@@ -133,6 +223,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         brandVoice: brandVoice || null,
         storeKnowledge: storeKnowledge || null,
         blockedProductIds,
+        excludedCollectionIds,
+        preferredProductIds,
+        upsellPriorityProductIds,
+        proactiveMessagesEnabled,
+        proactiveDelaySeconds,
+        maxProactivePrompts,
+        maxProductRecommendations,
+        minimumProactiveConfidence,
+        minimumUpsellIntentScore,
+        hesitationDetectionEnabled,
+        discountPermission,
+        allowedDiscountCodes,
+        bundleSupportEnabled,
+        analyticsEnabled,
       },
     });
 
@@ -145,6 +249,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ...config,
         discountThreshold: config.discountThreshold.toString(),
         blockedProductIds: config.blockedProductIds.join(", "),
+        excludedCollectionIds: config.excludedCollectionIds.join(", "),
+        preferredProductIds: config.preferredProductIds.join(", "),
+        upsellPriorityProductIds: config.upsellPriorityProductIds.join(", "),
+        allowedDiscountCodes: config.allowedDiscountCodes.join(", "),
       },
     });
   } catch (error) {
@@ -175,6 +283,20 @@ export default function Settings() {
     brandVoice: config.brandVoice,
     storeKnowledge: config.storeKnowledge,
     blockedProductIds: config.blockedProductIds,
+    excludedCollectionIds: config.excludedCollectionIds,
+    preferredProductIds: config.preferredProductIds,
+    upsellPriorityProductIds: config.upsellPriorityProductIds,
+    proactiveMessagesEnabled: config.proactiveMessagesEnabled,
+    proactiveDelaySeconds: config.proactiveDelaySeconds,
+    maxProactivePrompts: config.maxProactivePrompts,
+    maxProductRecommendations: config.maxProductRecommendations,
+    minimumProactiveConfidence: config.minimumProactiveConfidence,
+    minimumUpsellIntentScore: config.minimumUpsellIntentScore,
+    hesitationDetectionEnabled: config.hesitationDetectionEnabled,
+    discountPermission: config.discountPermission,
+    allowedDiscountCodes: config.allowedDiscountCodes,
+    bundleSupportEnabled: config.bundleSupportEnabled,
+    analyticsEnabled: config.analyticsEnabled,
   });
 
   const isSaving =
@@ -190,6 +312,13 @@ export default function Settings() {
         discountNudgeEnabled: String(formState.discountNudgeEnabled),
         exitIntentEnabled: String(formState.exitIntentEnabled),
         postPurchaseEnabled: String(formState.postPurchaseEnabled),
+        proactiveMessagesEnabled: String(formState.proactiveMessagesEnabled),
+        hesitationDetectionEnabled: String(
+          formState.hesitationDetectionEnabled,
+        ),
+        discountPermission: String(formState.discountPermission),
+        bundleSupportEnabled: String(formState.bundleSupportEnabled),
+        analyticsEnabled: String(formState.analyticsEnabled),
       },
       { method: "post" },
     );
@@ -300,6 +429,158 @@ export default function Settings() {
             <BlockStack gap="400">
               <BlockStack gap="200">
                 <Text as="h2" variant="headingMd">
+                  Sales behavior and proactive assistance
+                </Text>
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  Control when the assistant may approach shoppers and the
+                  guardrails used for recommendations and upsells.
+                </Text>
+              </BlockStack>
+
+              <FormLayout>
+                <InlineStack gap="400" wrap>
+                  <Checkbox
+                    label="Proactive messages"
+                    checked={formState.proactiveMessagesEnabled}
+                    onChange={(checked) =>
+                      setFormState({
+                        ...formState,
+                        proactiveMessagesEnabled: checked,
+                      })
+                    }
+                  />
+                  <Checkbox
+                    label="Hesitation detection"
+                    checked={formState.hesitationDetectionEnabled}
+                    onChange={(checked) =>
+                      setFormState({
+                        ...formState,
+                        hesitationDetectionEnabled: checked,
+                      })
+                    }
+                  />
+                  <Checkbox
+                    label="Sales analytics"
+                    checked={formState.analyticsEnabled}
+                    onChange={(checked) =>
+                      setFormState({ ...formState, analyticsEnabled: checked })
+                    }
+                  />
+                </InlineStack>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: "16px",
+                  }}
+                >
+                  <TextField
+                    label="Proactive delay"
+                    type="number"
+                    suffix="seconds"
+                    value={formState.proactiveDelaySeconds}
+                    onChange={(value) =>
+                      setFormState({
+                        ...formState,
+                        proactiveDelaySeconds: value,
+                      })
+                    }
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Prompt limit per session"
+                    type="number"
+                    value={formState.maxProactivePrompts}
+                    onChange={(value) =>
+                      setFormState({ ...formState, maxProactivePrompts: value })
+                    }
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Products per recommendation"
+                    type="number"
+                    value={formState.maxProductRecommendations}
+                    onChange={(value) =>
+                      setFormState({
+                        ...formState,
+                        maxProductRecommendations: value,
+                      })
+                    }
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Minimum proactive confidence"
+                    type="number"
+                    value={formState.minimumProactiveConfidence}
+                    onChange={(value) =>
+                      setFormState({
+                        ...formState,
+                        minimumProactiveConfidence: value,
+                      })
+                    }
+                    autoComplete="off"
+                    helpText="Use a value from 0 to 1."
+                  />
+                  <TextField
+                    label="Minimum intent before upsell"
+                    type="number"
+                    value={formState.minimumUpsellIntentScore}
+                    onChange={(value) =>
+                      setFormState({
+                        ...formState,
+                        minimumUpsellIntentScore: value,
+                      })
+                    }
+                    autoComplete="off"
+                    helpText="Use a score from 0 to 100."
+                  />
+                </div>
+
+                <TextField
+                  label="Preferred product GIDs"
+                  value={formState.preferredProductIds}
+                  onChange={(value) =>
+                    setFormState({ ...formState, preferredProductIds: value })
+                  }
+                  multiline={2}
+                  autoComplete="off"
+                  helpText="Comma-separated products to favor only after customer fit."
+                />
+                <TextField
+                  label="Upsell priority product GIDs"
+                  value={formState.upsellPriorityProductIds}
+                  onChange={(value) =>
+                    setFormState({
+                      ...formState,
+                      upsellPriorityProductIds: value,
+                    })
+                  }
+                  multiline={2}
+                  autoComplete="off"
+                />
+                <TextField
+                  label="Excluded collection GIDs"
+                  value={formState.excludedCollectionIds}
+                  onChange={(value) =>
+                    setFormState({
+                      ...formState,
+                      excludedCollectionIds: value,
+                    })
+                  }
+                  multiline={2}
+                  autoComplete="off"
+                />
+              </FormLayout>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <BlockStack gap="200">
+                <Text as="h2" variant="headingMd">
                   AI Sales Assistant & Personality
                 </Text>
                 <Text as="p" variant="bodyMd" tone="subdued">
@@ -371,6 +652,40 @@ export default function Settings() {
                   autoComplete="off"
                   helpText="Comma-separated Shopify Product GIDs to completely exclude from any recommended upsells."
                 />
+
+                <InlineStack gap="400" wrap>
+                  <Checkbox
+                    label="Bundle suggestions"
+                    checked={formState.bundleSupportEnabled}
+                    onChange={(checked) =>
+                      setFormState({
+                        ...formState,
+                        bundleSupportEnabled: checked,
+                      })
+                    }
+                  />
+                  <Checkbox
+                    label="Allow configured discount codes"
+                    checked={formState.discountPermission}
+                    onChange={(checked) =>
+                      setFormState({
+                        ...formState,
+                        discountPermission: checked,
+                      })
+                    }
+                  />
+                </InlineStack>
+
+                <TextField
+                  label="Allowed discount codes"
+                  value={formState.allowedDiscountCodes}
+                  onChange={(value) =>
+                    setFormState({ ...formState, allowedDiscountCodes: value })
+                  }
+                  autoComplete="off"
+                  helpText="Comma-separated allowlist. The agent cannot invent or apply other codes."
+                  disabled={!formState.discountPermission}
+                />
               </FormLayout>
             </BlockStack>
           </Card>
@@ -426,4 +741,29 @@ export default function Settings() {
 
 function parseBoolean(value: FormDataEntryValue | null) {
   return value === "true" || value === "on";
+}
+
+function parseCsv(value: FormDataEntryValue | null) {
+  return Array.from(
+    new Set(
+      String(value || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 500);
+}
+
+function parseBoundedNumber(
+  value: FormDataEntryValue | null,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+  integer = true,
+) {
+  const parsed = Number(value);
+  const bounded = Number.isFinite(parsed)
+    ? Math.min(Math.max(parsed, minimum), maximum)
+    : fallback;
+  return integer ? Math.round(bounded) : bounded;
 }

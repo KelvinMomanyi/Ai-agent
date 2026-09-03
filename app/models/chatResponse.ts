@@ -23,6 +23,11 @@ export type ChatProductCard = {
   variantId: string;
   imageUrl: string | null;
   price: string;
+  compareAtPrice: string | null;
+  availableForSale: boolean;
+  matchReasons: string[];
+  recommendationType: "primary" | "value" | "premium" | "upsell" | null;
+  rank: number | null;
   variants: Array<{
     id: string;
     title: string;
@@ -48,6 +53,7 @@ export type CurrencyInfo = {
 };
 
 export type GroundedAiChatResponse = {
+  message?: unknown;
   reply?: unknown;
   productIds?: unknown;
   action?: unknown;
@@ -68,6 +74,7 @@ export type RequestedCartSelection = {
 };
 
 export type GroundedCartItem = {
+  lineId?: string;
   product: CatalogProduct | null;
   productId: string;
   variantId: string;
@@ -151,6 +158,7 @@ export function normalizeLiveCartContext(
 
     return [
       {
+        lineId: cleanPromptText(item.lineId, 160),
         product,
         productId: product?.id || suppliedProductId,
         variantId: variant?.id || suppliedVariantId,
@@ -469,9 +477,11 @@ export function validateGroundedAiChatResponse(input: {
   userMessage?: string;
 }): ValidatedChatResponse {
   const reply =
-    typeof input.value?.reply === "string"
-      ? input.value.reply.trim().slice(0, 2_000)
-      : "";
+    typeof input.value?.message === "string"
+      ? input.value.message.trim().slice(0, 2_000)
+      : typeof input.value?.reply === "string"
+        ? input.value.reply.trim().slice(0, 2_000)
+        : "";
   if (
     !reply ||
     containsModelSuppliedPrice(reply) ||
@@ -550,6 +560,14 @@ export function getCatalogProductCards(
   products: CatalogProduct[],
   currency: CurrencyInfo,
   selectedVariantIds: Record<string, string> = {},
+  recommendationMetadata: Record<
+    string,
+    {
+      reasons?: string[];
+      recommendationType?: "primary" | "value" | "premium" | "upsell";
+      rank?: number;
+    }
+  > = {},
 ): ChatProductCard[] {
   return products.slice(0, 4).map((product) => {
     const availableVariants = product.variants.filter(
@@ -573,6 +591,20 @@ export function getCatalogProductCards(
       variantId,
       imageUrl: product.imageUrl || product.image || null,
       price: formatPrice(product.price, currency),
+      compareAtPrice:
+        product.compareAtPrice &&
+        Number(product.compareAtPrice) > Number(product.price)
+          ? formatPrice(product.compareAtPrice, currency)
+          : null,
+      availableForSale:
+        product.availableForSale && availableVariants.length > 0,
+      matchReasons: (recommendationMetadata[product.id]?.reasons || [])
+        .map((reason) => cleanPromptText(reason, 120))
+        .filter(Boolean)
+        .slice(0, 4),
+      recommendationType:
+        recommendationMetadata[product.id]?.recommendationType || null,
+      rank: recommendationMetadata[product.id]?.rank || null,
       variants: renderedVariants.map((variant) => ({
         id: variant.id,
         title: variant.title,

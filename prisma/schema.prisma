@@ -127,12 +127,22 @@ model ShopperSession {
   id               String         @id @default(cuid())
   shop             String
   anonymousId      String
+  customerId       String?
+  startedAt        DateTime       @default(now())
+  lastActivityAt   DateTime       @default(now())
   journeyStage     String         @default("discovering")
+  salesState       String         @default("BROWSING")
   intentScore      Float          @default(0)
   hesitationScore  Float          @default(0)
+  shopperProfile   Json           @default("{}")
   viewedProductIds String[]       @default([])
   cartProductIds   String[]       @default([])
   chatEngaged      Boolean        @default(false)
+  checkoutStarted  Boolean        @default(false)
+  purchaseCompleted Boolean       @default(false)
+  orderId          String?
+  orderValue       Decimal?       @db.Decimal(18, 2)
+  aiAttributedRevenue Decimal     @default(0) @db.Decimal(18, 2)
   totalPageViews   Int            @default(0)
   sessionDuration  Int            @default(0)
   context          Json           @default("{}")
@@ -141,9 +151,13 @@ model ShopperSession {
   events           ShopperEvent[]
   offers           Offer[]
   chatMessages     ChatMessage[]
+  recommendationOutcomes RecommendationOutcome[]
 
   @@unique([shop, anonymousId])
   @@index([shop, updatedAt])
+  @@index([shop, lastActivityAt])
+  @@index([shop, salesState, updatedAt])
+  @@index([shop, orderId])
 }
 
 model ShopperEvent {
@@ -229,8 +243,53 @@ model AppSettings {
   brandVoice           String?
   storeKnowledge       String?
   blockedProductIds    String[] @default([])
+  excludedCollectionIds String[] @default([])
+  preferredProductIds  String[] @default([])
+  upsellPriorityProductIds String[] @default([])
+  proactiveMessagesEnabled Boolean @default(true)
+  proactiveDelaySeconds Int @default(15)
+  maxProactivePrompts   Int @default(2)
+  maxProductRecommendations Int @default(3)
+  minimumProactiveConfidence Float @default(0.65)
+  minimumUpsellIntentScore Int @default(55)
+  hesitationDetectionEnabled Boolean @default(true)
+  discountPermission   Boolean @default(false)
+  allowedDiscountCodes String[] @default([])
+  bundleSupportEnabled Boolean @default(true)
+  analyticsEnabled     Boolean @default(true)
   bundleDiscountId     String?
   updatedAt            DateTime @updatedAt
+}
+
+model RecommendationOutcome {
+  id                     String         @id @default(cuid())
+  shop                   String
+  sessionId              String
+  productId              String
+  variantId              String?
+  primaryProductId       String?
+  recommendationType     String
+  reason                 String
+  rank                   Int
+  shopperProfileSnapshot Json           @default("{}")
+  salesState             String
+  shownAt                DateTime       @default(now())
+  clickedAt              DateTime?
+  addedAt                DateTime?
+  purchasedAt            DateTime?
+  rejectedAt             DateTime?
+  rejectionReason        String?
+  orderId                String?
+  revenue                Decimal?       @db.Decimal(18, 2)
+  cartValueBefore        Decimal?       @db.Decimal(18, 2)
+  cartValueAfter         Decimal?       @db.Decimal(18, 2)
+  metadata               Json           @default("{}")
+  session                ShopperSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([shop, productId, shownAt])
+  @@index([sessionId, shownAt])
+  @@index([shop, orderId])
+  @@index([shop, recommendationType, shownAt])
 }
 
 model CatalogSyncJob {

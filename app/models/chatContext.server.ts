@@ -139,7 +139,9 @@ export function buildVisitorBehaviorContext(input: {
   const recentSearchQueries = Array.from(
     new Set(
       recentEvents
-        .filter((event) => ["search", "search_query"].includes(event.type))
+        .filter((event) =>
+          ["search", "search_query", "search_performed"].includes(event.type),
+        )
         .map((event) => cleanText(asRecord(event.payload).query, 120))
         .filter(Boolean),
     ),

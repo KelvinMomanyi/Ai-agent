@@ -147,9 +147,16 @@ export class WidgetManager {
       if (active.length !== parsed.length) {
         localStorage.setItem(DISMISSED_KEY, JSON.stringify(active));
       }
-      return active
+      const dismissed = active
         .map((entry: any) => String(entry.widgetType || ""))
         .filter(Boolean);
+      if (
+        sessionStorage.getItem("aovboost_chat_dismissed_session") === "true" &&
+        !dismissed.includes("chat")
+      ) {
+        dismissed.push("chat");
+      }
+      return dismissed;
     } catch {
       return [];
     }
@@ -354,7 +361,10 @@ function getCurrentPageType() {
       "",
   ).toLowerCase();
   if (pathname === "/") return "home";
-  if (/\/collections(?:\/|$)/.test(pathname) || template.includes("collection")) {
+  if (
+    /\/collections(?:\/|$)/.test(pathname) ||
+    template.includes("collection")
+  ) {
     return "collection";
   }
   if (/\/products(?:\/|$)/.test(pathname) || template.includes("product")) {

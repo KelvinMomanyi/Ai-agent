@@ -16,9 +16,13 @@ type TriggerPayload = Record<string, unknown>;
 
 const CART_IDLE_MS = 10 * 60 * 1000;
 const INACTIVITY_MS = 5 * 60 * 1000;
-const PRODUCT_DWELL_MS = 30 * 1000;
 
 const TRIGGERS = {
+  collection_dwell: {
+    category: "browsing_behavior",
+    widgetHint: "chat",
+    throttleMs: 60 * 1000,
+  },
   long_product_dwell: {
     category: "browsing_behavior",
     widgetHint: "chat",
@@ -26,7 +30,7 @@ const TRIGGERS = {
   },
   repeated_product_view: {
     category: "browsing_behavior",
-    widgetHint: "bundle",
+    widgetHint: "chat",
     throttleMs: 60 * 1000,
   },
   scroll_depth_interest: {
@@ -116,6 +120,11 @@ const TRIGGERS = {
     widgetHint: "chat",
     oncePerSession: true,
     requestOffer: false,
+  },
+  returning_shopper: {
+    category: "customer_profile_loyalty",
+    widgetHint: "chat",
+    oncePerSession: true,
   },
   flash_sale_window: {
     category: "time_based",
@@ -225,7 +234,11 @@ export class TriggerRouter {
     ) as AovboostEvent;
     if (!detail.type) return;
 
-    if (detail.type === "product_view") {
+    if (
+      detail.type === "product_view" ||
+      detail.type === "product_viewed" ||
+      detail.type === "product_revisited"
+    ) {
       this.scheduleProductDwell(String(detail.productId || ""));
       this.handleRepeatedProductView(String(detail.productId || ""));
     }
@@ -237,7 +250,24 @@ export class TriggerRouter {
     }
 
     if (
-      detail.type === "search" &&
+      detail.type === "scroll_depth" &&
+      Number(detail.depth || 0) >= 25 &&
+      isCollectionPage()
+    ) {
+      const snapshot = this.options.sessionManager.getSnapshot();
+      const delay = Number(
+        this.options.sessionManager.getSettings().proactiveDelaySeconds || 15,
+      );
+      if (snapshot.sessionDuration >= delay) {
+        this.fire("collection_dwell", {
+          depth: Number(detail.depth || 0),
+          dwellSeconds: snapshot.sessionDuration,
+        });
+      }
+    }
+
+    if (
+      (detail.type === "search" || detail.type === "search_performed") &&
       String(detail.query || "").trim().length >= 2
     ) {
       this.fire("search_query", {
@@ -257,7 +287,26 @@ export class TriggerRouter {
       this.handleCartState(detail);
     }
 
-    if (detail.type === "checkout_start") {
+    if (
+      detail.type === "cart_closed" &&
+      this.options.sessionManager.getSnapshot().hesitationScore >= 55
+    ) {
+      this.setTimer(
+        "cart_hesitation",
+        () => {
+          this.fire("inactivity_timeout", {
+            reason: "cart_hesitation",
+            idleSeconds: 15,
+          });
+        },
+        15_000,
+      );
+    }
+
+    if (
+      detail.type === "checkout_start" ||
+      detail.type === "checkout_started"
+    ) {
       this.fire("checkout_started", {
         path: detail.path || window.location.pathname,
       });
@@ -290,15 +339,19 @@ export class TriggerRouter {
     this.clearTimer("product_dwell");
     if (!productId || !isProductPage()) return;
 
+    const configuredDelay = Number(
+      this.options.sessionManager.getSettings().proactiveDelaySeconds || 15,
+    );
+    const dwellMs = Math.min(Math.max(configuredDelay, 10), 120) * 1000;
     this.setTimer(
       "product_dwell",
       () => {
         this.fire("long_product_dwell", {
           productId,
-          dwellSeconds: PRODUCT_DWELL_MS / 1000,
+          dwellSeconds: dwellMs / 1000,
         });
       },
-      PRODUCT_DWELL_MS,
+      dwellMs,
     );
   }
 
@@ -418,6 +471,9 @@ export class TriggerRouter {
       this.setTimer(
         "inactivity",
         () => {
+          this.options.eventBus.track("idle", {
+            idleSeconds: INACTIVITY_MS / 1000,
+          });
           this.fire("inactivity_timeout", {
             idleSeconds: INACTIVITY_MS / 1000,
           });
@@ -438,7 +494,18 @@ export class TriggerRouter {
   private installFirstTimeVisitorTracking(): void {
     try {
       const key = "aovboost_returning_visitor";
-      if (window.localStorage.getItem(key) === "true") return;
+      if (window.localStorage.getItem(key) === "true") {
+        const delay = Number(
+          this.options.sessionManager.getSettings().proactiveDelaySeconds || 15,
+        );
+        window.setTimeout(
+          () => {
+            this.fire("returning_shopper", { path: window.location.pathname });
+          },
+          Math.min(Math.max(delay, 10), 120) * 1000,
+        );
+        return;
+      }
       window.localStorage.setItem(key, "true");
       window.setTimeout(() => {
         this.fire("first_time_visitor", { path: window.location.pathname });
@@ -499,9 +566,7 @@ export class TriggerRouter {
       const cart = await this.readCart();
       const payload = { ...basePayload, ...cart };
       this.fire(trigger, payload);
-      if (cart.cartProductIds.length > 0 || cart.cartValue > 0) {
-        this.options.eventBus.track("cart_update", payload);
-      }
+      this.options.eventBus.track("cart_update", payload);
       this.handleCartState(payload);
     }, 350);
   }
@@ -651,6 +716,10 @@ function isProductPage() {
     /\/products(?:\/|$)/.test(window.location.pathname) ||
     Boolean(getCurrentProductId())
   );
+}
+
+function isCollectionPage() {
+  return /\/collections(?:\/|$)/.test(window.location.pathname);
 }
 
 function isThankYouPage() {

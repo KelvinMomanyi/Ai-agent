@@ -26,6 +26,9 @@ export class EventBus {
   private originalXhrOpen: typeof XMLHttpRequest.prototype.open | null = null;
   private originalXhrSend: typeof XMLHttpRequest.prototype.send | null = null;
   private authFlushInFlight = false;
+  private searchTimer: number | undefined;
+  private lastSearchQuery = "";
+  private recentEventKeys = new Map<string, number>();
 
   constructor(private options: EventBusOptions) {}
 
@@ -36,6 +39,7 @@ export class EventBus {
     this.installScrollTracking();
     this.installHoverTracking();
     this.installSearchTracking();
+    this.installCommerceInteractionTracking();
 
     document.addEventListener("add-to-cart", ((event: CustomEvent) => {
       this.track("add_to_cart", normalizePayload(event.detail));
@@ -50,9 +54,21 @@ export class EventBus {
   }
 
   track(type: string, payload: EventPayload = {}): void {
+    const now = Date.now();
+    const dedupeKey = getDedupeKey(type, payload);
+    if (dedupeKey) {
+      const previous = this.recentEventKeys.get(dedupeKey) || 0;
+      if (now - previous < 750) return;
+      this.recentEventKeys.set(dedupeKey, now);
+      if (this.recentEventKeys.size > 100) {
+        for (const [key, timestamp] of this.recentEventKeys) {
+          if (now - timestamp > 5_000) this.recentEventKeys.delete(key);
+        }
+      }
+    }
     const event: AovboostEvent = {
       type,
-      ts: Date.now(),
+      ts: now,
       sessionId: this.options.sessionManager.anonymousId,
       shop: this.options.shop,
       url: window.location.href,
@@ -173,13 +189,21 @@ export class EventBus {
     this.track("page_view", { pageType: getPageType() });
 
     if (isCheckoutPage()) {
-      this.track("checkout_start", { path: window.location.pathname });
+      this.track("checkout_started", { path: window.location.pathname });
+    }
+
+    if (/\/cart(?:\/|$)/.test(window.location.pathname)) {
+      this.track("cart_opened", { source: "cart_page" });
     }
 
     const product = getShopifyProduct();
     if (product) {
-      this.track("product_view", {
-        productId: toProductGid(product.gid || product.id),
+      const productId = toProductGid(product.gid || product.id);
+      const revisited = this.options.sessionManager
+        .getSnapshot()
+        .viewedProductIds.includes(productId);
+      this.track(revisited ? "product_revisited" : "product_viewed", {
+        productId,
         handle: product.handle,
         title: product.title,
       });
@@ -187,7 +211,7 @@ export class EventBus {
 
     const collection = getShopifyCollection();
     if (collection || window.location.pathname.includes("/collections/")) {
-      this.track("collection_view", {
+      this.track("collection_viewed", {
         collectionId: String(collection?.id || ""),
         handle: collection?.handle || getHandleFromPath("/collections/"),
         title: collection?.title,
@@ -216,12 +240,18 @@ export class EventBus {
             });
           });
         } else if (isCartChangeUrl(requestUrl) && response.ok) {
-          this.track("remove_from_cart", {
-            ...getCartPayload(init?.body),
-            requestUrl,
-          });
+          const payload = getCartPayload(init?.body);
+          this.track(
+            Number(payload.quantity) === 0
+              ? "remove_from_cart"
+              : "quantity_changed",
+            {
+              ...payload,
+              requestUrl,
+            },
+          );
         } else if (isSearchUrl(requestUrl)) {
-          this.track("search", {
+          this.track("search_performed", {
             query: getSearchQuery(requestUrl),
             requestUrl,
           });
@@ -245,6 +275,8 @@ export class EventBus {
 
     const trackVerifiedAdd = (payload: EventPayload) =>
       this.track("add_to_cart", payload);
+    const trackVerifiedMutation = (type: string, payload: EventPayload) =>
+      this.track(type, payload);
     const prototype = XMLHttpRequest.prototype;
     this.originalXhrOpen = prototype.open;
     this.originalXhrSend = prototype.send;
@@ -273,7 +305,9 @@ export class EventBus {
       return (originalOpen as any).call(this, method, url);
     };
 
-    prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
+    prototype.send = function (
+      body?: Document | XMLHttpRequestBodyInit | null,
+    ) {
       const requestUrl =
         (this as XMLHttpRequest & { __aovboostUrl?: string }).__aovboostUrl ||
         "";
@@ -295,6 +329,24 @@ export class EventBus {
           },
           { once: true },
         );
+      } else if (isCartChangeUrl(requestUrl)) {
+        this.addEventListener(
+          "load",
+          () => {
+            if (this.status < 200 || this.status >= 300) return;
+            trackVerifiedMutation(
+              Number(requestPayload.quantity) === 0
+                ? "remove_from_cart"
+                : "quantity_changed",
+              {
+                ...requestPayload,
+                source: "verified_xhr_response",
+                requestUrl,
+              },
+            );
+          },
+          { once: true },
+        );
       }
       return originalSend.call(this, body);
     };
@@ -309,7 +361,8 @@ export class EventBus {
         waiting = true;
         window.setTimeout(() => {
           waiting = false;
-          const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+          const maxScroll =
+            document.documentElement.scrollHeight - window.innerHeight;
           if (maxScroll <= 0) return;
           const percent = Math.round((window.scrollY / maxScroll) * 100);
           [25, 50, 75, 90].forEach((depth) => {
@@ -353,11 +406,82 @@ export class EventBus {
       (event) => {
         const target = event.target as HTMLInputElement | null;
         if (!target) return;
-        const name = `${target.name || ""} ${target.id || ""} ${target.type || ""}`.toLowerCase();
+        const name =
+          `${target.name || ""} ${target.id || ""} ${target.type || ""}`.toLowerCase();
         if (!name.includes("search")) return;
         const query = target.value.trim();
         if (query.length < 2) return;
-        this.track("search", { query, source: "predictive_input" });
+        if (this.searchTimer) window.clearTimeout(this.searchTimer);
+        this.searchTimer = window.setTimeout(() => {
+          if (query === this.lastSearchQuery) return;
+          this.lastSearchQuery = query;
+          this.track("search_performed", {
+            query,
+            source: "predictive_input",
+          });
+        }, 500);
+      },
+      true,
+    );
+  }
+
+  private installCommerceInteractionTracking(): void {
+    document.addEventListener(
+      "click",
+      (event) => {
+        const target = event.target as HTMLElement | null;
+        if (!target) return;
+        const checkout = target.closest(
+          "a[href*='/checkout'], button[name='checkout'], [data-checkout]",
+        );
+        if (checkout) {
+          this.track("checkout_clicked", { source: "storefront_control" });
+          return;
+        }
+        const cartOpen = target.closest(
+          "a[href='/cart'], [data-cart-open], [aria-controls*='cart'], .cart-icon-bubble",
+        );
+        if (cartOpen) {
+          this.track("cart_opened", { source: "storefront_control" });
+          return;
+        }
+        const cartClose = target.closest(
+          "[data-cart-close], .drawer__close, [aria-label*='Close cart'], [aria-label*='close cart']",
+        );
+        if (cartClose) {
+          this.track("cart_closed", { source: "storefront_control" });
+        }
+      },
+      true,
+    );
+
+    document.addEventListener(
+      "change",
+      (event) => {
+        const target = event.target as
+          HTMLInputElement | HTMLSelectElement | null;
+        if (!target) return;
+        const identity =
+          `${target.name || ""} ${target.id || ""}`.toLowerCase();
+        if (/quantity|updates\[/.test(identity)) {
+          this.track("quantity_changed", {
+            productId: getCurrentProductId(),
+            quantity: Number(target.value || 0),
+            source: "storefront_control",
+          });
+          return;
+        }
+        if (/variant|option|size|color|colour/.test(identity)) {
+          this.track("variant_selected", {
+            productId: getCurrentProductId(),
+            variantId: /variant/.test(identity)
+              ? toVariantGid(target.value)
+              : "",
+            optionName: target.name || target.id || "",
+            optionValue: target.value,
+            source: "storefront_control",
+          });
+        }
       },
       true,
     );
@@ -377,7 +501,9 @@ function getShopifyProduct(): Record<string, unknown> | null {
 
 function getShopifyCollection(): Record<string, unknown> | null {
   const win = window as any;
-  return win.Shopify?.collection || win.ShopifyAnalytics?.meta?.collection || null;
+  return (
+    win.Shopify?.collection || win.ShopifyAnalytics?.meta?.collection || null
+  );
 }
 
 function getPageType() {
@@ -396,7 +522,9 @@ function isCheckoutPage() {
 function getHandleFromPath(prefix: string) {
   const index = window.location.pathname.indexOf(prefix);
   if (index === -1) return "";
-  return window.location.pathname.slice(index + prefix.length).split("/")[0] || "";
+  return (
+    window.location.pathname.slice(index + prefix.length).split("/")[0] || ""
+  );
 }
 
 function getRequestUrl(request: RequestInfo | URL) {
@@ -433,7 +561,10 @@ function getCartPayload(body: BodyInit | null | undefined) {
       quantity: Number(body.get("quantity") || 1),
     };
   }
-  if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) {
+  if (
+    typeof URLSearchParams !== "undefined" &&
+    body instanceof URLSearchParams
+  ) {
     return {
       variantId: String(body.get("id") || body.get("items[0][id]") || ""),
       quantity: Number(body.get("quantity") || 1),
@@ -459,6 +590,31 @@ function getCartPayload(body: BodyInit | null | undefined) {
   } catch {
     return {};
   }
+}
+
+function getDedupeKey(type: string, payload: EventPayload) {
+  if (
+    ![
+      "add_to_cart",
+      "remove_from_cart",
+      "quantity_changed",
+      "cart_opened",
+      "cart_closed",
+    ].includes(type)
+  ) {
+    return "";
+  }
+  return [
+    type,
+    String(payload.productId || ""),
+    String(payload.variantId || ""),
+    String(payload.quantity || ""),
+  ].join(":");
+}
+
+function getCurrentProductId() {
+  const product = getShopifyProduct();
+  return product ? toProductGid(product.gid || product.id) : "";
 }
 
 async function readCartAddResponse(response: Response) {

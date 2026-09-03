@@ -1,4 +1,8 @@
-import { data as json, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
+import {
+  data as json,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "react-router";
 import prisma from "../db.server";
 import { ingestStorefrontEvents } from "../models/event.server";
 import type { StorefrontEvent } from "../models/session.server";
@@ -36,10 +40,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
     const body = (await request.json()) as EventsBody;
     const auth = authenticateStorefrontRequest(request, body);
-    const { shop, sessionId } = auth;
+    const { shop, sessionId, customerId } = auth;
 
     if (!shop || !(await isInstalledShop(shop))) {
-      return json({ ok: false, error: "Invalid shop" }, { status: 401, headers: withCors() });
+      return json(
+        { ok: false, error: "Invalid shop" },
+        { status: 401, headers: withCors() },
+      );
     }
 
     if (!Array.isArray(body.events) || body.events.length > 100) {
@@ -76,6 +83,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await ingestStorefrontEvents({
       shop,
       sessionId,
+      customerId,
       events: events.map((event) => ({ ...event, shop, sessionId })),
     });
 
@@ -108,7 +116,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 async function isInstalledShop(shop: string) {
   const [session, legacyShop] = await Promise.all([
     prisma.session.findFirst({ where: { shop }, select: { id: true } }),
-    prisma.shop.findUnique({ where: { shopDomain: shop }, select: { shopDomain: true } }),
+    prisma.shop.findUnique({
+      where: { shopDomain: shop },
+      select: { shopDomain: true },
+    }),
   ]);
 
   return Boolean(session || legacyShop);
@@ -121,7 +132,9 @@ function getErrorMessage(error: unknown) {
 function sanitizeEvent(value: unknown): StorefrontEvent | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const event = value as Record<string, unknown>;
-  const type = String(event.type || "").trim().slice(0, 64);
+  const type = String(event.type || "")
+    .trim()
+    .slice(0, 64);
   if (!/^[a-z][a-z0-9_:-]*$/i.test(type)) return null;
 
   const timestamp = Number(event.ts);
