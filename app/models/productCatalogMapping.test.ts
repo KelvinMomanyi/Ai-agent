@@ -116,10 +116,16 @@ describe("Shopify catalog safety mapping", () => {
     ).toBe("gid://shopify/ProductVariant/11");
   });
 
-  it("rejects products that are not published to the Online Store", () => {
-    expect(
-      mapAdminCatalogProductNode(adminProduct({ onlineStoreUrl: null })),
-    ).toBeNull();
+  it("keeps active sellable products when Shopify omits onlineStoreUrl", () => {
+    const product = mapAdminCatalogProductNode(
+      adminProduct({ onlineStoreUrl: null }),
+    );
+
+    expect(product).not.toBeNull();
+    expect(product?.metafields).toMatchObject({
+      "aovboost.availableForSale": { value: "true" },
+      "aovboost.onlineStorePublished": { value: "false" },
+    });
   });
 
   it("stores a plain-text product description and featured image for grounding", () => {
@@ -215,7 +221,11 @@ describe("Shopify catalog safety mapping", () => {
       "gid://shopify/ProductVariant/201",
     );
 
-    expect(mapProductWebhook({ ...base, published_at: null })).toBeNull();
+    expect(
+      mapProductWebhook({ ...base, published_at: null })?.metafields,
+    ).toMatchObject({
+      "aovboost.onlineStorePublished": { value: "false" },
+    });
     const unavailable = mapProductWebhook({
       ...base,
       variants: [

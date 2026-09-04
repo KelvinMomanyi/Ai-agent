@@ -61,12 +61,12 @@ export function mapAdminCatalogProductNode(
   options: VariantMappingOptions = {},
 ): ShopifyProductInput | null {
   if (!node?.id || !node?.handle) return null;
-  if (
-    Object.prototype.hasOwnProperty.call(node, "onlineStoreUrl") &&
-    !node.onlineStoreUrl
-  ) {
-    return null;
-  }
+
+  // onlineStoreUrl is not a reliable catalog-eligibility signal. Shopify can
+  // return null for active, sellable products exposed through another
+  // storefront publication (including headless/catalog channels). Treat the
+  // active-products query and canonical variant availability as the source of
+  // truth, then let recommendation guards exclude unavailable variants.
 
   const variants: SyncedProductVariant[] = (
     node.variants?.edges ||
@@ -116,6 +116,9 @@ export function mapAdminCatalogProductNode(
   metafields["aovboost.variantsTruncated"] = booleanMetafield(
     Boolean(node.variants?.pageInfo?.hasNextPage),
   );
+  metafields["aovboost.onlineStorePublished"] = booleanMetafield(
+    Boolean(node.onlineStoreUrl),
+  );
   const description = normalizeProductDescription(
     node.description || node.descriptionHtml,
   );
@@ -164,7 +167,6 @@ export function mapProductWebhook(
     : product.publishedAt;
 
   if (!productId || !handle || (status && status !== "active")) return null;
-  if (publishedAt === null || publishedAt === "") return null;
 
   const sourceVariants = Array.isArray(product.variants)
     ? product.variants.map(asRecord)
@@ -198,6 +200,7 @@ export function mapProductWebhook(
     "aovboost.variantsTruncated": booleanMetafield(
       sourceVariants.length > MAX_SYNCED_PRODUCT_VARIANTS,
     ),
+    "aovboost.onlineStorePublished": booleanMetafield(Boolean(publishedAt)),
   };
 
   if (defaultVariant?.id) {

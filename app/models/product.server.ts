@@ -498,6 +498,11 @@ export async function syncProductsPageFromAdmin(
       (product: ShopifyProductInput | null): product is ShopifyProductInput =>
         Boolean(product),
     );
+  if (productNodes.length > 0 && products.length === 0) {
+    throw new Error(
+      `Shopify returned ${productNodes.length} active products, but none could be mapped into the catalog`,
+    );
+  }
   await upsertProductBatch(shop, products);
   const syncedVariantCount = products.reduce(
     (total, product) =>
