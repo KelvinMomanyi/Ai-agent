@@ -7,6 +7,7 @@ describe("ChatWidget", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     localStorage.clear();
+    sessionStorage.clear();
     (window as any).AOVBoost = {
       shop: "teretret.myshopify.com",
       shopName: "Teretret Outdoors",
@@ -189,6 +190,16 @@ describe("ChatWidget", () => {
       quantity: 1,
       properties: { _aovboost_offer_id: "offer-1" },
     });
+    widget.destroy();
+    const restored = new ChatWidget({ copy: { greeting: "New welcome" } });
+    restored.mount();
+    const restoredRoot = document.querySelector(
+      "[data-aovboost-widget='chat']",
+    )?.shadowRoot;
+    (restoredRoot?.querySelector("[data-expand]") as HTMLButtonElement).click();
+    expect(restoredRoot?.textContent).toContain("Trail Board");
+    expect(restoredRoot?.querySelector("[data-chat-add]")).not.toBeNull();
+    restored.destroy();
   });
 
   it("renders accessible input controls and escapes assistant HTML", async () => {

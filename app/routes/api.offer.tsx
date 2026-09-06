@@ -39,6 +39,7 @@ import {
   evaluateProactiveMessage,
   getProactiveMessage,
 } from "../sales/proactiveEngine";
+import { reserveProactiveMessage } from "../sales/proactiveEngine.server";
 import { normalizeSalesState } from "../sales/salesStateMachine";
 import { toMerchantSalesSettings } from "../sales/settings";
 
@@ -118,14 +119,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
     const settings = await getCachedAppSettings(shop);
     const cached = await getJsonCache<OfferDecision>(cacheKey);
-    if (cached) {
-      const safeCached = await enforceCatalogBackedDecision({
-        shop,
-        decision: cached,
-        excludedProductIds: settings.blockedProductIds,
-      });
-      return json(safeCached, { headers: withCors() });
-    }
 
     const session = await getShopperSession(shop, sessionId).then(async (s) => {
       if (s) return s;
@@ -200,6 +193,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
+    // Never reuse proactive decisions: permission and prompt accounting are per request.
+    if (
+      cached &&
+      !proactiveTrigger &&
+      cached.widgetType !== "chat" &&
+      cached.widgetType &&
+      !(body.dismissedWidgets || []).includes(cached.widgetType) &&
+      !["CHECKOUT", "PURCHASED"].includes(snapshot.salesState) &&
+      (cached.widgetType !== "upsell" || settings.upsellEnabled) &&
+      (cached.widgetType !== "bundle" || settings.bundlesEnabled)
+    ) {
+      const safeCached = await enforceCatalogBackedDecision({
+        shop,
+        decision: cached,
+        excludedProductIds: settings.blockedProductIds,
+      });
+      return json(safeCached, { headers: withCors() });
+    }
+
     const candidates = proactiveDecision
       ? []
       : await buildOfferCandidates({
@@ -269,18 +281,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
     if (proactiveDecision) {
-      await prisma.shopperSession.update({
-        where: { id: session.id },
-        data: {
-          context: {
-            ...sessionContext,
-            proactivePromptCount:
-              Number(sessionContext.proactivePromptCount || 0) + 1,
-            lastProactivePromptAt: new Date().toISOString(),
-            lastProactiveMessageType: proactiveDecision.messageType,
+      const reserved = await reserveProactiveMessage(
+        shop,
+        session.id,
+        toMerchantSalesSettings(settings),
+        proactiveDecision.messageType,
+      );
+      if (!reserved)
+        return json(
+          {
+            widgetType: null,
+            payload: {},
+            reasoning: "proactive_reservation_denied",
+            confidence: 0,
           },
-        },
-      });
+          { headers: withCors() },
+        );
     }
     const catalogGuardedDecision = await enforceCatalogBackedDecision({
       shop,

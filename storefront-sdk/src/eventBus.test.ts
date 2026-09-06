@@ -48,15 +48,33 @@ describe("EventBus cart verification", () => {
 
     await vi.waitFor(() => {
       expect(
-        recordEvent.mock.calls.filter(([event]) => event.type === "add_to_cart"),
+        recordEvent.mock.calls.filter(
+          ([event]) => event.type === "add_to_cart",
+        ),
       ).toHaveLength(1);
     });
     expect(
-      recordEvent.mock.calls.find(([event]) => event.type === "add_to_cart")?.[0],
+      recordEvent.mock.calls.find(
+        ([event]) => event.type === "add_to_cart",
+      )?.[0],
     ).toMatchObject({
       productId: "gid://shopify/Product/101",
       variantId: "gid://shopify/ProductVariant/202",
       source: "verified_fetch_response",
     });
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ items: [], item_count: 0 }), {
+        status: 200,
+      }),
+    );
+    await window.fetch("/cart/change.js", {
+      method: "POST",
+      body: JSON.stringify({ id: 202, quantity: 0 }),
+    });
+    expect(
+      recordEvent.mock.calls.find(
+        ([event]) => event.type === "remove_from_cart",
+      )?.[0],
+    ).toMatchObject({ quantity: 0 });
   });
 });

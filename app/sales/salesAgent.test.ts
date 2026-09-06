@@ -21,8 +21,281 @@ import {
 } from "./shopperProfile";
 import type { MerchantSalesSettings } from "./types";
 import { rankUpsells } from "./upsellEngine";
+import {
+  applyGroundedProfileUpdates,
+  executeSalesReadTools,
+  parseSalesAgentResponse,
+  requestedQuantity,
+  salesAllowsRecommendations,
+} from "./agentOrchestrator.server";
+import { resolveSalesCartIntent } from "./cartIntent";
+import { resolveCartLineIntent } from "./cartLineIntent";
 
 describe("AI sales control modules", () => {
+  it("keeps budgets, sizes and preference corrections separate", () => {
+    expect(
+      extractProfileUpdates("My budget is under 100").preferredSizes,
+    ).toBeUndefined();
+    expect(
+      extractProfileUpdates("Size 43 with a budget under 5000"),
+    ).toMatchObject({ budgetMax: 5000, preferredSizes: ["43"] });
+    expect(
+      extractProfileUpdates("Budget between KES 2,000 and 5,000"),
+    ).toMatchObject({ budgetMin: 2000, budgetMax: 5000 });
+    const old = mergeShopperProfile(null, {
+      preferredColors: ["black"],
+      budgetMax: 100,
+    });
+    expect(
+      mergeShopperProfile(
+        old,
+        extractProfileUpdates("Actually blue instead of black"),
+      ).preferredColors,
+    ).toEqual(["blue"]);
+    expect(
+      mergeShopperProfile(old, extractProfileUpdates("No budget limit"))
+        .budgetMax,
+    ).toBeNull();
+  });
+
+  it("never ranks an unrelated, rejected or excluded collection product", () => {
+    const item = product("best", "Daily Running Shoes", 90, ["running"]);
+    const input = {
+      products: [item],
+      query: "refrigerator",
+      profile: emptyShopperProfile(),
+      settings,
+    };
+    expect(rankProductRecommendations(input)).toEqual([]);
+    expect(
+      rankProductRecommendations({
+        ...input,
+        query: "running",
+        rejectedProductIds: [item.id],
+      }),
+    ).toEqual([]);
+    expect(
+      rankProductRecommendations({
+        ...input,
+        query: "running",
+        products: [{ ...item, collectionIds: ["blocked"] }],
+        settings: { ...settings, excludedCollectionIds: ["blocked"] },
+      }),
+    ).toEqual([]);
+  });
+
+  it("uses the selected variant price and treats preference options as alternatives", () => {
+    const item = product("best", "Running Shoes", 50, ["running"]);
+    item.variants[0].price = "120";
+    const profile = mergeShopperProfile(null, {
+      budgetMax: 100,
+      preferredColors: ["black", "blue"],
+    });
+    expect(
+      rankProductRecommendations({
+        products: [item],
+        query: "running",
+        profile,
+        settings,
+      }),
+    ).toEqual([]);
+    item.variants[0].price = "90";
+    const ranked = rankProductRecommendations({
+      products: [item],
+      query: "running",
+      profile,
+      settings,
+    });
+    expect(ranked[0].product.price).toBe("90");
+    expect(ranked[0].recommendedVariantId).toBe(item.variants[0].id);
+    expect(
+      rankProductRecommendations({
+        products: [item],
+        query: "running",
+        profile: { ...profile, budgetCurrency: "KES" },
+        currencyCode: "USD",
+        settings,
+      }),
+    ).toEqual([]);
+  });
+
+  it("validates structured responses and accepts only grounded memory", () => {
+    expect(
+      parseSalesAgentResponse({
+        message: "Hello",
+        toolCalls: [
+          { name: "execute_sql", arguments: { query: "DROP TABLE" } },
+        ],
+      }),
+    ).toBeNull();
+    expect(
+      parseSalesAgentResponse({
+        message: "Hello",
+        action: {
+          type: "add_to_cart",
+          productId: "p",
+          variantId: "v",
+          quantity: 1.5,
+        },
+      }),
+    ).toBeNull();
+    expect(
+      parseSalesAgentResponse({
+        message: "Hello",
+        toolCalls: [{ name: "get_cart", arguments: {} }],
+      }),
+    ).not.toBeNull();
+    const profile = applyGroundedProfileUpdates(
+      emptyShopperProfile(),
+      { budgetMax: 1, need: "luxury watches", intendedUse: "daily running" },
+      "I need shoes for daily running, budget under 100",
+    );
+    expect(profile.budgetMax).toBe(100);
+    expect(profile.need).not.toBe("luxury watches");
+    expect(profile.intendedUse).toBe("daily running, budget under 100");
+    expect(salesAllowsRecommendations("PURCHASED")).toBe(false);
+    expect(salesAllowsRecommendations("CHECKOUT")).toBe(false);
+  });
+
+  it("executes bounded read tools without accepting invented IDs or mutations", () => {
+    const item = product("best", "Daily Runner", 90, ["running"]);
+    const tools = createCommerceToolLayer({
+      shop: store.shop,
+      catalog: {
+        shop: store.shop,
+        refreshedAt: "",
+        productCount: 1,
+        products: [item],
+        byId: { [item.id]: item },
+        byCategory: {},
+        byTag: {},
+      },
+      cart,
+      store,
+      settings,
+    });
+    expect(
+      executeSalesReadTools(
+        [{ name: "get_product", arguments: { productId: item.id } }],
+        tools,
+      )[0],
+    ).toMatchObject({ name: "get_product", result: { id: item.id } });
+    expect(
+      executeSalesReadTools(
+        [
+          {
+            name: "compare_products",
+            arguments: { productIds: [item.id, "invented"] },
+          },
+        ],
+        tools,
+      )[0],
+    ).toHaveProperty("error");
+    expect(
+      executeSalesReadTools(
+        [{ name: "add_to_cart", arguments: { productId: item.id } }],
+        tools,
+      ),
+    ).toEqual([]);
+    for (const quantity of [0, -1, 1.5, NaN, Infinity, 11])
+      expect(
+        tools.validateAddToCart(
+          { productId: item.id, variantId: item.variants[0].id, quantity },
+          { explicitlyRequested: true },
+        ),
+      ).toBeNull();
+  });
+
+  it("keeps an explicitly requested quantity while asking for a missing size", () => {
+    const item = product("best", "Running Shoes", 90, ["running"]);
+    item.variants.push({
+      ...item.variants[0],
+      id: "gid://shopify/ProductVariant/second",
+      title: "Black / 44",
+      selectedOptions: [
+        { name: "Color", value: "Black" },
+        { name: "Size", value: "44" },
+      ],
+    });
+    const first = resolveSalesCartIntent({
+      message: "Put two in my cart",
+      history: [
+        { role: "assistant", content: "I'd start with Running Shoes." },
+      ],
+      products: [item],
+      now: 1000,
+    });
+    expect(first?.quantity).toBe(2);
+    expect(first?.pending).not.toBeNull();
+    const next = resolveSalesCartIntent({
+      message: "size 44",
+      history: [],
+      products: [item],
+      pending: first?.pending,
+      now: 2000,
+    });
+    expect(next?.quantity).toBe(2);
+    expect(next?.variant?.id).toBe("gid://shopify/ProductVariant/second");
+    expect(
+      resolveSalesCartIntent({
+        message: "Don't add it",
+        history: [],
+        products: [item],
+        pending: first?.pending,
+        now: 2000,
+      }),
+    ).toBeNull();
+    expect(
+      resolveSalesCartIntent({
+        message: "44",
+        history: [],
+        products: [item],
+        pending: first?.pending,
+        now: 900000,
+      }),
+    ).toBeNull();
+    expect(requestedQuantity("Add 20 to my cart")).toBeNull();
+  });
+
+  it("resolves only explicit, unambiguous cart line changes", () => {
+    const populated = {
+      ...cart,
+      items: [
+        {
+          lineId: "line-key",
+          product: null,
+          productId: "p",
+          variantId: "v",
+          title: "Runner",
+          variantTitle: "Black",
+          handle: "runner",
+          quantity: 2,
+          finalUnitPrice: 90,
+          originalUnitPrice: 90,
+          finalLinePrice: 180,
+          originalLinePrice: 180,
+        },
+      ],
+    };
+    expect(
+      resolveCartLineIntent("Remove Runner from my cart", populated)?.action,
+    ).toMatchObject({
+      type: "remove_from_cart",
+      expectedQuantity: 2,
+      quantity: 0,
+    });
+    expect(
+      resolveCartLineIntent("Change Runner quantity to 3", populated)?.action,
+    ).toMatchObject({ type: "update_cart_line", quantity: 3 });
+    expect(resolveCartLineIntent("Don't remove Runner", populated)).toBeNull();
+    expect(
+      resolveCartLineIntent("Remove it", {
+        ...populated,
+        items: [...populated.items, ...populated.items],
+      })?.action,
+    ).toBeUndefined();
+  });
+
   it("extracts and merges structured shopper memory without losing earlier facts", () => {
     const first = mergeShopperProfile(
       emptyShopperProfile(),

@@ -1,7 +1,40 @@
 import { describe, expect, it } from "vitest";
 import { computeSessionState } from "./session.server";
+import type { ShopperSession } from "@prisma/client";
 
 describe("shopper sales journeys", () => {
+  it("preserves proactive state and reconciles an empty cart snapshot", () => {
+    const existing = {
+      viewedProductIds: ["p1"],
+      cartProductIds: ["p1"],
+      context: {
+        proactivePromptCount: 2,
+        lastProactivePromptAt: "2026-09-06T12:00:00Z",
+        cartValue: 90,
+        cartItemCount: 1,
+      },
+    } as unknown as ShopperSession;
+    const result = computeSessionState(existing, [
+      { type: "product_revisited", productId: "p1" },
+      {
+        type: "session_sync",
+        cartProductIds: [],
+        cartVariantIds: [],
+        cartItemCount: 0,
+        cartValue: 0,
+      },
+    ]);
+    expect(result.context).toMatchObject({
+      proactivePromptCount: 2,
+      cartValue: 0,
+      cartItemCount: 0,
+      productViewCounts: { p1: 2 },
+    });
+    expect(result.cartProductIds).toEqual([]);
+    expect(
+      computeSessionState(null, [{ type: "checkout_clicked" }]).checkoutStarted,
+    ).toBe(true);
+  });
   it("moves a qualified shopper from discovery through recommendation to closing", () => {
     const result = computeSessionState(null, [
       { type: "page_view", url: "/collections/running" },

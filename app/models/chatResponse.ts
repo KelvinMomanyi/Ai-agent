@@ -731,7 +731,7 @@ export function findRequestedCartProduct(
     .map((message) => message.content);
   const lastAssistantMessage = recentAssistantMessages.at(-1) || "";
   const explicitAddRequest =
-    /\b(add|buy|purchase|get|take)\b.*\b(cart|it|this|one|product|bag|item)\b/i.test(
+    /\b(add|buy|purchase|get|take|put)\b.*\b(cart|it|this|one|product|bag|item)\b/i.test(
       userMessage,
     ) || /\badd to cart\b/i.test(userMessage);
   const affirmativeAddRequest =

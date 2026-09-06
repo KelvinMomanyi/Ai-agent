@@ -1,5 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../db.server";
+import { withCommerceTransaction } from "./commerceTransaction.server";
+import { getJsonCache, setJsonCache } from "../redis.server";
 import type { StorefrontEvent } from "./session.server";
 import type { ShopperProfile, SalesState } from "../sales/types";
 
@@ -170,56 +172,143 @@ export async function markPurchasedRecommendationOutcomes(input: {
   if (sessionIds.length === 0) {
     return { outcomeCount: 0, attributedRevenue: 0 };
   }
-  let updated = 0;
-  let attributedRevenue = 0;
-  for (const line of input.lineItems) {
-    const revenue = Math.max(
-      Number(line.price || 0) * Number(line.quantity || 1) -
-        Number(line.totalDiscount || 0),
-      0,
-    );
-    const result = await prisma.recommendationOutcome.updateMany({
-      where: {
-        shop: input.shop,
-        sessionId: { in: sessionIds },
-        productId: line.productId,
-        purchasedAt: null,
-        OR: [{ clickedAt: { not: null } }, { addedAt: { not: null } }],
-      },
-      data: {
-        purchasedAt: new Date(),
-        orderId: input.orderId,
-        revenue: String(revenue),
-      },
-    });
-    updated += result.count;
-    if (result.count > 0) attributedRevenue += revenue;
-  }
-  if (updated > 0) {
-    const orderValue = Number.isFinite(input.orderValue)
-      ? Math.max(Number(input.orderValue), 0)
-      : input.lineItems.reduce(
-          (sum, line) =>
-            sum +
-            Math.max(
-              Number(line.price || 0) * Number(line.quantity || 1) -
-                Number(line.totalDiscount || 0),
-              0,
-            ),
+  return withCommerceTransaction(
+    `order:${input.shop}`,
+    input.orderId,
+    async (tx) => {
+      for (const sessionId of [...sessionIds].sort()) {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`session:${input.shop}`}), hashtext(${sessionId}))::text`;
+      }
+      const groupedLines = new Map<
+        string,
+        { productId: string; variantId: string; revenue: number }
+      >();
+      for (const line of input.lineItems) {
+        const revenue = Math.max(
+          Number(line.price || 0) * Number(line.quantity || 1) -
+            Number(line.totalDiscount || 0),
           0,
         );
-    await prisma.shopperSession.updateMany({
-      where: { shop: input.shop, id: { in: sessionIds } },
-      data: {
-        purchaseCompleted: true,
-        salesState: "PURCHASED",
-        orderId: input.orderId,
-        orderValue: String(orderValue),
-        aiAttributedRevenue: String(attributedRevenue),
-      },
+        const key = `${line.productId}:${line.variantId}`;
+        const previous = groupedLines.get(key);
+        groupedLines.set(key, {
+          productId: line.productId,
+          variantId: line.variantId,
+          revenue: (previous?.revenue || 0) + revenue,
+        });
+      }
+      for (const line of groupedLines.values()) {
+        const credited = await tx.recommendationOutcome.findFirst({
+          where: {
+            shop: input.shop,
+            orderId: input.orderId,
+            productId: line.productId,
+            variantId: line.variantId,
+          },
+        });
+        if (credited) continue;
+        const outcome = await tx.recommendationOutcome.findFirst({
+          where: {
+            shop: input.shop,
+            sessionId: { in: sessionIds },
+            productId: line.productId,
+            purchasedAt: null,
+            rejectedAt: null,
+            session: { chatEngaged: true },
+            AND: [
+              { OR: [{ variantId: line.variantId }, { variantId: null }] },
+              {
+                OR: [{ clickedAt: { not: null } }, { addedAt: { not: null } }],
+              },
+            ],
+          },
+          orderBy: { shownAt: "desc" },
+          select: { id: true },
+        });
+        if (!outcome) continue;
+        await tx.recommendationOutcome.update({
+          where: { id: outcome.id },
+          data: {
+            purchasedAt: new Date(),
+            orderId: input.orderId,
+            variantId: line.variantId,
+            revenue: String(line.revenue),
+          },
+        });
+      }
+      // Return persisted totals, not this delivery's delta, so redelivery is stable.
+      const outcomes = await tx.recommendationOutcome.findMany({
+        where: { shop: input.shop, orderId: input.orderId },
+        select: { sessionId: true, revenue: true },
+      });
+      const attributedRevenue = outcomes.reduce(
+        (sum, outcome) => sum + Number(outcome.revenue || 0),
+        0,
+      );
+      const orderValue = Number.isFinite(input.orderValue)
+        ? Math.max(Number(input.orderValue), 0)
+        : input.lineItems.reduce(
+            (sum, line) =>
+              sum +
+              Math.max(
+                Number(line.price || 0) * Number(line.quantity || 1) -
+                  Number(line.totalDiscount || 0),
+                0,
+              ),
+            0,
+          );
+      for (const sessionId of sessionIds)
+        await tx.shopperSession.updateMany({
+          where: { shop: input.shop, id: sessionId },
+          data: {
+            purchaseCompleted: true,
+            salesState: "PURCHASED",
+            orderId: input.orderId,
+            orderValue: String(orderValue),
+            aiAttributedRevenue: String(
+              outcomes
+                .filter((outcome) => outcome.sessionId === sessionId)
+                .reduce(
+                  (sum, outcome) => sum + Number(outcome.revenue || 0),
+                  0,
+                ),
+            ),
+          },
+        });
+      return { outcomeCount: outcomes.length, attributedRevenue };
+    },
+  );
+}
+
+export async function getRecommendationPerformance(shop: string) {
+  const key = `sales-outcome-performance:${shop}`;
+  try {
+    const cached =
+      await getJsonCache<
+        Record<string, { shown: number; purchased: number; rejected: number }>
+      >(key);
+    if (cached) return cached;
+    const rows = await prisma.recommendationOutcome.groupBy({
+      by: ["productId"],
+      where: { shop, shownAt: { gte: new Date(Date.now() - 90 * 86400000) } },
+      _count: { _all: true, purchasedAt: true, rejectedAt: true },
     });
+    const result = Object.fromEntries(
+      rows.map((row) => [
+        row.productId,
+        {
+          shown: row._count._all,
+          purchased: row._count.purchasedAt,
+          rejected: row._count.rejectedAt,
+        },
+      ]),
+    );
+    await setJsonCache(key, result, 600);
+    return result;
+  } catch {
+    // Learning signals are optional: cache/analytics failure must not block sales.
+    return {};
   }
-  return { outcomeCount: updated, attributedRevenue };
 }
 
 function outcomeFieldForEvent(type: string) {

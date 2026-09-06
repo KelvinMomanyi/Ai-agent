@@ -1,5 +1,6 @@
 import type { Prisma, ShopperSession } from "@prisma/client";
 import prisma from "../db.server";
+import { withCommerceTransaction } from "./commerceTransaction.server";
 import {
   calculateHesitationScore,
   calculatePurchaseIntent,
@@ -61,30 +62,41 @@ export async function upsertShopperSessionFromEvents(input: {
   customerId?: string | null;
   events: StorefrontEvent[];
 }) {
-  const existing = await getShopperSession(input.shop, input.sessionId);
-  const computed = computeSessionState(existing, input.events);
+  return withCommerceTransaction(
+    `session:${input.shop}`,
+    input.sessionId,
+    async (tx) => {
+      const existing = await tx.shopperSession.findFirst({
+        where: {
+          shop: input.shop,
+          OR: [{ id: input.sessionId }, { anonymousId: input.sessionId }],
+        },
+      });
+      const computed = computeSessionState(existing, input.events);
 
-  return prisma.shopperSession.upsert({
-    where: {
-      shop_anonymousId: {
-        shop: input.shop,
-        anonymousId: input.sessionId,
-      },
+      return tx.shopperSession.upsert({
+        where: {
+          shop_anonymousId: {
+            shop: input.shop,
+            anonymousId: input.sessionId,
+          },
+        },
+        update: {
+          ...computed,
+          lastActivityAt: new Date(),
+          ...(input.customerId ? { customerId: input.customerId } : {}),
+        },
+        create: {
+          id: input.sessionId,
+          shop: input.shop,
+          anonymousId: input.sessionId,
+          customerId: input.customerId || null,
+          lastActivityAt: new Date(),
+          ...computed,
+        },
+      });
     },
-    update: {
-      ...computed,
-      lastActivityAt: new Date(),
-      ...(input.customerId ? { customerId: input.customerId } : {}),
-    },
-    create: {
-      id: input.sessionId,
-      shop: input.shop,
-      anonymousId: input.sessionId,
-      customerId: input.customerId || null,
-      lastActivityAt: new Date(),
-      ...computed,
-    },
-  });
+  );
 }
 
 export function toShopperSessionSnapshot(session: ShopperSession) {
@@ -181,6 +193,8 @@ export function computeSessionState(
   );
   let currentVariantId = String(existingContext.currentVariantId || "");
   let currentCollectionId = String(existingContext.currentCollectionId || "");
+  let pendingCartSelection = existingContext.pendingCartSelection;
+  let proactiveDismissed = existingContext.proactiveDismissed === true;
 
   for (const event of events) {
     lastEventType = event.type;
@@ -197,7 +211,11 @@ export function computeSessionState(
       }
     }
 
-    if (event.type === "product_view" || event.type === "product_viewed") {
+    if (
+      ["product_view", "product_viewed", "product_revisited"].includes(
+        event.type,
+      )
+    ) {
       const productId = getProductId(event);
       if (productId) {
         currentProductId = productId;
@@ -233,6 +251,12 @@ export function computeSessionState(
       const message = String(
         event.message || asRecord(event.payload).message || "",
       );
+      if (
+        /\b(?:cancel|never mind|nevermind|do not|don't|not now|no thanks)\b/i.test(
+          message,
+        )
+      )
+        pendingCartSelection = null;
       const objection = classifyObjection(message);
       currentObjection = objection;
       shopperProfile = mergeShopperProfile(
@@ -241,6 +265,8 @@ export function computeSessionState(
         { objection },
       );
     }
+    if (event.type === "widget_dismiss" && event.widgetType === "chat")
+      proactiveDismissed = true;
 
     if (event.type === "add_to_cart") {
       addToCartCount += 1;
@@ -297,9 +323,14 @@ export function computeSessionState(
       if (productId) currentProductId = productId;
     }
 
-    if (event.type === "checkout_start" || event.type === "checkout_started") {
+    if (
+      ["checkout_start", "checkout_started", "checkout_clicked"].includes(
+        event.type,
+      )
+    ) {
       checkoutStarted = true;
     }
+    if (event.type === "checkout_returned") checkoutStarted = false;
 
     if (event.type === "purchase_completed") purchaseCompleted = true;
 
@@ -356,40 +387,37 @@ export function computeSessionState(
         sessionDuration,
         Number(snapshot.sessionDuration || event.sessionDuration || 0),
       );
-      cartValue = Math.max(
-        cartValue,
-        Number(
-          snapshot.cartValue ||
-            snapshot.cartTotal ||
-            event.cartValue ||
-            event.cartTotal ||
-            0,
-        ),
-      );
+      const nextValue =
+        snapshot.cartValue ??
+        snapshot.cartTotal ??
+        event.cartValue ??
+        event.cartTotal;
+      if (nextValue !== undefined && Number.isFinite(Number(nextValue))) {
+        cartValue = Math.max(0, Number(nextValue));
+      }
       for (const productId of toStringArray(
         snapshot.viewedProductIds || event.viewedProductIds,
       )) {
         viewedProductIds.add(productId);
       }
-      for (const productId of toStringArray(
-        snapshot.cartProductIds || event.cartProductIds,
-      )) {
+      const nextProducts = snapshot.cartProductIds ?? event.cartProductIds;
+      if (Array.isArray(nextProducts)) cartProductIds.clear();
+      for (const productId of toStringArray(nextProducts)) {
         cartProductIds.add(productId);
       }
-      for (const variantId of toStringArray(
-        snapshot.cartVariantIds || event.cartVariantIds,
-      )) {
+      const nextVariants = snapshot.cartVariantIds ?? event.cartVariantIds;
+      if (Array.isArray(nextVariants)) cartVariantIds.clear();
+      for (const variantId of toStringArray(nextVariants)) {
         cartVariantIds.add(variantId);
       }
-      cartItemCount = Math.max(
-        cartItemCount,
-        Number(
-          snapshot.cartItemCount ||
-            event.cartItemCount ||
-            cartProductIds.size ||
-            cartVariantIds.size,
-        ),
-      );
+      const nextCount = snapshot.cartItemCount ?? event.cartItemCount;
+      if (nextCount !== undefined)
+        cartItemCount = Math.max(0, Number(nextCount) || 0);
+      else if (Array.isArray(nextProducts) || Array.isArray(nextVariants)) {
+        cartItemCount = Math.max(cartProductIds.size, cartVariantIds.size);
+      }
+      const nextItems = snapshot.cartItems ?? event.cartItems;
+      if (Array.isArray(nextItems)) cartContents = nextItems;
     }
   }
 
@@ -457,6 +485,13 @@ export function computeSessionState(
     totalPageViews,
     sessionDuration,
     context: {
+      ...existingContext,
+      proactiveDismissed,
+      ...(pendingCartSelection !== undefined
+        ? {
+            pendingCartSelection: pendingCartSelection as Prisma.InputJsonValue,
+          }
+        : {}),
       maxScrollDepth,
       addToCartCount,
       cartItemCount,

@@ -27,31 +27,14 @@ export function evaluateProactiveMessage(input: {
   now?: number;
   settings: MerchantSalesSettings;
 }): ProactiveDecision {
-  const now = input.now || Date.now();
   const deny = (reason: string): ProactiveDecision => ({
     allowed: false,
     reason,
     confidence: 0,
     messageType: null,
   });
-  if (!input.settings.agentEnabled) return deny("agent_disabled");
-  if (!input.settings.proactiveMessagesEnabled) {
-    return deny("proactive_disabled");
-  }
-  if (input.dismissed) return deny("shopper_dismissed");
-  if (input.salesState === "PURCHASED" || input.salesState === "CHECKOUT") {
-    return deny("sales_state_disallows_interruption");
-  }
-  if (input.promptCount >= input.settings.maxProactivePrompts) {
-    return deny("session_prompt_limit");
-  }
-  if (
-    input.lastPromptAt &&
-    now - input.lastPromptAt <
-      Math.max(120, input.settings.proactiveDelaySeconds) * 1_000
-  ) {
-    return deny("cooldown_active");
-  }
+  const blocked = proactiveBlockReason(input);
+  if (blocked) return deny(blocked);
 
   let confidence = 0;
   let messageType: ProactiveDecision["messageType"] = null;
@@ -92,6 +75,33 @@ export function evaluateProactiveMessage(input: {
     return deny("below_confidence_threshold");
   }
   return { allowed: true, reason: "eligible", confidence, messageType };
+}
+
+export function proactiveBlockReason(
+  input: Pick<
+    Parameters<typeof evaluateProactiveMessage>[0],
+    | "settings"
+    | "dismissed"
+    | "salesState"
+    | "promptCount"
+    | "lastPromptAt"
+    | "now"
+  >,
+) {
+  if (!input.settings.agentEnabled) return "agent_disabled";
+  if (!input.settings.proactiveMessagesEnabled) return "proactive_disabled";
+  if (input.dismissed) return "shopper_dismissed";
+  if (input.salesState === "PURCHASED" || input.salesState === "CHECKOUT")
+    return "sales_state_disallows_interruption";
+  if (input.promptCount >= input.settings.maxProactivePrompts)
+    return "session_prompt_limit";
+  if (
+    input.lastPromptAt &&
+    (input.now ?? Date.now()) - input.lastPromptAt <
+      Math.max(120, input.settings.proactiveDelaySeconds) * 1_000
+  )
+    return "cooldown_active";
+  return null;
 }
 
 export function getProactiveMessage(type: ProactiveDecision["messageType"]) {

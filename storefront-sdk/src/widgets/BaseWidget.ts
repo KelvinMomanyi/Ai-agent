@@ -471,18 +471,20 @@ export async function addVariantToCart(
   quantity = 1,
   offerId?: unknown,
 ) {
-  if (!variantId) return null;
+  if (
+    !variantId ||
+    !Number.isInteger(quantity) ||
+    quantity < 1 ||
+    quantity > 10
+  )
+    return null;
   const numericId = String(variantId).split("/").pop();
-  const response = await fetch("/cart/add.js", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      id: numericId,
-      quantity,
-      properties: offerLineProperties(offerId),
-    }),
+  if (!numericId || !/^\d+$/.test(numericId)) return null;
+  return mutateShopifyCart("add", {
+    id: numericId,
+    quantity,
+    properties: offerLineProperties(offerId),
   });
-  return response.ok ? response.json() : null;
 }
 
 export async function addManyToCart(
@@ -499,12 +501,17 @@ export async function addManyToCart(
     }));
   if (cartItems.length === 0) return null;
 
-  const response = await fetch("/cart/add.js", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items: cartItems }),
-  });
-  return response.ok ? response.json() : null;
+  if (
+    cartItems.some(
+      (item) =>
+        !/^\d+$/.test(item.id || "") ||
+        !Number.isInteger(item.quantity) ||
+        item.quantity < 1 ||
+        item.quantity > 10,
+    )
+  )
+    return null;
+  return mutateShopifyCart("add", { items: cartItems });
 }
 
 function offerLineProperties(
@@ -516,6 +523,9 @@ function offerLineProperties(
     ([key, propertyValue]) => key.startsWith("_aovboost_") && propertyValue,
   );
   const result = Object.fromEntries(entries);
+  const sessionId = window.AOVBoostSDK?.sessionId;
+  if (sessionId && /^[a-zA-Z0-9_-]{1,128}$/.test(sessionId))
+    result._aovboost_session_id = sessionId;
   if (value) result._aovboost_offer_id = value;
   return Object.keys(result).length > 0 ? result : undefined;
 }
@@ -573,3 +583,4 @@ button, input, select { font: inherit; }
 .variant-picker { display: grid; gap: 4px; color: var(--aovboost-muted); font-size: 11px; }
 .variant-picker select { width: 100%; min-height: 34px; border: 1px solid var(--aovboost-line); border-radius: 7px; background: var(--aovboost-surface); color: var(--aovboost-ink); padding: 6px 8px; }
 `;
+import { mutateShopifyCart } from "../shopifyCart";

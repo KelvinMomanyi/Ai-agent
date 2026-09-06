@@ -1,6 +1,7 @@
 const OFFER_PROPERTY = "_aovboost_offer_id";
 
 export type OrderAttribution = {
+  sessionIds: string[];
   productIds: string[];
   offerIds: string[];
   attributedOffers: Array<{ offerId: string; revenue: number }>;
@@ -19,10 +20,14 @@ export function extractOrderAttribution(payload: unknown): OrderAttribution {
   const sourceLines = Array.isArray(order.line_items) ? order.line_items : [];
   const revenueByOffer = new Map<string, number>();
   const productIds = new Set<string>();
+  const sessionIds = new Set<string>();
 
   const lineItems = sourceLines.map((value) => {
     const line = asRecord(value);
-    const productId = toGid("Product", line.product_id || asRecord(line.product).id);
+    const productId = toGid(
+      "Product",
+      line.product_id || asRecord(line.product).id,
+    );
     const variantId = toGid(
       "ProductVariant",
       line.variant_id || line.admin_graphql_api_id || asRecord(line.variant).id,
@@ -32,10 +37,15 @@ export function extractOrderAttribution(payload: unknown): OrderAttribution {
     const totalDiscount = getLineDiscount(line);
     const lineRevenue = Math.max(price * quantity - totalDiscount, 0);
     const offerId = getOfferId(line.properties);
+    const sessionId = getOfferId(line.properties, "_aovboost_session_id");
+    if (sessionId) sessionIds.add(sessionId);
 
     if (productId) productIds.add(productId);
     if (offerId) {
-      revenueByOffer.set(offerId, (revenueByOffer.get(offerId) || 0) + lineRevenue);
+      revenueByOffer.set(
+        offerId,
+        (revenueByOffer.get(offerId) || 0) + lineRevenue,
+      );
     }
 
     return {
@@ -54,6 +64,7 @@ export function extractOrderAttribution(payload: unknown): OrderAttribution {
   }));
 
   return {
+    sessionIds: Array.from(sessionIds),
     productIds: Array.from(productIds),
     offerIds: attributedOffers.map(({ offerId }) => offerId),
     attributedOffers,
@@ -61,17 +72,17 @@ export function extractOrderAttribution(payload: unknown): OrderAttribution {
   };
 }
 
-function getOfferId(value: unknown) {
+function getOfferId(value: unknown, propertyName = OFFER_PROPERTY) {
   if (Array.isArray(value)) {
     for (const property of value) {
       const record = asRecord(property);
       const key = String(record.name || record.key || "");
-      if (key === OFFER_PROPERTY) return cleanOfferId(record.value);
+      if (key === propertyName) return cleanOfferId(record.value);
     }
     return "";
   }
 
-  return cleanOfferId(asRecord(value)[OFFER_PROPERTY]);
+  return cleanOfferId(asRecord(value)[propertyName]);
 }
 
 function cleanOfferId(value: unknown) {

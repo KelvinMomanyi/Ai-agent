@@ -5,6 +5,8 @@ import {
   text,
   type WidgetPayload,
 } from "./BaseWidget";
+import { cartUrl, mutateShopifyCart } from "../shopifyCart";
+import { hasTrackingConsent } from "../consent";
 
 type ProductCard = {
   productId?: string;
@@ -33,6 +35,8 @@ type CartAction = {
   productTitle?: string;
   variantId?: string;
   quantity?: number;
+  lineId?: string;
+  expectedQuantity?: number;
 };
 
 type Message = {
@@ -769,6 +773,7 @@ export class ChatWidget extends BaseWidget {
       },
       body: JSON.stringify({
         ...auth,
+        analyticsConsent: hasTrackingConsent(config),
         message: value,
         messageHistory: this.messages.slice(0, -2),
         currency: cartCurrency || currency.code,
@@ -791,6 +796,58 @@ export class ChatWidget extends BaseWidget {
     assistantIndex: number,
     assistantEl: HTMLElement,
   ) {
+    if (
+      action.type === "remove_from_cart" ||
+      action.type === "update_cart_line"
+    ) {
+      try {
+        const fresh = await readLiveCartContext();
+        const line = fresh.items.find(
+          (item) =>
+            item.lineId === action.lineId &&
+            item.variantId === action.variantId,
+        );
+        const quantity =
+          action.type === "remove_from_cart" ? 0 : Number(action.quantity);
+        if (
+          !line ||
+          line.quantity !== action.expectedQuantity ||
+          !Number.isInteger(quantity) ||
+          quantity < 0 ||
+          quantity > 10
+        ) {
+          throw new Error(
+            "Cart changed. Please check your cart and request the change again.",
+          );
+        }
+        const result = await mutateShopifyCart("change", {
+          id: action.lineId,
+          quantity,
+        });
+        if (!result)
+          throw new Error(
+            "Shopify could not confirm that change. Please check your cart.",
+          );
+        this.messages[assistantIndex].content =
+          quantity === 0
+            ? `Removed ${action.productTitle || "that item"} from your cart.`
+            : `Updated ${action.productTitle || "that item"} to quantity ${quantity}.`;
+        this.track(quantity === 0 ? "remove_from_cart" : "quantity_changed", {
+          variantId: action.variantId,
+          quantity,
+          source: "conversational_action",
+        });
+      } catch (error) {
+        this.messages[assistantIndex].content =
+          error instanceof Error
+            ? error.message
+            : "I couldn't confirm the change. Please check your cart before trying again.";
+      }
+      assistantEl.innerHTML = this.renderMessageContent(
+        this.messages[assistantIndex],
+      );
+      return;
+    }
     if (action.type !== "add_to_cart" || !action.variantId) return;
 
     try {
@@ -801,7 +858,7 @@ export class ChatWidget extends BaseWidget {
       );
       if (!result) throw new Error("Cart add failed");
       this.messages[assistantIndex].content =
-        `Added ${action.productTitle || "that product"} to your cart.`;
+        `Added ${Number(action.quantity || 1)} × ${action.productTitle || "that product"} to your cart.`;
       assistantEl.innerHTML = this.renderMessageContent(
         this.messages[assistantIndex],
       );
@@ -929,6 +986,8 @@ export class ChatWidget extends BaseWidget {
           this.messages.slice(-20).map((message) => ({
             role: message.role,
             content: message.content,
+            productCards: message.productCards?.slice(0, 4),
+            checkoutCta: message.checkoutCta === true,
           })),
         ),
       );
@@ -953,7 +1012,10 @@ export class ChatWidget extends BaseWidget {
         .slice(-20)
         .map((message) => ({
           ...message,
-          restoredTextOnly: true,
+          productCards: Array.isArray(message.productCards)
+            ? message.productCards.slice(0, 4)
+            : undefined,
+          checkoutCta: message.checkoutCta === true,
         })) as Message[];
     } catch {
       return [];
@@ -1072,7 +1134,7 @@ async function readLiveCartContext(): Promise<LiveCartContext> {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), 1_500);
   try {
-    const response = await fetch("/cart.js", {
+    const response = await fetch(cartUrl("read"), {
       headers: { Accept: "application/json", "Cache-Control": "no-cache" },
       cache: "no-store",
       credentials: "same-origin",

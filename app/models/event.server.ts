@@ -13,6 +13,19 @@ export async function ingestStorefrontEvents(input: {
   customerId?: string | null;
   events: StorefrontEvent[];
 }) {
+  const settings = await prisma.appSettings.findUnique({
+    where: { shop: input.shop },
+    select: { analyticsEnabled: true },
+  });
+  if (settings?.analyticsEnabled === false) return null;
+  // Browser events cannot attest to a purchase or its value.
+  const events = input.events.filter(
+    (event) =>
+      !["purchase_completed", "conversion", "order_created"].includes(
+        event.type,
+      ),
+  );
+  input = { ...input, events };
   const session = await upsertShopperSessionFromEvents(input);
 
   if (input.events.length > 0) {

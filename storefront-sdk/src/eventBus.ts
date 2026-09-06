@@ -1,4 +1,5 @@
 import type { SessionManager } from "./sessionManager";
+import { hasTrackingConsent } from "./consent";
 
 type EventPayload = Record<string, unknown>;
 
@@ -54,6 +55,10 @@ export class EventBus {
   }
 
   track(type: string, payload: EventPayload = {}): void {
+    if (!hasTrackingConsent(window.AOVBoost || {})) {
+      this.queue = [];
+      return;
+    }
     const now = Date.now();
     const dedupeKey = getDedupeKey(type, payload);
     if (dedupeKey) {
@@ -77,7 +82,14 @@ export class EventBus {
     };
 
     this.options.sessionManager.recordEvent(event);
-    this.queue.push(event);
+    if (
+      this.options.sessionManager.getSettings?.().analyticsEnabled !== false
+    ) {
+      // Bound offline buffering; a broken service must not grow storefront memory.
+      this.queue.push(event);
+      if (this.queue.length > 200)
+        this.queue.splice(0, this.queue.length - 200);
+    }
     document.dispatchEvent(
       new CustomEvent("aovboost:event", { detail: event }),
     );
@@ -85,6 +97,10 @@ export class EventBus {
   }
 
   flush(): void {
+    if (!hasTrackingConsent(window.AOVBoost || {})) {
+      this.queue = [];
+      return;
+    }
     if (this.flushTimer) {
       window.clearTimeout(this.flushTimer);
       this.flushTimer = undefined;
@@ -96,7 +112,21 @@ export class EventBus {
       return;
     }
 
-    const events = this.queue.splice(0);
+    const events: AovboostEvent[] = [];
+    let bytes = 0;
+    while (this.queue.length && events.length < 25) {
+      const next = this.queue[0];
+      const size = new TextEncoder().encode(JSON.stringify(next)).length;
+      if (size > 40_000) {
+        this.queue.shift();
+        continue;
+      }
+      if (bytes + size > 48_000) break;
+      events.push(this.queue.shift()!);
+      bytes += size;
+    }
+    if (this.queue.length) this.scheduleFlush();
+    if (!events.length) return;
     void this.postEvents(events);
   }
 
@@ -578,7 +608,7 @@ function getCartPayload(body: BodyInit | null | undefined) {
       return {
         productId: parsed.productId || parsed.product_id,
         variantId: parsed.id || parsed.items?.[0]?.id,
-        quantity: parsed.quantity || parsed.items?.[0]?.quantity || 1,
+        quantity: parsed.quantity ?? parsed.items?.[0]?.quantity ?? 1,
       };
     }
 

@@ -84,10 +84,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     if (topic === "ORDERS_CREATE") {
+      const settings = await prisma.appSettings.findUnique({
+        where: { shop },
+        select: { analyticsEnabled: true },
+      });
+      if (settings?.analyticsEnabled === false) return new Response("OK");
       const attribution = extractOrderAttribution(payload);
       const orderId = String(
         (payload as any).admin_graphql_api_id || (payload as any).id || "",
       );
+      if (!orderId) return new Response("Missing order ID", { status: 400 });
       await incrementOrderAffinities(
         shop,
         attribution.productIds,
@@ -102,6 +108,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           })
         : [];
       const knownOfferIds = new Set(knownOffers.map(({ id }) => id));
+      const linkedSessions = attribution.sessionIds.length
+        ? await prisma.shopperSession.findMany({
+            where: {
+              shop,
+              OR: [
+                { id: { in: attribution.sessionIds } },
+                { anonymousId: { in: attribution.sessionIds } },
+              ],
+            },
+            select: { id: true },
+          })
+        : [];
       const attributedOffers = attribution.attributedOffers.filter(
         ({ offerId }) => knownOfferIds.has(offerId),
       );
@@ -113,7 +131,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const recommendationAttribution =
         await markPurchasedRecommendationOutcomes({
           shop,
-          sessionIds: knownOffers.map((offer) => offer.sessionId),
+          sessionIds: [
+            ...knownOffers.map((offer) => offer.sessionId),
+            ...linkedSessions.map((session) => session.id),
+          ],
           orderId,
           orderValue: Number((payload as any).total_price || 0),
           lineItems: attribution.lineItems,

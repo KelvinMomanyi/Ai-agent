@@ -1,4 +1,8 @@
 import type { CatalogCacheProduct } from "../models/catalogCache.server";
+import {
+  budgetCurrencyMatches,
+  merchantAllowsProduct,
+} from "./recommendationEligibility";
 import type {
   MerchantSalesSettings,
   RankedRecommendation,
@@ -21,9 +25,11 @@ export function rankUpsells(input: {
   profile: ShopperProfile;
   settings: MerchantSalesSettings;
   cartValue: number;
+  currencyCode?: string;
 }): RankedRecommendation<CatalogCacheProduct>[] {
   if (
     !input.settings.agentEnabled ||
+    !budgetCurrencyMatches(input.profile, input.currencyCode) ||
     input.profile.purchaseIntentScore <
       input.settings.minimumUpsellIntentScore ||
     input.profile.currentObjection === "PRICE" ||
@@ -51,7 +57,8 @@ export function rankUpsells(input: {
     .flatMap((affinity) => {
       const product = products.get(affinity.targetId);
       if (
-        !product?.availableForSale ||
+        !product ||
+        !merchantAllowsProduct(product, input.settings) ||
         cart.has(affinity.targetId) ||
         blocked.has(affinity.targetId) ||
         rejected.has(affinity.targetId)
@@ -60,7 +67,16 @@ export function rankUpsells(input: {
       }
       const attachRate = Math.min(Math.log1p(affinity.orderCount) / 6, 1);
       const compatibility = clamp(affinity.score, 0, 1);
-      const price = Number(product.price || 0);
+      const variants = product.variants.filter(
+        (variant) =>
+          variant.availableForSale &&
+          Number.isFinite(Number(variant.price)) &&
+          (input.profile.budgetMax === null ||
+            input.cartValue + Number(variant.price) <= input.profile.budgetMax),
+      );
+      if (!variants.length) return [];
+      const chosen = variants[0];
+      const price = Number(chosen.price);
       const priceResistance =
         input.profile.priceSensitivity === "high" &&
         price > Math.max(input.cartValue * 0.35, 1)
@@ -74,18 +90,18 @@ export function rankUpsells(input: {
         priceResistance;
       return [
         {
-          product,
+          product: {
+            ...product,
+            price: chosen.price,
+            compareAtPrice: chosen.compareAtPrice,
+            variants,
+          },
           score: Math.round(score * 100) / 100,
           rank: 1,
           reasons: [
             affinity.reason || "Complements an item in your cart",
           ].slice(0, 4),
-          recommendedVariantId:
-            product.variants.filter((variant) => variant.availableForSale)
-              .length === 1
-              ? product.variants.find((variant) => variant.availableForSale)
-                  ?.id || ""
-              : "",
+          recommendedVariantId: variants.length === 1 ? chosen.id : "",
           recommendationType: "upsell" as const,
         },
       ];

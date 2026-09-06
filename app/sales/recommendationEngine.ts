@@ -1,4 +1,9 @@
 import type { CatalogCacheProduct } from "../models/catalogCache.server";
+import {
+  budgetCurrencyMatches,
+  eligibleVariants,
+  merchantAllowsProduct,
+} from "./recommendationEligibility";
 import type {
   MerchantSalesSettings,
   RankedRecommendation,
@@ -35,13 +40,21 @@ export function rankProductRecommendations(input: {
   cartProductIds?: string[];
   rejectedProductIds?: string[];
   weights?: Partial<RecommendationWeights>;
+  currencyCode?: string;
+  outcomes?: Record<
+    string,
+    { shown: number; purchased: number; rejected: number }
+  >;
 }): RankedRecommendation<CatalogCacheProduct>[] {
+  if (
+    !input.settings.agentEnabled ||
+    !budgetCurrencyMatches(input.profile, input.currencyCode)
+  )
+    return [];
   const weights = {
     ...DEFAULT_RECOMMENDATION_WEIGHTS,
     ...(input.weights || {}),
   };
-  const blocked = new Set(input.settings.excludedProductIds);
-  const blockedCollections = new Set(input.settings.excludedCollectionIds);
   const inCart = new Set(input.cartProductIds || []);
   const rejected = new Set(input.rejectedProductIds || []);
   const preferred = new Set(input.settings.preferredProductIds);
@@ -50,25 +63,30 @@ export function rankProductRecommendations(input: {
   );
 
   const eligible = input.products.filter((product) => {
-    if (!product.availableForSale || blocked.has(product.id)) return false;
-    if (inCart.has(product.id)) return false;
-    if (product.collectionIds?.some((id) => blockedCollections.has(id))) {
-      return false;
-    }
     if (
-      input.profile.budgetMax !== null &&
-      positivePrice(product.price) > input.profile.budgetMax
-    ) {
+      !merchantAllowsProduct(product, input.settings) ||
+      rejected.has(product.id)
+    )
       return false;
-    }
-    return hasRequiredVariantOptions(product, input.profile);
+    if (inCart.has(product.id)) return false;
+    return eligibleVariants(product, input.profile).length > 0;
   });
 
   const scored = eligible
     .map((product) => {
       const intentMatch = matchRatio(queryTokens, productSearchTokens(product));
+      if (queryTokens.length > 0 && intentMatch === 0) return null;
+      const variants = eligibleVariants(product, input.profile);
+      const recommendedVariant = variants[0];
+      // Cards and budget reasoning must use the same eligible variant's price.
+      const pricedProduct = {
+        ...product,
+        price: recommendedVariant.price,
+        compareAtPrice: recommendedVariant.compareAtPrice,
+        variants,
+      };
       const preferenceMatch = getPreferenceMatch(product, input.profile);
-      const budgetMatch = getBudgetMatch(product, input.profile);
+      const budgetMatch = getBudgetMatch(pricedProduct, input.profile);
       const availability = getAvailabilityScore(product);
       const orderSignal = Math.log1p(
         Math.max(0, Number(product.orderCount || 0)),
@@ -82,21 +100,23 @@ export function rankProductRecommendations(input: {
         budgetMatch * weights.budgetMatch +
         availability * weights.availability +
         Math.min(orderSignal / 5, 1) * weights.salesPerformance +
-        (preferred.has(product.id) ? weights.merchantPriority : 0) +
-        Math.min(orderSignal / 8, 1) * weights.historicalConversion -
+        (preferred.has(product.id) ? weights.merchantPriority : 0) -
         rejectionPenalty;
-      const recommendedVariant = selectRecommendedVariant(
-        product,
-        input.profile,
-      );
+      const outcomes = input.outcomes?.[product.id];
+      const learnedFit = outcomes
+        ? (outcomes.purchased + 1) / (outcomes.shown + 10)
+        : 0;
       return {
-        product,
-        score: roundScore(score),
-        reasons: buildMatchReasons(product, input.profile, intentMatch),
+        product: pricedProduct,
+        score: roundScore(score + learnedFit * weights.historicalConversion),
+        reasons: buildMatchReasons(pricedProduct, input.profile, intentMatch),
         recommendedVariantId: recommendedVariant?.id || "",
       };
     })
-    .filter((entry) => entry.score > 0)
+    .filter(
+      (entry): entry is NonNullable<typeof entry> =>
+        entry !== null && entry.score > 0,
+    )
     .sort(
       (left, right) =>
         right.score - left.score ||
@@ -134,53 +154,6 @@ export function rankProductRecommendations(input: {
   return chosen
     .slice(0, clamp(input.settings.maxProductRecommendations, 1, 4))
     .map((entry, index) => ({ ...entry, rank: index + 1 }));
-}
-
-function hasRequiredVariantOptions(
-  product: CatalogCacheProduct,
-  profile: ShopperProfile,
-) {
-  const variants = product.variants.filter(
-    (variant) => variant.availableForSale,
-  );
-  if (variants.length === 0) return false;
-  const wants = [
-    ...profile.preferredColors.map((value) => ({ type: "color", value })),
-    ...profile.preferredSizes.map((value) => ({ type: "size", value })),
-  ];
-  if (wants.length === 0) return true;
-  return variants.some((variant) =>
-    wants.every((wanted) =>
-      variant.selectedOptions.some(
-        (option) =>
-          option.name.toLowerCase().includes(wanted.type) &&
-          normalize(option.value) === normalize(wanted.value),
-      ),
-    ),
-  );
-}
-
-function selectRecommendedVariant(
-  product: CatalogCacheProduct,
-  profile: ShopperProfile,
-) {
-  const variants = product.variants.filter(
-    (variant) => variant.availableForSale,
-  );
-  return (
-    variants.find((variant) =>
-      [
-        ...profile.preferredColors.map((value) => ({ type: "color", value })),
-        ...profile.preferredSizes.map((value) => ({ type: "size", value })),
-      ].every((wanted) =>
-        variant.selectedOptions.some(
-          (option) =>
-            option.name.toLowerCase().includes(wanted.type) &&
-            normalize(option.value) === normalize(wanted.value),
-        ),
-      ),
-    ) || (variants.length === 1 ? variants[0] : undefined)
-  );
 }
 
 function getPreferenceMatch(
@@ -224,10 +197,16 @@ function buildMatchReasons(
     reasons.push("Within your budget");
   }
   if (profile.preferredColors.length) {
-    reasons.push(`Available in ${profile.preferredColors[0]}`);
+    const color = product.variants[0]?.selectedOptions.find((option) =>
+      /colou?r/i.test(option.name),
+    )?.value;
+    if (color) reasons.push(`Available in ${color.toLowerCase()}`);
   }
   if (profile.preferredSizes.length) {
-    reasons.push(`Your size ${profile.preferredSizes[0]} is available`);
+    const size = product.variants[0]?.selectedOptions.find((option) =>
+      /size/i.test(option.name),
+    )?.value;
+    if (size) reasons.push(`Your size ${size} is available`);
   }
   const preference = profile.preferences.find((value) =>
     product.searchText.toLowerCase().includes(value.toLowerCase()),
@@ -269,11 +248,51 @@ function matchRatio(needles: string[], haystack: string[]) {
 }
 
 function tokens(value: string) {
+  const stopWords = new Set([
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "that",
+    "this",
+    "these",
+    "those",
+    "want",
+    "need",
+    "looking",
+    "please",
+    "show",
+    "find",
+    "help",
+    "budget",
+    "under",
+    "size",
+    "have",
+    "some",
+    "something",
+    "product",
+    "products",
+    "recommend",
+    "recommendation",
+    "can",
+    "you",
+    "would",
+    "like",
+    "what",
+    "which",
+    "cheaper",
+    "option",
+    "options",
+  ]);
   return Array.from(
     new Set(
       normalize(value)
         .split(/[^a-z0-9]+/)
-        .filter((token) => token.length > 2),
+        .filter(
+          (token) =>
+            token.length > 2 && !/^\d+$/.test(token) && !stopWords.has(token),
+        ),
     ),
   );
 }

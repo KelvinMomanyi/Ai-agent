@@ -279,7 +279,10 @@ export class TriggerRouter {
       this.syncCartAndFire("cart_item_added", detail);
     }
 
-    if (detail.type === "remove_from_cart") {
+    if (
+      detail.type === "remove_from_cart" ||
+      detail.type === "quantity_changed"
+    ) {
       this.syncCartAndFire("cart_item_removed", detail);
     }
 

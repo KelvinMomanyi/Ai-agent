@@ -1,4 +1,5 @@
 import { EventBus } from "./eventBus";
+import { hasTrackingConsent, waitForTrackingConsent } from "./consent";
 import { LiveUpdates } from "./liveUpdates";
 import { OfferPoller } from "./offerPoller";
 import { SessionManager } from "./sessionManager";
@@ -134,50 +135,6 @@ function normalizeProxyApiBase(value?: string) {
   if (candidate.includes("/apps/aovboost")) return candidate;
   if (candidate.startsWith("/apps/")) return candidate;
   return "/apps/aovboost";
-}
-
-function hasTrackingConsent(config: AovBoostConfig) {
-  if (config.settings?.trackingConsentRequired !== true) return true;
-
-  const privacy = (window as any).Shopify?.customerPrivacy;
-  if (typeof privacy?.analyticsProcessingAllowed === "function") {
-    return Boolean(privacy.analyticsProcessingAllowed());
-  }
-  if (typeof privacy?.userCanBeTracked === "function") {
-    return Boolean(privacy.userCanBeTracked());
-  }
-
-  // Do not deadlock the assistant on stores that have not installed a consent API.
-  return true;
-}
-
-function waitForTrackingConsent(config: AovBoostConfig) {
-  return new Promise<void>((resolve) => {
-    const complete = () => {
-      if (
-        !hasTrackingConsent({
-          ...config,
-          settings: { ...config.settings, trackingConsentRequired: false },
-        })
-      )
-        return;
-      cleanup();
-      resolve();
-    };
-    const cleanup = () => {
-      [
-        "visitorConsentCollected",
-        "shopify:customer_privacy:consent_collected",
-        "aovboost:consent-granted",
-      ].forEach((eventName) => window.removeEventListener(eventName, complete));
-    };
-
-    [
-      "visitorConsentCollected",
-      "shopify:customer_privacy:consent_collected",
-      "aovboost:consent-granted",
-    ].forEach((eventName) => window.addEventListener(eventName, complete));
-  });
 }
 
 if (document.readyState === "loading") {

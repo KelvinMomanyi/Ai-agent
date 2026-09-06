@@ -52,13 +52,10 @@ export function createCommerceToolLayer(input: {
       "compare_products",
       "get_cart",
       "add_to_cart",
-      "remove_from_cart",
-      "update_cart_line",
       "get_related_products",
       "get_shipping_information",
       "get_return_policy",
       "create_bundle_suggestion",
-      ...(input.settings.discountPermission ? ["apply_discount"] : []),
     ] as const,
 
     searchProducts(
@@ -137,12 +134,23 @@ export function createCommerceToolLayer(input: {
       const variant = product.variants.find(
         (item) => item.id === variantId && item.availableForSale,
       );
-      const quantity = Math.floor(Number(action.quantity || 1));
-      if (!variant || quantity < 1 || quantity > 10) return null;
+      const quantity = Number(action.quantity ?? 1);
+      if (
+        !variant ||
+        !Number.isInteger(quantity) ||
+        quantity < 1 ||
+        quantity > 10
+      )
+        return null;
+      if (
+        variant.quantityAvailable !== null &&
+        variant.quantityAvailable < quantity
+      )
+        return null;
       return {
         type: "add_to_cart",
         productId: product.id,
-        productTitle: product.title,
+        productTitle: `${product.title}${variant.title && !/^default(?: title)?$/i.test(variant.title) ? ` (${variant.title})` : ""}`,
         variantId: variant.id,
         quantity,
       };
@@ -167,11 +175,11 @@ export function createCommerceToolLayer(input: {
       if (!options.explicitlyRequested) return null;
       const action = asRecord(value);
       const lineId = String(action.lineId || "").slice(0, 160);
-      const quantity = Math.floor(Number(action.quantity));
+      const quantity = Number(action.quantity);
       if (
         !lineId ||
         !input.cart.items.some((item) => item.lineId === lineId) ||
-        !Number.isFinite(quantity) ||
+        !Number.isInteger(quantity) ||
         quantity < 1 ||
         quantity > 10
       ) {
@@ -273,6 +281,31 @@ export function validateAllowlistedToolCall(
   const variantId = String(args.variantId || "");
   if (productId && !allowed.productIds.has(productId)) return null;
   if (variantId && !allowed.variantIds.has(variantId)) return null;
+  if (
+    ["get_product", "get_variants", "get_related_products"].includes(
+      call.name,
+    ) &&
+    !productId
+  )
+    return null;
+  if (call.name === "check_inventory" && !variantId) return null;
+  if (
+    ["compare_products", "create_bundle_suggestion"].includes(call.name) &&
+    (!Array.isArray(args.productIds) ||
+      args.productIds.length < 2 ||
+      args.productIds.length > 4 ||
+      args.productIds.some(
+        (id) => typeof id !== "string" || !allowed.productIds.has(id),
+      ))
+  )
+    return null;
+  if (
+    args.quantity !== undefined &&
+    (!Number.isInteger(args.quantity) ||
+      Number(args.quantity) < 1 ||
+      Number(args.quantity) > 10)
+  )
+    return null;
   if (call.name === "apply_discount") {
     const code = String(args.code || "")
       .trim()

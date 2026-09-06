@@ -99,8 +99,13 @@ export function extractProfileUpdates(
   if (!text) return {};
 
   const budget = extractBudget(text);
+  // A correction describes the replacement, not another permanent constraint.
+  const positiveText = text.replace(
+    /\b(?:instead of|rather than|not|no longer)\s+[a-z]+/gi,
+    " ",
+  );
   const colors = COLORS.filter((color) =>
-    new RegExp(`\\b${color}\\b`, "i").test(text),
+    new RegExp(`\\b${color}\\b`, "i").test(positiveText),
   ).map((color) => (color === "gray" ? "grey" : color));
   const sizes = extractSizes(text);
   const preferences = PREFERENCE_TERMS.filter((term) =>
@@ -175,14 +180,14 @@ export function mergeShopperProfile(
       ...current.preferences,
       ...(updates.preferences || []),
     ]).slice(0, 12),
-    preferredColors: unique([
-      ...current.preferredColors,
-      ...(updates.preferredColors || []),
-    ]).slice(0, 8),
-    preferredSizes: unique([
-      ...current.preferredSizes,
-      ...(updates.preferredSizes || []),
-    ]).slice(0, 8),
+    preferredColors:
+      updates.preferredColors === undefined
+        ? current.preferredColors
+        : cleanList(updates.preferredColors, 8, 40),
+    preferredSizes:
+      updates.preferredSizes === undefined
+        ? current.preferredSizes
+        : cleanList(updates.preferredSizes, 8, 40),
     brands: unique([...current.brands, ...(updates.brands || [])]).slice(0, 8),
     knownObjections,
     currentObjection:
@@ -209,36 +214,42 @@ function extractBudget(text: string): Partial<ShopperProfile> {
         : /\b(?:EUR|€)\b/i.test(text)
           ? "EUR"
           : "";
-  const numbers = Array.from(
-    text.matchAll(
-      /(?:KSh|KES|USD|US\$|GBP|EUR|[$£€])?\s*(\d[\d,]*(?:\.\d{1,2})?)/gi,
-    ),
-  )
-    .map((match) => Number(match[1].replace(/,/g, "")))
-    .filter((value) => Number.isFinite(value) && value >= 0)
-    .slice(0, 2);
-  if (numbers.length === 0) return {};
-
-  if (/\b(?:between|from)\b/i.test(text) && numbers.length >= 2) {
-    return {
-      budgetMin: Math.min(numbers[0], numbers[1]),
-      budgetMax: Math.max(numbers[0], numbers[1]),
-      ...(currency ? { budgetCurrency: currency } : {}),
-    };
-  }
   if (
-    /\b(?:under|below|less than|up to|max(?:imum)?|budget(?: is| of)?)\b/i.test(
-      text,
-    )
+    /\b(?:no budget limit|no maximum budget|budget is unlimited)\b/i.test(text)
   ) {
+    return { budgetMin: null, budgetMax: null };
+  }
+  const money =
+    "(?:KSh|KES|USD|US\\$|GBP|EUR|[$£€])?\\s*(\\d[\\d,]*(?:\\.\\d{1,2})?)";
+  const range = new RegExp(
+    `\\b(?:between|from)\\s+${money}\\s*(?:and|to|-)\\s*${money}`,
+    "i",
+  ).exec(text);
+  const parse = (value: string) => Number(value.replace(/,/g, ""));
+  if (range) {
     return {
-      budgetMax: numbers[0],
+      budgetMin: Math.min(parse(range[1]), parse(range[2])),
+      budgetMax: Math.max(parse(range[1]), parse(range[2])),
       ...(currency ? { budgetCurrency: currency } : {}),
     };
   }
-  if (/\b(?:over|above|at least|minimum|from)\b/i.test(text)) {
+  const maximum = new RegExp(
+    `\\b(?:under|below|less than|up to|max(?:imum)?(?: budget)?|budget(?: is| of)?)\\s*(?:is|of|:|=)?\\s*${money}`,
+    "i",
+  ).exec(text);
+  if (maximum) {
     return {
-      budgetMin: numbers[0],
+      budgetMax: parse(maximum[1]),
+      ...(currency ? { budgetCurrency: currency } : {}),
+    };
+  }
+  const minimum = new RegExp(
+    `\\b(?:over|above|at least|minimum(?: budget)?)\\s*(?:is|of|:|=)?\\s*${money}`,
+    "i",
+  ).exec(text);
+  if (minimum) {
+    return {
+      budgetMin: parse(minimum[1]),
       ...(currency ? { budgetCurrency: currency } : {}),
     };
   }
@@ -248,7 +259,7 @@ function extractBudget(text: string): Partial<ShopperProfile> {
 function extractSizes(text: string) {
   const values = Array.from(
     text.matchAll(
-      /\b(?:size\s*)?(XXS|XS|S|M|L|XL|XXL|XXXL|\d{1,3}(?:\.5)?)\b/gi,
+      /\bsize\s*(?:is|:)?\s*(XXXL|XXL|XXS|XL|XS|S|M|L|\d{1,3}(?:\.5)?)\b/gi,
     ),
   ).map((match) => match[1].toUpperCase());
   return unique(values).slice(0, 8);
@@ -266,7 +277,7 @@ function extractFirstGroup(text: string, patterns: RegExp[]) {
 function compactProfileUpdates(updates: Partial<ShopperProfile>) {
   return Object.fromEntries(
     Object.entries(updates).filter(([, value]) => {
-      if (value === undefined || value === null || value === "") return false;
+      if (value === undefined || value === "") return false;
       return !Array.isArray(value) || value.length > 0;
     }),
   ) as Partial<ShopperProfile>;
