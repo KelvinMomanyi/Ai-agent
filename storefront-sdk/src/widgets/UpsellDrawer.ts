@@ -16,6 +16,7 @@ export class UpsellDrawer extends BaseWidget {
   render(): void {
     const products = getProducts(this.payload).slice(0, 3);
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
+    const inline = this.payload.presentation === "inline";
     if (products.length === 0) {
       this.destroy();
       return;
@@ -40,9 +41,10 @@ export class UpsellDrawer extends BaseWidget {
         .head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
         .added-note { margin: 12px 0; border-radius: 8px; background: #ecfdf5; color: #047857; font-size: 13px; font-weight: 700; padding: 9px 11px; }
         .status { min-height: 16px; color: var(--aovboost-accent); font-size: 12px; font-weight: 650; }
+        ${inline ? `.drawer { position: static; inset: auto; z-index: auto; width: 100%; height: auto; margin: 18px 0; transform: none; animation: none; overflow: visible; }` : ""}
       </style>
-      <div class="backdrop" data-dismiss></div>
-      <aside class="drawer" aria-label="Add-to-cart upsell">
+      ${inline ? "" : '<div class="backdrop" data-dismiss></div>'}
+      <aside class="drawer" aria-label="Recommended cart additions">
         <div class="head">
           <div>
             <h3 class="title">${text(copy.headline || "Great choice. Complete the set")}</h3>
@@ -50,7 +52,7 @@ export class UpsellDrawer extends BaseWidget {
           </div>
           <button type="button" class="icon" data-dismiss aria-label="Close">x</button>
         </div>
-        <div class="added-note">Your selected item was added to the cart.</div>
+        ${inline ? "" : '<div class="added-note">Your selected item was added to the cart.</div>'}
         <div class="product-grid">
           ${products
             .map(
@@ -80,9 +82,7 @@ export class UpsellDrawer extends BaseWidget {
             )
             .join("")}
         </div>
-        <div class="actions">
-          <a class="secondary" href="/cart">Continue to cart</a>
-        </div>
+        ${inline ? "" : '<div class="actions"><a class="secondary" href="/cart">Continue to cart</a></div>'}
       </aside>
     `);
 
@@ -134,6 +134,10 @@ export class UpsellDrawer extends BaseWidget {
 
   private dismiss() {
     this.trackDismiss();
+    if (this.payload.presentation === "inline") {
+      this.destroy();
+      return;
+    }
     this.container.animate(
       [{ transform: "translateX(0)" }, { transform: "translateX(100%)" }],
       { duration: 180, easing: "ease-in", fill: "forwards" },

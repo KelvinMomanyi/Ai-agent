@@ -6,6 +6,7 @@ import { OfferPoller } from "./offerPoller";
 afterEach(() => {
   vi.restoreAllMocks();
   document.body.innerHTML = "";
+  window.history.replaceState({}, "", "/");
 });
 
 describe("OfferPoller", () => {
@@ -13,7 +14,9 @@ describe("OfferPoller", () => {
     const firstOffer = deferred<Response>();
     const firstOfferStarted = deferred<void>();
     const offerBodies: Array<Record<string, unknown>> = [];
-    const mountDecision = vi.fn();
+    const mountDecision = vi
+      .fn()
+      .mockReturnValue({ status: "mounted", reason: "test_slot" });
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -94,7 +97,8 @@ describe("OfferPoller", () => {
         return jsonResponse({
           widgetType: null,
           payload: {},
-          reasoning: "No catalog-backed products were available for this widget.",
+          reasoning:
+            "No catalog-backed products were available for this widget.",
         });
       },
     );
@@ -118,6 +122,89 @@ describe("OfferPoller", () => {
       reasoning: "No catalog-backed products were available for this widget.",
       httpStatus: 200,
     });
+  });
+  it("records placement suppression without claiming the offer was mounted", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input) === "/cart.js"
+        ? jsonResponse({ items: [], item_count: 0, total_price: 0 })
+        : jsonResponse({ widgetType: "bundle", payload: {} }),
+    );
+    const mountDecision = vi
+      .fn()
+      .mockReturnValue({
+        status: "suppressed",
+        reason: "bundle_requires_product_page",
+      });
+    const poller = new OfferPoller({
+      shop: "example.myshopify.com",
+      apiBase: "/apps/aovboost",
+      eventBus: {} as any,
+      sessionManager: sessionManagerStub() as any,
+      widgetManager: {
+        mountDecision,
+        getDismissedWidgets: () => [],
+        getStatus: () => ({}),
+      } as any,
+    });
+    await poller.requestOffer("initial");
+    expect(mountDecision).toHaveBeenCalledTimes(1);
+    expect(poller.getStatus().recentDecisions.at(-1)).toMatchObject({
+      outcome: "suppressed",
+      placementReason: "bundle_requires_product_page",
+    });
+    poller.destroy();
+  });
+
+  it("discards an offer response when the shopper has navigated elsewhere", async () => {
+    const response = deferred<Response>();
+    const started = deferred<void>();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === "/cart.js")
+        return jsonResponse({ items: [], item_count: 0, total_price: 0 });
+      started.resolve();
+      return response.promise;
+    });
+    const mountDecision = vi.fn();
+    const poller = new OfferPoller({
+      shop: "example.myshopify.com",
+      apiBase: "/apps/aovboost",
+      eventBus: {} as any,
+      sessionManager: sessionManagerStub() as any,
+      widgetManager: { mountDecision, getDismissedWidgets: () => [] } as any,
+    });
+    const request = poller.requestOffer("initial");
+    await started.promise;
+    window.history.replaceState({}, "", "/collections/new");
+    response.resolve(jsonResponse({ widgetType: "rec_strip", payload: {} }));
+    await expect(request).resolves.toBeNull();
+    expect(mountDecision).not.toHaveBeenCalled();
+    poller.destroy();
+  });
+
+  it("sends product context for a collection-scoped product URL", async () => {
+    window.history.replaceState({}, "", "/collections/snow/products/board");
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/cart.js")
+        return jsonResponse({ items: [], item_count: 0, total_price: 0 });
+      if (String(input) === "/products/board.js")
+        return jsonResponse({ id: 123 });
+      bodies.push(JSON.parse(String(init?.body)));
+      return jsonResponse({ widgetType: null });
+    });
+    const poller = new OfferPoller({
+      shop: "example.myshopify.com",
+      apiBase: "/apps/aovboost",
+      eventBus: {} as any,
+      sessionManager: sessionManagerStub() as any,
+      widgetManager: { getDismissedWidgets: () => [] } as any,
+    });
+    await poller.requestOffer("initial");
+    expect(bodies[0]).toMatchObject({
+      currentPageType: "product",
+      currentProductId: "gid://shopify/Product/123",
+    });
+    poller.destroy();
   });
 });
 

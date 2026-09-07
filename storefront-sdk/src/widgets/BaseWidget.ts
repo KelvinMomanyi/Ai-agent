@@ -46,6 +46,8 @@ export abstract class BaseWidget {
   constructor(protected payload: WidgetPayload) {
     this.container = document.createElement("div");
     this.container.setAttribute("data-aovboost-widget", this.getWidgetType());
+    this.container.dataset.presentation =
+      payload.presentation === "inline" ? "inline" : "floating";
     this.root = this.container.attachShadow({ mode: "open" });
     this.injectStyles();
   }
@@ -54,7 +56,13 @@ export abstract class BaseWidget {
   abstract render(): void;
 
   destroy(): void {
+    const mount = this.container.parentElement;
     this.container.remove();
+    if (
+      mount?.hasAttribute("data-aovboost-mount") &&
+      mount.childElementCount === 0
+    )
+      mount.remove();
   }
 
   isMounted(): boolean {
@@ -62,9 +70,55 @@ export abstract class BaseWidget {
   }
 
   mount(target = document.body): void {
+    if (this.payload.presentation === "inline") this.applyInlineTheme(target);
     target.appendChild(this.container);
     this.render();
-    this.trackImpression();
+    if (this.container.isConnected) this.trackImpression();
+  }
+
+  private applyInlineTheme(target: HTMLElement): void {
+    const style = this.container.style;
+    const theme = getComputedStyle(target);
+    if (theme.color) style.setProperty("--aovboost-ink", theme.color);
+    style.setProperty("--aovboost-muted", "var(--aovboost-ink)");
+    style.setProperty("--aovboost-accent", "var(--aovboost-ink)");
+    style.setProperty(
+      "--aovboost-line",
+      "color-mix(in srgb, var(--aovboost-ink) 18%, transparent)",
+    );
+    for (
+      let ancestor: HTMLElement | null = target;
+      ancestor;
+      ancestor = ancestor.parentElement
+    ) {
+      const background = getComputedStyle(ancestor).backgroundColor;
+      if (
+        background &&
+        background !== "transparent" &&
+        background !== "rgba(0, 0, 0, 0)"
+      ) {
+        style.setProperty("--aovboost-surface", background);
+        break;
+      }
+    }
+    style.setProperty("--aovboost-action", "var(--aovboost-ink)");
+    style.setProperty("--aovboost-action-text", "var(--aovboost-surface)");
+    const button = target.parentElement?.querySelector<HTMLElement>(
+      ".product-form__submit, button[name='add'], button[name='checkout']",
+    );
+    if (button) {
+      const buttonStyle = getComputedStyle(button);
+      if (
+        buttonStyle.backgroundColor &&
+        buttonStyle.backgroundColor !== "transparent" &&
+        buttonStyle.backgroundColor !== "rgba(0, 0, 0, 0)"
+      ) {
+        style.setProperty("--aovboost-action", buttonStyle.backgroundColor);
+        style.setProperty("--aovboost-action-text", buttonStyle.color);
+      }
+      if (buttonStyle.borderRadius)
+        style.setProperty("--aovboost-radius", buttonStyle.borderRadius);
+    }
   }
 
   protected injectStyles(): void {
@@ -551,6 +605,23 @@ const BASE_WIDGET_CSS = `
   color: var(--aovboost-ink);
   font-family: inherit;
 }
+:host([data-presentation="inline"]) {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  contain: inline-size;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+:host([data-presentation="inline"]) * { min-width: 0; }
+:host([data-presentation="inline"]) .card,
+:host([data-presentation="inline"]) .bar,
+:host([data-presentation="inline"]) .drawer { box-shadow: none; border-radius: var(--aovboost-radius, 8px); }
+:host([data-presentation="inline"]) .primary,
+:host([data-presentation="inline"]) .secondary { border-radius: var(--aovboost-radius, 8px); }
+:host([data-presentation="inline"]) .secondary { background: color-mix(in srgb, var(--aovboost-ink) 6%, var(--aovboost-surface)); }
 * { box-sizing: border-box; letter-spacing: 0; }
 button, input, select { font: inherit; }
 .card, .drawer, .bar, .modal, .pill {

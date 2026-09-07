@@ -32,10 +32,12 @@ export class SocialProof extends BaseWidget {
           padding: 8px 10px;
           font-size: 12px;
           font-weight: 700;
-          color: #064e3b;
-          background: #ecfdf5;
+          color: var(--aovboost-ink);
+          background: var(--aovboost-surface);
+          margin: 10px 0;
+          max-width: 100%;
         }
-        .dot { width: 8px; height: 8px; border-radius: 999px; background: #10b981; }
+        .dot { width: 8px; height: 8px; flex-shrink: 0; border-radius: 999px; background: var(--aovboost-accent); }
       </style>
       <div class="pill" role="status"><span class="dot"></span><span data-message>${text(messages[0])}</span></div>
     `);

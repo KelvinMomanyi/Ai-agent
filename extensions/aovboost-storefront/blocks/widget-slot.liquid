@@ -1,0 +1,36 @@
+{% comment %} Deliberate inline placement; offers are supplied by the AOVBoost app embed. {% endcomment %}
+<div data-aovboost-slot="{{ block.settings.widget_type | escape }}" {{ block.shopify_attributes }}>
+  {% if request.design_mode %}
+    <p style="padding: 1rem; border: 1px dashed currentColor; font: inherit;">
+      AOVBoost: eligible {{ block.settings.widget_type | replace: '_', ' ' | escape }} offers appear here.
+    </p>
+  {% endif %}
+</div>
+
+{% schema %}
+{
+  "name": "AOVBoost offer placement",
+  "target": "section",
+  "settings": [
+    {
+      "type": "select",
+      "id": "widget_type",
+      "label": "Offer type",
+      "default": "bundle",
+      "options": [
+        { "value": "bundle", "label": "Product bundle" },
+        { "value": "rec_strip", "label": "Product recommendations" },
+        { "value": "upsell_drawer", "label": "Cart recommendations" },
+        { "value": "discount_nudge", "label": "Cart goal" },
+        { "value": "inline_alert", "label": "Product update" },
+        { "value": "social_proof", "label": "Product social proof" },
+        { "value": "countdown_banner", "label": "Campaign countdown" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": "Enable the AOVBoost app embed. Product offers appear on matching product pages; cart offers appear on the cart page. Place outside purchase buttons, navigation and product cards."
+    }
+  ]
+}
+{% endschema %}

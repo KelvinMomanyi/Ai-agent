@@ -39,12 +39,12 @@ export class RecStrip extends BaseWidget {
         }
         .tile { scroll-snap-align: start; border: 1px solid var(--aovboost-line); border-radius: 10px; padding: 10px; display: grid; align-content: start; gap: 8px; }
         .product-link { color: inherit; text-decoration: none; }
-        .badge { width: fit-content; border-radius: 999px; background: #ecfdf5; color: #047857; font-size: 11px; padding: 4px 7px; }
+        .badge { width: fit-content; border-radius: 999px; background: var(--aovboost-surface); color: var(--aovboost-accent); border: 1px solid var(--aovboost-line); font-size: 11px; padding: 4px 7px; }
         .status { min-height: 16px; color: var(--aovboost-accent); font-size: 11px; font-weight: 650; }
         .primary { text-align: center; text-decoration: none; }
         @media (max-width: 640px) {
           .strip { margin: 14px 0; padding: 14px; }
-          .rail { grid-auto-columns: minmax(155px, 72vw); }
+          .rail { grid-auto-columns: minmax(0, min(210px, 85%)); }
         }
       </style>
       <section class="strip card">

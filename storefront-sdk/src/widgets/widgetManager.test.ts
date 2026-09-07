@@ -1,14 +1,22 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isWidgetEnabled, WidgetManager } from "./widgetManager";
 
+let manager: WidgetManager;
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+  manager = new WidgetManager();
+});
 afterEach(() => {
+  manager.destroyActive();
   document.body.innerHTML = "";
   window.history.replaceState({}, "", "/");
+  vi.restoreAllMocks();
 });
 
-describe("isWidgetEnabled", () => {
+describe("widget management", () => {
   it("honors merchant settings for every configurable widget family", () => {
     const settings = {
       chatEnabled: false,
@@ -18,179 +26,241 @@ describe("isWidgetEnabled", () => {
       exitIntentEnabled: false,
       postPurchaseEnabled: false,
     };
-
-    expect(isWidgetEnabled("chat", settings)).toBe(false);
-    expect(isWidgetEnabled("bundle", settings)).toBe(false);
-    expect(isWidgetEnabled("upsell_drawer", settings)).toBe(false);
-    expect(isWidgetEnabled("rec_strip", settings)).toBe(false);
-    expect(isWidgetEnabled("social_proof", settings)).toBe(false);
-    expect(isWidgetEnabled("discount_nudge", settings)).toBe(false);
-    expect(isWidgetEnabled("countdown_banner", settings)).toBe(false);
-    expect(isWidgetEnabled("exit_intent", settings)).toBe(false);
-    expect(isWidgetEnabled("post_purchase", settings)).toBe(false);
-  });
-
-  it("keeps backward-compatible defaults and unrelated system widgets", () => {
+    for (const type of [
+      "chat",
+      "bundle",
+      "upsell_drawer",
+      "rec_strip",
+      "social_proof",
+      "discount_nudge",
+      "countdown_banner",
+      "exit_intent",
+      "post_purchase",
+    ]) {
+      expect(isWidgetEnabled(type, settings)).toBe(false);
+    }
     expect(isWidgetEnabled("chat", {})).toBe(true);
     expect(isWidgetEnabled("inline_alert", { chatEnabled: false })).toBe(true);
   });
 
-  it("keeps chat, merchandising, banner, and overlay slots active together", () => {
-    localStorage.clear();
-    document.body.innerHTML =
-      "<main><div data-product-description></div></main>";
-    const manager = new WidgetManager({
-      chatEnabled: true,
-      upsellEnabled: true,
-      discountNudgeEnabled: true,
-    });
-
+  it("keeps one merchandising block and one notice alongside the assistant", () => {
+    productPage();
     manager.mountDecision({
       widgetType: "chat",
-      payload: { offerId: "chat-1", greeting: "Can I help?" },
+      payload: { greeting: "Can I help?" },
     });
-    manager.mountDecision({
-      widgetType: "rec_strip",
-      payload: { offerId: "rec-1", products: [widgetProduct()] },
-    });
+    manager.mountDecision(bundleDecision());
     manager.mountDecision({
       widgetType: "social_proof",
-      payload: { offerId: "proof-1", products: [widgetProduct()] },
+      payload: { products: [widgetProduct()] },
+    });
+    expect(
+      manager.mountDecision({
+        widgetType: "rec_strip",
+        payload: { products: [widgetProduct()] },
+      }).status,
+    ).toBe("suppressed");
+    expect(
+      manager.mountDecision({
+        widgetType: "inline_alert",
+        payload: { body: "Update" },
+      }).status,
+    ).toBe("suppressed");
+    expect(
+      manager.mountDecision({
+        widgetType: "toast",
+        payload: { headline: "Complete the set" },
+      }).status,
+    ).toBe("suppressed");
+    expect(manager.getStatus().mountedWidgetTypes).toEqual([
+      "bundle",
+      "chat",
+      "social_proof",
+    ]);
+    document.dispatchEvent(new CustomEvent("aovboost:open-chat"));
+    expect(
+      widget("chat")?.shadowRoot?.querySelector("[data-input]"),
+    ).not.toBeNull();
+    manager.resetPageContext();
+    expect(manager.getStatus().mountedWidgetTypes).toEqual(["chat"]);
+    expect(document.querySelector("[data-aovboost-mount]")).toBeNull();
+  });
+
+  it("preserves visible bundle content and variant selection across repeated offers", () => {
+    productPage();
+    manager.mountDecision(bundleDecision());
+    const original = widget("bundle");
+    const picker =
+      original!.shadowRoot!.querySelector<HTMLSelectElement>("select")!;
+    picker.value = "gid://shopify/ProductVariant/12";
+    const next = bundleDecision();
+    next.payload.offerId = "offer-2";
+    expect(manager.mountDecision(next).status).toBe("unchanged");
+    expect(widget("bundle")).toBe(original);
+    expect(picker.value).toBe("gid://shopify/ProductVariant/12");
+    expect(
+      document.querySelectorAll("[data-aovboost-widget='bundle']"),
+    ).toHaveLength(1);
+  });
+
+  it("remounts after a theme section is replaced", () => {
+    productPage();
+    manager.mountDecision(bundleDecision());
+    const original = widget("bundle");
+    productPage();
+    expect(manager.mountDecision(bundleDecision()).status).toBe("mounted");
+    expect(widget("bundle")).not.toBe(original);
+  });
+
+  it("clears product widgets and the assistant when navigating to a protected page", () => {
+    productPage();
+    manager.mountDecision(bundleDecision());
+    manager.mountDecision({ widgetType: "chat" });
+    window.history.replaceState({}, "", "/checkout");
+    expect(manager.mountDecision(bundleDecision()).status).toBe("suppressed");
+    expect(manager.getStatus().mountedWidgetTypes).toEqual([]);
+  });
+
+  it("renders cart additions and progress inline without a competing drawer backdrop", () => {
+    window.history.replaceState({}, "", "/cart");
+    document.body.innerHTML =
+      "<main><cart-items id='main-cart-items'><form>Items</form></cart-items><section id='main-cart-footer'>Checkout</section></main>";
+    manager.mountDecision({
+      widgetType: "upsell_drawer",
+      payload: { products: [widgetProduct()] },
     });
     manager.mountDecision({
       widgetType: "discount_nudge",
-      payload: { offerId: "goal-1", threshold: 100, cartValue: 82 },
+      payload: { threshold: 100, cartValue: 50 },
     });
-    manager.mountDecision({
-      widgetType: "toast",
-      payload: { offerId: "toast-1", headline: "Complete the set" },
-    });
-
-    expect(activeWidgetTypes()).toEqual([
-      "chat",
+    expect(manager.getStatus().mountedWidgetTypes).toEqual([
       "discount_nudge",
-      "rec_strip",
-      "social_proof",
-      "toast",
-    ]);
-    expect(
-      document.querySelector<HTMLElement>(
-        "[data-aovboost-widget='social_proof']",
-      )?.shadowRoot?.textContent,
-    ).toContain("12 verified orders include Verified Add-on");
-    document.dispatchEvent(new CustomEvent("aovboost:open-chat"));
-    expect(
-      document
-        .querySelector<HTMLElement>("[data-aovboost-widget='chat']")
-        ?.shadowRoot?.querySelector("[data-input]"),
-    ).not.toBeNull();
-
-    manager.mountDecision({
-      widgetType: "upsell_drawer",
-      payload: { offerId: "upsell-1", products: [widgetProduct()] },
-    });
-    expect(activeWidgetTypes()).toEqual([
-      "chat",
-      "discount_nudge",
-      "rec_strip",
-      "social_proof",
       "upsell_drawer",
     ]);
-
-    manager.resetPageContext();
-    expect(activeWidgetTypes()).toEqual(["chat", "discount_nudge"]);
-
-    manager.destroyActive();
-    expect(activeWidgetTypes()).toEqual([]);
-  });
-
-  it("places collection recommendations before the product grid", () => {
-    localStorage.clear();
-    window.history.replaceState({}, "", "/collections/all");
-    document.body.innerHTML =
-      "<main><h1>All products</h1><ul id='product-grid'></ul></main>";
-    const manager = new WidgetManager({ upsellEnabled: true });
-
-    manager.mountDecision({
-      widgetType: "rec_strip",
-      payload: { offerId: "rec-collection", products: [widgetProduct()] },
-    });
-
-    const mount = document.querySelector(
-      "[data-aovboost-mount='collection-recommendations']",
+    const upsell = widget("upsell_drawer")!;
+    expect(upsell.dataset.presentation).toBe("inline");
+    expect(upsell.parentElement?.previousElementSibling?.id).toBe(
+      "main-cart-items",
     );
-    expect(mount?.nextElementSibling?.id).toBe("product-grid");
-    expect(manager.getStatus().mountedWidgetTypes).toContain("rec_strip");
+    expect(upsell.shadowRoot?.querySelector(".backdrop")).toBeNull();
+    expect(upsell.shadowRoot?.querySelector(".added-note")).toBeNull();
+    expect(
+      widget("discount_nudge")?.parentElement?.nextElementSibling?.id,
+    ).toBe("main-cart-footer");
+    upsell
+      .shadowRoot!.querySelector<HTMLButtonElement>("[data-dismiss]")!
+      .click();
+    expect(widget("upsell_drawer")).toBeNull();
   });
 
-  it("always refreshes the verified upsell after a new cart addition", () => {
+  it("respects dismissal after another cart addition", () => {
+    window.history.replaceState({}, "", "/cart");
+    document.body.innerHTML = "<main><cart-items>Items</cart-items></main>";
     localStorage.setItem(
       "aovboost_dismissed_widgets",
       JSON.stringify([
         { widgetType: "upsell_drawer", dismissedAt: Date.now() },
       ]),
     );
-    const manager = new WidgetManager({ upsellEnabled: true });
-
-    manager.mountDecision({
-      widgetType: "upsell_drawer",
-      payload: {
-        offerId: "upsell-1",
-        triggerType: "cart_item_added",
-        products: [widgetProduct("2", "First complement")],
-      },
-    });
-    manager.mountDecision({
-      widgetType: "upsell_drawer",
-      payload: {
-        offerId: "upsell-2",
-        triggerType: "cart_item_added",
-        products: [widgetProduct("3", "Second complement")],
-      },
-    });
-
-    const drawers = document.querySelectorAll(
-      "[data-aovboost-widget='upsell_drawer']",
-    );
-    expect(drawers).toHaveLength(1);
-    expect((drawers[0] as HTMLElement).shadowRoot?.textContent).toContain(
-      "Second complement",
-    );
     expect(
-      (drawers[0] as HTMLElement).shadowRoot?.querySelector("[data-timer]"),
-    ).toBeNull();
+      manager.mountDecision({
+        widgetType: "upsell_drawer",
+        payload: {
+          triggerType: "cart_item_added",
+          products: [widgetProduct()],
+        },
+      }).reason,
+    ).toBe("shopper_dismissed");
+    expect(widget("upsell_drawer")).toBeNull();
+  });
+
+  it("removes empty generated mounts without recording an impression", () => {
+    window.history.replaceState({}, "", "/collections/all");
+    document.body.innerHTML = "<main><ul id='product-grid'></ul></main>";
+    const track = vi.fn();
+    document.addEventListener("aovboost:track", track);
+    expect(
+      manager.mountDecision({
+        widgetType: "rec_strip",
+        payload: { products: [] },
+      }).status,
+    ).toBe("suppressed");
+    expect(document.querySelector("[data-aovboost-mount]")).toBeNull();
+    expect(track).not.toHaveBeenCalled();
+    document.removeEventListener("aovboost:track", track);
+  });
+
+  it("retains a merchant slot when its campaign is dismissed and avoids replacing the timer", () => {
+    document.body.innerHTML =
+      "<main><div data-aovboost-slot='countdown_banner'></div></main>";
+    const decision = {
+      widgetType: "countdown_banner",
+      payload: { endsAt: "2099-01-01" },
+    };
+    manager.mountDecision(decision);
+    expect(manager.mountDecision(decision).status).toBe("unchanged");
+    widget("countdown_banner")!
+      .shadowRoot!.querySelector<HTMLButtonElement>("[data-dismiss]")!
+      .click();
+    expect(
+      document.querySelector("[data-aovboost-slot='countdown_banner']"),
+    ).not.toBeNull();
+    expect(widget("countdown_banner")).toBeNull();
+  });
+
+  it("adopts the surrounding theme palette and purchase button appearance", () => {
+    productPage();
+    const info = document.querySelector<HTMLElement>(
+      ".product__info-container",
+    )!;
+    info.style.cssText =
+      "background-color: rgb(30, 30, 30); color: rgb(240, 240, 240); font-family: Georgia";
+    document.querySelector<HTMLElement>("button[name='add']")!.style.cssText =
+      "background-color: rgb(200, 180, 120); color: rgb(20, 20, 20); border-radius: 2px";
+    manager.mountDecision(bundleDecision());
+    const style = widget("bundle")!.style;
+    expect(style.getPropertyValue("--aovboost-surface")).toBe(
+      "rgb(30, 30, 30)",
+    );
+    expect(style.getPropertyValue("--aovboost-ink")).toBe("rgb(240, 240, 240)");
+    expect(style.getPropertyValue("--aovboost-action")).toBe(
+      "rgb(200, 180, 120)",
+    );
+    expect(style.getPropertyValue("--aovboost-radius")).toBe("2px");
   });
 });
 
-function activeWidgetTypes() {
-  return Array.from(
-    document.querySelectorAll<HTMLElement>("[data-aovboost-widget]"),
-  )
-    .map((element) => element.dataset.aovboostWidget)
-    .sort();
+function widget(type: string) {
+  return document.querySelector<HTMLElement>(
+    `[data-aovboost-widget='${type}']`,
+  );
 }
-
-function widgetProduct(id = "2", title = "Verified Add-on") {
+function productPage() {
+  window.history.replaceState({}, "", "/products/board");
+  document.body.innerHTML =
+    "<main><section id='MainProduct-1'><div class='product__info-container'><product-form><form action='/cart/add'><button name='add'>Add</button><div class='shopify-payment-button'>Pay</div></form></product-form></div></section></main>";
+}
+function bundleDecision() {
+  return {
+    widgetType: "bundle",
+    payload: {
+      offerId: "offer-1",
+      products: [widgetProduct(), widgetProduct("2", "boots")],
+    },
+  };
+}
+function widgetProduct(id = "1", handle = "board") {
   return {
     id: `gid://shopify/Product/${id}`,
-    productId: `gid://shopify/Product/${id}`,
-    variantId: `gid://shopify/ProductVariant/${id}2`,
-    title,
-    handle: title.toLowerCase().replace(/\s+/g, "-"),
-    imageUrl: "",
-    price: "20.00",
-    variants: [
-      {
-        id: `gid://shopify/ProductVariant/${id}2`,
-        title: "Default",
-        sku: "ADD-ON",
-        price: "20.00",
-        compareAtPrice: null,
-        quantityAvailable: 10,
-        availableForSale: true,
-        selectedOptions: [],
-      },
-    ],
+    handle,
+    title: handle,
+    price: "20",
     orderCount: 12,
+    variants: [1, 2].map((variant) => ({
+      id: `gid://shopify/ProductVariant/${id}${variant}`,
+      title: `Size ${variant}`,
+      price: "20",
+      availableForSale: true,
+    })),
   };
 }

@@ -43,6 +43,7 @@ export class DiscountNudge extends BaseWidget {
         .label { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 700; }
         .track { height: 6px; border-radius: 999px; overflow: hidden; background: #e5e7eb; margin-top: 6px; }
         .track span { display: block; height: 100%; width: ${progress * 100}%; background: var(--aovboost-accent); transition: width 200ms ease; }
+        ${this.payload.presentation === "inline" ? `.bar { position: static; inset: auto; z-index: auto; margin: 16px 0; border: 1px solid var(--aovboost-line); padding: 14px; } .label { flex-wrap: wrap; } .label > span { flex: 1 1 160px; }` : ""}
       </style>
       <div class="bar">
         <div class="label">

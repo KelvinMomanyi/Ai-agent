@@ -11,6 +11,12 @@ import { ToastNudge } from "./ToastNudge";
 import { UpsellDrawer } from "./UpsellDrawer";
 import type { BaseWidget, WidgetPayload } from "./BaseWidget";
 import type { StorefrontSettings } from "../sessionManager";
+import {
+  getStorefrontPage,
+  hasBlockingSurface,
+  resolveWidgetPlacement,
+  type WidgetPlacement,
+} from "./placement";
 
 export type OfferDecision = {
   widgetType: string | null;
@@ -22,14 +28,10 @@ export type OfferDecision = {
 
 const DISMISSED_KEY = "aovboost_dismissed_widgets";
 const DISMISS_TTL_MS = 30 * 60 * 1000;
-const INLINE_WIDGET_TYPES = new Set([
-  "bundle",
-  "rec_strip",
-  "inline_alert",
-  "social_proof",
-  "post_purchase",
-]);
-const BANNER_WIDGET_TYPES = new Set(["countdown_banner", "discount_nudge"]);
+export type PlacementOutcome = {
+  status: "mounted" | "unchanged" | "suppressed";
+  reason: string;
+};
 
 type MountedWidget = {
   key: string;
@@ -41,23 +43,24 @@ export class WidgetManager {
   private bannerWidget: MountedWidget | null = null;
   private overlayWidget: MountedWidget | null = null;
   private inlineWidgets = new Map<string, MountedWidget>();
+  private lastPlacement: PlacementOutcome | null = null;
+  private lastOverlayAt = 0;
+  private pagePath = window.location.pathname;
 
   constructor(private settings: StorefrontSettings = {}) {}
 
-  mountDecision(decision: OfferDecision): void {
-    if (!decision.widgetType) return;
-    if (!isWidgetEnabled(decision.widgetType, this.settings)) return;
+  mountDecision(decision: OfferDecision): PlacementOutcome {
+    if (this.pagePath !== window.location.pathname) this.resetPageContext();
+    const result = (status: PlacementOutcome["status"], reason: string) => {
+      this.lastPlacement = { status, reason };
+      return this.lastPlacement;
+    };
+    if (!decision.widgetType) return result("suppressed", "no_widget");
+    if (!isWidgetEnabled(decision.widgetType, this.settings))
+      return result("suppressed", "merchant_disabled");
     const payload = decision.payload || {};
-    const requiredCartUpsell =
-      decision.widgetType === "upsell_drawer" &&
-      (payload.triggerType === "cart_item_added" ||
-        payload.triggerType === "add_to_cart");
-    if (
-      this.getDismissedWidgets().includes(decision.widgetType) &&
-      !requiredCartUpsell
-    ) {
-      return;
-    }
+    if (this.getDismissedWidgets().includes(decision.widgetType))
+      return result("suppressed", "shopper_dismissed");
 
     const offerId = String(payload.offerId || "");
     const nextKey = `${decision.widgetType}:${getWidgetIdentity(
@@ -66,53 +69,85 @@ export class WidgetManager {
       offerId,
     )}`;
 
-    if (INLINE_WIDGET_TYPES.has(decision.widgetType)) {
-      const mounted = this.inlineWidgets.get(decision.widgetType);
-      if (mounted?.key === nextKey) return;
-
-      const widget = createWidget(decision.widgetType, payload);
-      if (!widget) return;
-
-      mounted?.widget.destroy();
-      const target = this.resolveTarget(decision.widgetType);
-      widget.mount(target);
-      this.inlineWidgets.set(decision.widgetType, { key: nextKey, widget });
-      return;
+    const previous = this.inlineWidgets.get(decision.widgetType);
+    if (previous?.widget.isMounted()) {
+      // Do not swap a visible offer, reset variant choices or shift the layout.
+      return result("unchanged", "stable_offer_already_present");
     }
-
-    const widget = createWidget(decision.widgetType, payload);
-    if (!widget) return;
-
+    previous?.widget.destroy();
+    this.inlineWidgets.delete(decision.widgetType);
     if (decision.widgetType === "chat") {
-      if (this.chatWidget?.widget.isMounted()) return;
+      if (this.chatWidget?.widget.isMounted())
+        return result("unchanged", "assistant_already_present");
       this.chatWidget?.widget.destroy();
-      widget.mount(this.resolveTarget(decision.widgetType));
-      this.chatWidget = { key: nextKey, widget };
-      return;
     }
-
-    if (BANNER_WIDGET_TYPES.has(decision.widgetType)) {
-      if (
-        this.bannerWidget?.key === nextKey &&
-        this.bannerWidget.widget.isMounted()
-      ) {
-        return;
-      }
-      this.bannerWidget?.widget.destroy();
-      widget.mount(this.resolveTarget(decision.widgetType));
-      this.bannerWidget = { key: nextKey, widget };
-      return;
-    }
-
     if (
-      this.overlayWidget?.key === nextKey &&
-      this.overlayWidget.widget.isMounted()
+      decision.widgetType === "countdown_banner" &&
+      this.bannerWidget?.widget.isMounted()
+    )
+      return result("unchanged", "campaign_already_present");
+    if (
+      ["bundle", "rec_strip", "upsell_drawer"].includes(decision.widgetType) &&
+      ["bundle", "rec_strip", "upsell_drawer"].some((type) =>
+        this.inlineWidgets.get(type)?.widget.isMounted(),
+      )
     ) {
-      return;
+      return result("suppressed", "one_merchandising_block_per_page");
     }
-    this.overlayWidget?.widget.destroy();
-    widget.mount(this.resolveTarget(decision.widgetType));
-    this.overlayWidget = { key: nextKey, widget };
+    if (
+      ["inline_alert", "social_proof", "discount_nudge"].includes(
+        decision.widgetType,
+      ) &&
+      ["inline_alert", "social_proof", "discount_nudge"].some((type) =>
+        this.inlineWidgets.get(type)?.widget.isMounted(),
+      )
+    ) {
+      return result("suppressed", "one_contextual_notice_per_page");
+    }
+    if (
+      ["toast", "exit_intent"].includes(decision.widgetType) &&
+      (this.chatWidget?.widget.isMounted() ||
+        this.overlayWidget?.widget.isMounted() ||
+        hasBlockingSurface() ||
+        (this.lastOverlayAt && Date.now() - this.lastOverlayAt < 120_000))
+    ) {
+      return result("suppressed", "attention_slot_occupied_or_cooling_down");
+    }
+    const placement = resolveWidgetPlacement(decision.widgetType, payload);
+    if (!placement.target) return result("suppressed", placement.reason);
+    const widget = createWidget(decision.widgetType, {
+      ...payload,
+      presentation: placement.inline ? "inline" : "floating",
+    });
+    if (!widget) return result("suppressed", "unknown_widget");
+    if (placement.zone === "assistant") {
+      this.overlayWidget?.widget.destroy();
+      this.overlayWidget = null;
+    }
+    widget.mount(placement.target);
+    if (!widget.isMounted())
+      return result("suppressed", "widget_has_no_renderable_content");
+    this.saveMounted(placement.zone, decision.widgetType, {
+      key: nextKey,
+      widget,
+    });
+    return result("mounted", placement.reason);
+  }
+
+  private saveMounted(
+    zone: WidgetPlacement["zone"],
+    type: string,
+    entry: MountedWidget,
+  ) {
+    if (zone === "assistant") this.chatWidget = entry;
+    else if (zone === "campaign") {
+      this.bannerWidget?.widget.destroy();
+      this.bannerWidget = entry;
+    } else if (zone === "overlay") {
+      this.overlayWidget?.widget.destroy();
+      this.overlayWidget = entry;
+      this.lastOverlayAt = Date.now();
+    } else this.inlineWidgets.set(type, entry);
   }
 
   destroyActive(): void {
@@ -127,10 +162,17 @@ export class WidgetManager {
   }
 
   resetPageContext(): void {
+    this.pagePath = window.location.pathname;
     this.overlayWidget?.widget.destroy();
     this.overlayWidget = null;
     this.inlineWidgets.forEach((mounted) => mounted.widget.destroy());
     this.inlineWidgets.clear();
+    this.bannerWidget?.widget.destroy();
+    this.bannerWidget = null;
+    if (["checkout", "thankyou", "other"].includes(getStorefrontPage())) {
+      this.chatWidget?.widget.destroy();
+      this.chatWidget = null;
+    }
   }
 
   getDismissedWidgets(): string[] {
@@ -177,52 +219,8 @@ export class WidgetManager {
       mountedWidgetTypes,
       dismissedWidgetTypes: this.getDismissedWidgets(),
       settings: { ...this.settings },
+      lastPlacement: this.lastPlacement,
     };
-  }
-
-  private resolveTarget(widgetType: string): HTMLElement {
-    if (widgetType === "bundle") {
-      return createMountAfter(
-        "product-form, .product-form, [data-product-form], form[action*='/cart/add']",
-        "product-bundle",
-      );
-    }
-
-    if (widgetType === "rec_strip") {
-      const pageType = getCurrentPageType();
-      if (pageType === "product") {
-        return createMountAfter(
-          ".product__description, [data-product-description], product-info, .product__info-container, product-form, .product-form, form[action*='/cart/add']",
-          "product-recommendations",
-        );
-      }
-      if (pageType === "collection") {
-        return createMountBefore(
-          "#product-grid, #ProductGridContainer, [data-product-grid], .collection__product-grid, .product-grid",
-          "collection-recommendations",
-        );
-      }
-      return createVisibleMainMount(
-        ".featured-collection, [data-section-type='featured-collection'], main section, #MainContent > *",
-        "home-recommendations",
-      );
-    }
-
-    if (widgetType === "social_proof") {
-      return createMountAfter(
-        ".product-form__submit, [data-add-to-cart], button[name='add']",
-        "product-social-proof",
-      );
-    }
-
-    if (widgetType === "inline_alert") {
-      return createMountAfter(
-        "[data-price], .product__price, .price, product-form, .product-form, [data-product-form]",
-        "product-alert",
-      );
-    }
-
-    return document.body;
   }
 }
 
@@ -290,85 +288,4 @@ function createWidget(widgetType: string, payload: WidgetPayload) {
     default:
       return null;
   }
-}
-
-function createMountAfter(selector: string, key: string): HTMLElement {
-  return createAdjacentMount(selector, key, "afterend");
-}
-
-function createMountBefore(selector: string, key: string): HTMLElement {
-  return createAdjacentMount(selector, key, "beforebegin");
-}
-
-function createAdjacentMount(
-  selector: string,
-  key: string,
-  position: "beforebegin" | "afterend",
-): HTMLElement {
-  const existing = findMount(key);
-  if (existing) return existing;
-  const anchor = document.querySelector(selector);
-  const target = createMount(key);
-
-  if (anchor?.parentElement) {
-    anchor.insertAdjacentElement(position, target);
-    return target;
-  }
-
-  return prependToMain(target);
-}
-
-function createVisibleMainMount(selector: string, key: string) {
-  const existing = findMount(key);
-  if (existing) return existing;
-  const target = createMount(key);
-  const anchor = document.querySelector(selector);
-  if (anchor?.parentElement) {
-    anchor.insertAdjacentElement("beforebegin", target);
-    return target;
-  }
-  return prependToMain(target);
-}
-
-function prependToMain(target: HTMLElement) {
-  const main = document.querySelector("main, #MainContent, [role='main']");
-  if (main) {
-    main.prepend(target);
-  } else {
-    document.body.prepend(target);
-  }
-  return target;
-}
-
-function createMount(key: string) {
-  const target = document.createElement("div");
-  target.setAttribute("data-aovboost-mount", key);
-  return target;
-}
-
-function findMount(key: string) {
-  const mount = document.querySelector<HTMLElement>(
-    `[data-aovboost-mount='${key}']`,
-  );
-  return mount?.isConnected ? mount : null;
-}
-
-function getCurrentPageType() {
-  const pathname = window.location.pathname;
-  const template = String(
-    (window as any).ShopifyAnalytics?.meta?.page?.pageType ||
-      document.body?.dataset?.template ||
-      "",
-  ).toLowerCase();
-  if (pathname === "/") return "home";
-  if (
-    /\/collections(?:\/|$)/.test(pathname) ||
-    template.includes("collection")
-  ) {
-    return "collection";
-  }
-  if (/\/products(?:\/|$)/.test(pathname) || template.includes("product")) {
-    return "product";
-  }
-  return "other";
 }

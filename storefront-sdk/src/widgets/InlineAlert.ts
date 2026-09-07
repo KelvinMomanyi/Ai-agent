@@ -19,8 +19,8 @@ export class InlineAlert extends BaseWidget {
         .alert {
           margin: 10px 0;
           box-shadow: none;
-          border-color: rgba(15, 118, 110, .32);
-          background: #f0fdfa;
+          border-color: var(--aovboost-line);
+          background: var(--aovboost-surface);
         }
         .head { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
       </style>

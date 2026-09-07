@@ -1,6 +1,7 @@
 import type { EventBus } from "./eventBus";
 import type { SessionManager, StorefrontSettings } from "./sessionManager";
 import type { OfferDecision, WidgetManager } from "./widgets/widgetManager";
+import { getStorefrontPage as getCurrentPageType } from "./widgets/placement";
 import {
   getStorefrontCurrency,
   setStorefrontCurrency,
@@ -23,11 +24,18 @@ type PendingOfferRequest = {
 
 export type OfferRuntimeEntry = {
   trigger: string;
-  outcome: "mounted" | "local_fallback" | "no_offer" | "request_failed";
+  outcome:
+    | "mounted"
+    | "unchanged"
+    | "suppressed"
+    | "local_fallback"
+    | "no_offer"
+    | "request_failed";
   widgetType: string | null;
   reasoning: string;
   httpStatus?: number;
   timestamp: number;
+  placementReason?: string;
 };
 
 const OFFER_REQUEST_TIMEOUT_MS = 8_000;
@@ -36,6 +44,7 @@ const STOREFRONT_READ_TIMEOUT_MS = 1_500;
 export class OfferPoller {
   private timer: number | undefined;
   private inFlight = false;
+  private pageVersion = 0;
   private stopped = false;
   private startupTimers = new Set<number>();
   private pendingRequests = new Map<string, PendingOfferRequest>();
@@ -99,6 +108,21 @@ export class OfferPoller {
       return null;
     }
     this.inFlight = true;
+    const pagePath = window.location.pathname;
+    const pageVersion = this.pageVersion;
+    const isCurrentPage = () =>
+      !this.stopped &&
+      pagePath === window.location.pathname &&
+      pageVersion === this.pageVersion;
+    const fallback = (reasoning: string, httpStatus?: number) =>
+      isCurrentPage()
+        ? this.mountLocalFallback(
+            trigger,
+            triggerPayload,
+            reasoning,
+            httpStatus,
+          )
+        : null;
 
     try {
       const snapshot = this.options.sessionManager.getSnapshot();
@@ -135,14 +159,13 @@ export class OfferPoller {
             : snapshot.cartValue;
       const auth = await this.options.sessionManager.getSignedAuthPayload();
       if (!auth) {
-        return this.mountLocalFallback(
-          trigger,
-          triggerPayload,
+        return fallback(
           "Storefront session unavailable; catalog-backed widgets require the app proxy connection.",
         );
       }
       const currency = getStorefrontCurrency();
       const currentProductId = await getCurrentProductId();
+      if (!isCurrentPage()) return null;
 
       const body = {
         ...auth,
@@ -172,9 +195,7 @@ export class OfferPoller {
         const refreshedAuth =
           await this.options.sessionManager.getSignedAuthPayload();
         if (!refreshedAuth) {
-          return this.mountLocalFallback(
-            trigger,
-            triggerPayload,
+          return fallback(
             "Storefront authentication could not be refreshed.",
             response.status,
           );
@@ -183,15 +204,14 @@ export class OfferPoller {
       }
 
       if (!response.ok) {
-        return this.mountLocalFallback(
-          trigger,
-          triggerPayload,
+        return fallback(
           `Offer request failed with HTTP ${response.status}.`,
           response.status,
         );
       }
 
       const decision = (await response.json()) as OfferDecision;
+      if (!isCurrentPage()) return null;
       if (!decision.widgetType) {
         if (decision.reasoning?.startsWith("proactive_")) {
           this.recordRuntime({
@@ -203,27 +223,24 @@ export class OfferPoller {
           });
           return null;
         }
-        return this.mountLocalFallback(
-          trigger,
-          triggerPayload,
+        return fallback(
           decision.reasoning || "The server found no eligible offer.",
           response.status,
         );
       }
 
-      this.options.widgetManager.mountDecision(decision);
+      const placement = this.options.widgetManager.mountDecision(decision);
       this.recordRuntime({
         trigger,
-        outcome: "mounted",
+        outcome: placement.status,
+        placementReason: placement.reason,
         widgetType: decision.widgetType,
-        reasoning: decision.reasoning || "Server decision mounted.",
+        reasoning: decision.reasoning || "Server offer evaluated.",
         httpStatus: response.status,
       });
       return decision;
     } catch (error) {
-      return this.mountLocalFallback(
-        trigger,
-        triggerPayload,
+      return fallback(
         error instanceof Error ? error.message : "Offer request failed.",
       );
     } finally {
@@ -244,6 +261,10 @@ export class OfferPoller {
     const detail = (event as CustomEvent).detail as
       Record<string, unknown> | undefined;
     if (detail?.type !== "page_view") return;
+    this.pageVersion += 1;
+    this.pendingRequests.clear();
+    this.startupTimers.forEach((timer) => window.clearTimeout(timer));
+    this.startupTimers.clear();
     this.options.widgetManager.resetPageContext();
     this.scheduleStartupRequest("navigation", 300);
     if (getCurrentPageType() === "product") {
@@ -353,10 +374,12 @@ export class OfferPoller {
       return null;
     }
 
-    this.options.widgetManager.mountDecision(decision);
+    const placement = this.options.widgetManager.mountDecision(decision);
     this.recordRuntime({
       trigger,
-      outcome: "local_fallback",
+      outcome:
+        placement.status === "mounted" ? "local_fallback" : placement.status,
+      placementReason: placement.reason,
       widgetType: decision.widgetType,
       reasoning,
       httpStatus,
@@ -392,10 +415,7 @@ function allowLocalProactiveMessage(settings: StorefrontSettings) {
       sessionStorage.getItem("aovboost_local_proactive_at") || 0,
     );
     if (count >= maximum || Date.now() - lastPromptAt < 120_000) return false;
-    sessionStorage.setItem(
-      "aovboost_local_proactive_count",
-      String(count + 1),
-    );
+    sessionStorage.setItem("aovboost_local_proactive_count", String(count + 1));
     sessionStorage.setItem("aovboost_local_proactive_at", String(Date.now()));
   } catch {
     // Continue with the widget manager guard when browser storage is blocked.
@@ -620,32 +640,6 @@ function getToastBody(trigger: string) {
     return "I can compare this with related products when you are ready.";
   }
   return "I can help find the right product or useful add-on.";
-}
-
-function getCurrentPageType() {
-  const path = window.location.pathname;
-  const pageType = String(
-    (window as any).ShopifyAnalytics?.meta?.page?.pageType ||
-      document.body?.dataset?.template ||
-      "",
-  ).toLowerCase();
-
-  if (path === "/") return "home";
-  if (/\/collections(?:\/|$)/.test(path) || pageType.includes("collection")) {
-    return "collection";
-  }
-  if (/\/products(?:\/|$)/.test(path) || pageType.includes("product")) {
-    return "product";
-  }
-  if (/\/cart(?:\/|$)/.test(path) || pageType.includes("cart")) return "cart";
-  if (/\/checkout(?:\/|$)/.test(path)) return "checkout";
-  if (
-    /\/thank_you(?:\/|$)/.test(path) ||
-    Boolean((window as any).Shopify?.checkout)
-  ) {
-    return "thankyou";
-  }
-  return "other";
 }
 
 async function getCurrentProductId() {

@@ -36,6 +36,7 @@ export class CountdownBanner extends BaseWidget {
         }
         .copy { min-width: 0; }
         .timer { font-size: 13px; font-weight: 800; white-space: nowrap; }
+        ${this.payload.presentation === "inline" ? `.banner { position: static; top: auto; z-index: auto; border: 1px solid var(--aovboost-line); margin: 16px 0; }` : ""}
         @media (max-width: 520px) {
           .banner { grid-template-columns: minmax(0, 1fr) auto; }
           .timer { grid-column: 1 / -1; }
@@ -65,7 +66,8 @@ export class CountdownBanner extends BaseWidget {
       );
     });
     this.tick();
-    this.timer = window.setInterval(() => this.tick(), 1000);
+    if (this.container.isConnected)
+      this.timer = window.setInterval(() => this.tick(), 1000);
   }
 
   destroy(): void {
