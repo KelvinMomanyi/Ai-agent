@@ -24,7 +24,8 @@
     "prisma": "prisma",
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
-    "test": "vitest run --config vitest.config.ts"
+    "test": "vitest run --config vitest.config.ts",
+    "tokens:audit": "node --env-file=.env scripts/audit-offline-tokens.mjs"
   },
   "type": "module",
   "engines": {

@@ -22,6 +22,9 @@ export class UpstashSessionStorage implements SessionStorage {
 
   async storeSession(session: Session): Promise<boolean> {
     const storedInPrisma = await this.storeSessionInPrisma(session);
+    // Rotated credentials must survive cache loss and process restarts.
+    // Never acknowledge a cache-only write as a successful token rotation.
+    if (!storedInPrisma) return false;
     if (!this.redis) return storedInPrisma;
 
     try {
@@ -40,6 +43,10 @@ export class UpstashSessionStorage implements SessionStorage {
   }
 
   async loadSession(id: string): Promise<Session | undefined> {
+    // PostgreSQL is authoritative for rotating offline credentials. A stale
+    // Redis entry must not hide a newer pair saved during a cache outage.
+    if (id.startsWith("offline_")) return this.loadSessionFromPrisma(id);
+
     try {
       if (!this.redis) return this.loadSessionFromPrisma(id);
 
@@ -125,7 +132,9 @@ export class UpstashSessionStorage implements SessionStorage {
       if (!Array.isArray(ids) || ids.length === 0) {
         ids = await (this.redis.smembers as any)(LEGACY_SHOP_SESSIONS_KEY);
       }
-      if (!Array.isArray(ids) || ids.length === 0) return [];
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return this.findSessionsByShopFromPrisma(shop);
+      }
 
       const sessions = await Promise.all(
         ids.map((id: string) => this.loadSession(id)),
@@ -139,7 +148,9 @@ export class UpstashSessionStorage implements SessionStorage {
           ...filtered.map(({ id }) => id),
         );
       }
-      return filtered;
+      return filtered.length > 0
+        ? filtered
+        : this.findSessionsByShopFromPrisma(shop);
     } catch {
       return this.findSessionsByShopFromPrisma(shop);
     }

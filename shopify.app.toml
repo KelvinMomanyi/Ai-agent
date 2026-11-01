@@ -3,7 +3,7 @@
 client_id = "b314197727859b8c244255e176f8b2af"
 name = "AOVBoost"
 handle = "ai-agent-21"
-application_url = "https://ai-agent-plum-eight.vercel.app"
+application_url = "https://ai-agent-dusky-nine.vercel.app"
 embedded = true
 
 [build]
@@ -16,9 +16,9 @@ scopes = "read_orders,read_products,write_discounts,write_app_proxy"
 
 [auth]
 redirect_urls = [
-  "https://ai-agent-plum-eight.vercel.app/auth/callback",
-  "https://ai-agent-plum-eight.vercel.app/auth/shopify/callback",
-  "https://ai-agent-plum-eight.vercel.app/api/auth/callback"
+  "https://ai-agent-dusky-nine.vercel.app/auth/callback",
+  "https://ai-agent-dusky-nine.vercel.app/auth/shopify/callback",
+  "https://ai-agent-dusky-nine.vercel.app/api/auth/callback"
 ]
 
 [webhooks]
@@ -45,7 +45,7 @@ api_version = "2026-07"
   uri = "/api/webhooks"
 
 [app_proxy]
-url = "https://ai-agent-plum-eight.vercel.app/api"
+url = "https://ai-agent-dusky-nine.vercel.app/api"
 subpath = "aovboost"
 prefix = "apps"
 

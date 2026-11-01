@@ -6,6 +6,11 @@ import {
 } from "@shopify/shopify-app-react-router/server";
 import prisma from "./db.server";
 import { ensureExpiringOfflineToken } from "./services/offline-token-migration.server";
+import {
+  assertPermanentShopDomain,
+  getApplicationOnlyAdminContext,
+  hasApplicationOnlyCredentials,
+} from "./services/application-only-token.server";
 import { UpstashSessionStorage } from "./upstash-session-storage.server";
 
 const shopify = shopifyApp({
@@ -121,6 +126,20 @@ export const authenticate = {
     };
   },
 } as typeof shopify.authenticate;
-export const unauthenticated = shopify.unauthenticated;
+export const unauthenticated: typeof shopify.unauthenticated = {
+  ...shopify.unauthenticated,
+  admin: async (shop) => {
+    assertPermanentShopDomain(shop);
+    if (hasApplicationOnlyCredentials()) {
+      return getApplicationOnlyAdminContext(shop);
+    }
+
+    const stored = await shopify.sessionStorage.loadSession(`offline_${shop}`);
+    if (stored) {
+      await ensureExpiringOfflineToken(stored, shopify.sessionStorage);
+    }
+    return shopify.unauthenticated.admin(shop);
+  },
+};
 export const login = shopify.login;
 export const sessionStorage = shopify.sessionStorage;

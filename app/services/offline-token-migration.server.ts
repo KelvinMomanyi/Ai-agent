@@ -107,7 +107,11 @@ async function persistRotatedSession(
   session: Session,
 ) {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    if (await storage.storeSession(session)) return;
+    try {
+      if (await storage.storeSession(session)) return;
+    } catch {
+      // Retain the returned pair and retry persistence, never the exchange.
+    }
   }
 
   throw new OfflineTokenMigrationError(
@@ -122,7 +126,7 @@ async function migrateWithShopify(input: {
   return getTokenApi().auth.migrateToExpiringToken(input);
 }
 
-function getTokenApi() {
+export function getTokenApi() {
   if (tokenApi) return tokenApi;
 
   const apiKey = process.env.SHOPIFY_API_KEY;

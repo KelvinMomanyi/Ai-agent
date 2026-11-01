@@ -44,6 +44,9 @@ export async function migrateOfflineTokenBatch(
           isOnline: false,
           scope: record.scope || undefined,
           accessToken: record.accessToken,
+          expires: record.expires || undefined,
+          refreshToken: record.refreshToken || undefined,
+          refreshTokenExpires: record.refreshTokenExpires || undefined,
         });
       await ensureExpiringOfflineToken(session, sessionStorage);
       results.push({ shop: record.shop, status: "migrated" });

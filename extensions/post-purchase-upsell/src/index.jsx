@@ -14,7 +14,7 @@ import {
   View,
 } from "@shopify/post-purchase-ui-extensions-react";
 
-const APP_URL = "https://ai-agent-plum-eight.vercel.app";
+const APP_URL = "https://ai-agent-dusky-nine.vercel.app";
 
 export const ShouldRender = extend(
   "Checkout::PostPurchase::ShouldRender",

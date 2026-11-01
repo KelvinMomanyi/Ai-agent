@@ -115,4 +115,42 @@ describe("offline token migration", () => {
     ).rejects.toThrow("incomplete expiry metadata");
     expect(migrate).not.toHaveBeenCalled();
   });
+
+  it("retries thrown storage failures without repeating the token exchange", async () => {
+    const original = perpetualSession("throwing-storage.myshopify.com");
+    const { storage, storeSession } = memoryStorage(original);
+    storeSession.mockRejectedValueOnce(new Error("database unavailable"));
+    const migrate = vi.fn(async () => ({
+      session: rotatedSession(original.shop),
+    }));
+    await ensureExpiringOfflineToken(original, storage, migrate);
+    expect(storeSession).toHaveBeenCalledTimes(2);
+    expect(migrate).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a persistence failure instead of declaring migration successful", async () => {
+    const original = perpetualSession("failed-storage.myshopify.com");
+    const { storage, storeSession } = memoryStorage(original, [
+      false,
+      false,
+      false,
+    ]);
+    await expect(
+      ensureExpiringOfflineToken(original, storage, async () => ({
+        session: rotatedSession(original.shop),
+      })),
+    ).rejects.toThrow("could not be persisted");
+    expect(storeSession).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects credentials returned for a different store", async () => {
+    const original = perpetualSession("expected-store.myshopify.com");
+    const { storage, storeSession } = memoryStorage(original);
+    await expect(
+      ensureExpiringOfflineToken(original, storage, async () => ({
+        session: rotatedSession("different-store.myshopify.com"),
+      })),
+    ).rejects.toThrow("incomplete expiring token data");
+    expect(storeSession).not.toHaveBeenCalled();
+  });
 });

@@ -148,6 +148,9 @@ app in Shopify Checkout settings and the app must have post-purchase access.
 
 ### Expiring offline access token rollout
 
+For the read-only audit, controlled migration and private-key background access
+setup, follow [the rollout guide](docs/offline-token-rollout.md).
+
 This app requests expiring Shopify offline access tokens and automatically
 rotates them through the official Shopify library. Deploy the Prisma migrations
 before deploying the application so the refresh token fields exist.
@@ -158,7 +161,7 @@ To migrate dormant installations in a controlled batch, set a strong
 protected endpoint:
 
 ```sh
-curl -X POST "https://ai-agent-plum-eight.vercel.app/internal/token-migration?limit=20" \
+curl -X POST "https://ai-agent-dusky-nine.vercel.app/internal/token-migration?limit=20" \
   -H "Authorization: Bearer $OFFLINE_TOKEN_MIGRATION_SECRET"
 ```
 
