@@ -50,6 +50,7 @@ export class OfferPoller {
   private pendingRequests = new Map<string, PendingOfferRequest>();
   private runtimeHistory: OfferRuntimeEntry[] = [];
   private abortController = new AbortController();
+  private requestController: AbortController | undefined;
   private options: OfferPollerOptions;
 
   constructor(options: OfferPollerOptions) {
@@ -57,6 +58,9 @@ export class OfferPoller {
   }
 
   init(): void {
+    window.addEventListener("pagehide", this.abortRequest, {
+      signal: this.abortController.signal,
+    });
     this.scheduleStartupRequest("initial", 650);
     if (getCurrentPageType() === "product") {
       this.scheduleStartupRequest("social_proof", 950);
@@ -82,6 +86,7 @@ export class OfferPoller {
 
   destroy(): void {
     this.stopped = true;
+    this.abortRequest();
     this.abortController.abort();
     if (this.timer) window.clearInterval(this.timer);
     this.startupTimers.forEach((timer) => window.clearTimeout(timer));
@@ -102,7 +107,7 @@ export class OfferPoller {
     trigger = "manual",
     triggerPayload: Record<string, unknown> = {},
   ): Promise<OfferDecision | null> {
-    if (this.stopped) return null;
+    if (this.stopped || document.visibilityState === "hidden") return null;
     if (this.inFlight) {
       this.enqueuePendingRequest(trigger, triggerPayload);
       return null;
@@ -261,6 +266,7 @@ export class OfferPoller {
     const detail = (event as CustomEvent).detail as
       Record<string, unknown> | undefined;
     if (detail?.type !== "page_view") return;
+    this.abortRequest();
     this.pageVersion += 1;
     this.pendingRequests.clear();
     this.startupTimers.forEach((timer) => window.clearTimeout(timer));
@@ -313,6 +319,7 @@ export class OfferPoller {
 
   private async postOffer(body: Record<string, unknown>) {
     const controller = new AbortController();
+    this.requestController = controller;
     const timeout = window.setTimeout(
       () => controller.abort(),
       OFFER_REQUEST_TIMEOUT_MS,
@@ -325,13 +332,16 @@ export class OfferPoller {
           "X-AOVBoost-Shop": this.options.shop,
         },
         body: JSON.stringify(body),
-        keepalive: true,
         signal: controller.signal,
       });
     } finally {
       window.clearTimeout(timeout);
+      if (this.requestController === controller)
+        this.requestController = undefined;
     }
   }
+
+  private abortRequest = () => this.requestController?.abort();
 
   private mountLocalFallback(
     trigger: string,

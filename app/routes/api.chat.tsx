@@ -1,3 +1,4 @@
+import { isInstalledShop } from "../models/installedShop.server";
 import {
   data as json,
   type ActionFunctionArgs,
@@ -85,6 +86,9 @@ import { toMerchantSalesSettings } from "../sales/settings";
 import { normalizeShopperProfile } from "../sales/shopperProfile";
 import { rankUpsells } from "../sales/upsellEngine";
 import type { SalesState, ShopperProfile } from "../sales/types";
+
+// Forward client disconnects to cancellable UI work on Vercel.
+export const config = { runtime: "nodejs", supportsCancellation: true };
 
 type ChatBody = {
   sessionId?: string;
@@ -274,6 +278,7 @@ const handleChatRequest = async ({ request }: ActionFunctionArgs) => {
     getShopUrgencyLevel(shop),
     loadChatContextSources({
       shop,
+      query: userMessage,
       session,
       pageContext: body.storefrontContext,
       clientHistory: clientMessageHistory,
@@ -561,6 +566,9 @@ const handleChatRequest = async ({ request }: ActionFunctionArgs) => {
     );
 
   const encoder = new TextEncoder();
+  const abortController = new AbortController();
+  const chatSignal = AbortSignal.any([request.signal, abortController.signal]);
+  let streamClosed = false;
   let finalReply = "";
   let provider: "gemini" | "groq" | "mistral" | "deepseek" | "heuristic" =
     "heuristic";
@@ -568,11 +576,14 @@ const handleChatRequest = async ({ request }: ActionFunctionArgs) => {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (value: unknown) => {
+        if (streamClosed || chatSignal.aborted) return;
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify(value)}\n\n`),
         );
       };
       const done = () => {
+        if (streamClosed || chatSignal.aborted) return;
+        streamClosed = true;
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
       };
@@ -699,6 +710,8 @@ const handleChatRequest = async ({ request }: ActionFunctionArgs) => {
         }
 
         let aiResult = await callAI({
+          shop,
+          signal: chatSignal,
           triggerName:
             messageIntent === "price_sensitive"
               ? "price_sensitive_chat"
@@ -732,6 +745,7 @@ const handleChatRequest = async ({ request }: ActionFunctionArgs) => {
             shouldProactivelyFollowUp: false,
           }),
         });
+        if (chatSignal.aborted) return;
         let plan = parseSalesAgentResponse(
           parseAiJson<unknown>(aiResult.content),
         );
@@ -741,6 +755,8 @@ const handleChatRequest = async ({ request }: ActionFunctionArgs) => {
         );
         if (toolResults.length) {
           aiResult = await callAI({
+            shop,
+            signal: chatSignal,
             triggerName: "chat:tool_results",
             systemPrompt,
             userPrompt: JSON.stringify({
@@ -758,6 +774,7 @@ const handleChatRequest = async ({ request }: ActionFunctionArgs) => {
               action: null,
             }),
           });
+          if (chatSignal.aborted) return;
           plan = parseSalesAgentResponse(
             parseAiJson<unknown>(aiResult.content),
           );
@@ -884,6 +901,7 @@ const handleChatRequest = async ({ request }: ActionFunctionArgs) => {
         await persistAssistantMessage(shop, session.id, finalReply, provider);
         done();
       } catch (error) {
+        if (chatSignal.aborted) return;
         console.error("AOVBoost chat stream failed:", getErrorMessage(error));
         if (!finalReply) {
           finalReply = fallbackReply;
@@ -899,12 +917,16 @@ const handleChatRequest = async ({ request }: ActionFunctionArgs) => {
         done();
       }
     },
+    cancel() {
+      streamClosed = true;
+      abortController.abort();
+    },
   });
 
   return new Response(stream, {
     headers: withCors({
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-store",
       "X-Accel-Buffering": "no",
     }),
   });
@@ -936,18 +958,6 @@ async function persistAssistantMessage(
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
-}
-
-async function isInstalledShop(shop: string) {
-  const [session, legacyShop] = await Promise.all([
-    prisma.session.findFirst({ where: { shop }, select: { id: true } }),
-    prisma.shop.findUnique({
-      where: { shopDomain: shop },
-      select: { shopDomain: true },
-    }),
-  ]);
-
-  return Boolean(session || legacyShop);
 }
 
 async function getShopUrgencyLevel(shop: string) {

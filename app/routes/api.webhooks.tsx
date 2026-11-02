@@ -14,7 +14,8 @@ import {
   mapProductWebhook,
   type ShopifyProductInput,
 } from "../models/productCatalogMapping";
-import { refreshCatalogCache } from "../models/catalogCache.server";
+import { invalidateCatalogCache } from "../models/catalogCache.server";
+import { redis } from "../redis.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, topic, payload } = await authenticate.webhook(request);
@@ -43,7 +44,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (!product) {
         if (productId) {
           await deleteProduct(shop, productId);
-          await refreshCatalogCacheSafely(shop);
+          await invalidateCatalogCacheSafely(shop);
         }
       } else if (product.id) {
         const existing =
@@ -67,7 +68,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           previousPrice: existing?.price?.toString(),
           payload,
         });
-        await refreshCatalogCacheSafely(shop);
+        await invalidateCatalogCacheSafely(shop);
       }
       return new Response("OK");
     }
@@ -78,7 +79,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
       if (productId) {
         await deleteProduct(shop, productId);
-        await refreshCatalogCacheSafely(shop);
+        await invalidateCatalogCacheSafely(shop);
       }
       return new Response("OK");
     }
@@ -209,11 +210,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 };
 
-async function refreshCatalogCacheSafely(shop: string) {
+async function invalidateCatalogCacheSafely(shop: string) {
   try {
-    await refreshCatalogCache(shop);
+    await invalidateCatalogCache(shop);
   } catch (error) {
-    console.warn("AOVBoost catalog cache refresh after webhook failed:", {
+    console.warn("AOVBoost catalog invalidation after webhook failed:", {
       shop,
       error: getErrorMessage(error),
     });
@@ -245,6 +246,12 @@ async function deleteShopData(shop: string, deleteSessions: boolean) {
 }
 
 async function purgeShopData(shop: string) {
+  await Promise.all([
+    redis.del(`installed:${shop}`),
+    redis.del(`settings:${shop}`),
+    redis.del(`public-settings:${shop}`),
+    invalidateCatalogCache(shop),
+  ]);
   const sessions = await sessionStorage.findSessionsByShop(shop);
   if (sessions.length > 0) {
     await sessionStorage.deleteSessions(sessions.map(({ id }) => id));

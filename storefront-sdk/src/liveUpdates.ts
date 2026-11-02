@@ -37,6 +37,8 @@ export class LiveUpdates {
   private destroyed = false;
   private enabled = true;
   private seenEventIds = new Set<string>();
+  private emptyPolls = 0;
+  private inFlight = false;
 
   constructor(private options: LiveUpdatesOptions) {}
 
@@ -44,6 +46,8 @@ export class LiveUpdates {
     if (this.running || this.destroyed || !this.enabled) return;
     window.addEventListener("pagehide", this.handlePageHide);
     window.addEventListener("pageshow", this.handlePageShow);
+    document.addEventListener("visibilitychange", this.handleVisibility);
+    document.addEventListener("aovboost:event", this.handleNavigation);
     this.running = true;
     this.schedule(INITIAL_POLL_DELAY_MS);
   }
@@ -53,6 +57,8 @@ export class LiveUpdates {
     this.pause();
     window.removeEventListener("pagehide", this.handlePageHide);
     window.removeEventListener("pageshow", this.handlePageShow);
+    document.removeEventListener("visibilitychange", this.handleVisibility);
+    document.removeEventListener("aovboost:event", this.handleNavigation);
     this.seenEventIds.clear();
   }
 
@@ -62,6 +68,20 @@ export class LiveUpdates {
     if (this.destroyed || !this.enabled || this.running) return;
     this.running = true;
     this.schedule(INITIAL_POLL_DELAY_MS);
+  };
+
+  private handleVisibility = () => {
+    if (document.visibilityState === "hidden") this.pause();
+    else {
+      this.emptyPolls = 0;
+      this.handlePageShow();
+    }
+  };
+
+  private handleNavigation = (event: Event) => {
+    if ((event as CustomEvent).detail?.type !== "page_view") return;
+    this.emptyPolls = 0;
+    if (this.running) this.schedule(INITIAL_POLL_DELAY_MS);
   };
 
   private pause(): void {
@@ -82,6 +102,21 @@ export class LiveUpdates {
   }
 
   private async poll(): Promise<void> {
+    if (
+      !this.running ||
+      this.destroyed ||
+      document.visibilityState === "hidden"
+    )
+      return;
+    if (
+      !/\/(products\/|cart(?:\/|$))/.test(window.location.pathname) ||
+      this.options.sessionManager.isActive?.() === false
+    ) {
+      this.schedule(60_000);
+      return;
+    }
+    if (this.inFlight) return;
+    this.inFlight = true;
     let nextDelay = DEFAULT_POLL_INTERVAL_MS;
     try {
       const result = await this.requestUpdates();
@@ -92,9 +127,21 @@ export class LiveUpdates {
         return;
       }
       result.events.forEach((event) => this.dispatch(event));
+      this.emptyPolls = result.events.length
+        ? 0
+        : Math.min(this.emptyPolls + 1, 5);
+      nextDelay = Math.max(
+        nextDelay,
+        Math.min(120_000, DEFAULT_POLL_INTERVAL_MS * 2 ** this.emptyPolls),
+      );
     } catch {
-      // A transient network failure leaves the next bounded poll available.
+      this.emptyPolls = Math.min(this.emptyPolls + 1, 5);
+      nextDelay = Math.min(
+        120_000,
+        DEFAULT_POLL_INTERVAL_MS * 2 ** this.emptyPolls,
+      );
     } finally {
+      this.inFlight = false;
       this.requestController = undefined;
       this.schedule(nextDelay);
     }
@@ -105,14 +152,27 @@ export class LiveUpdates {
     events: LiveUpdate[];
     pollAfterMs: number;
   }> {
+    if (
+      !this.running ||
+      this.destroyed ||
+      document.visibilityState === "hidden"
+    )
+      throw new Error("Live updates paused");
     const auth = await this.options.sessionManager.getSignedAuthPayload();
     if (!auth) {
-      return { enabled: true, events: [], pollAfterMs: DEFAULT_POLL_INTERVAL_MS };
+      return {
+        enabled: true,
+        events: [],
+        pollAfterMs: DEFAULT_POLL_INTERVAL_MS,
+      };
     }
 
     const controller = new AbortController();
     this.requestController = controller;
-    const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      REQUEST_TIMEOUT_MS,
+    );
 
     let response: Response;
     try {
@@ -154,7 +214,9 @@ export class LiveUpdates {
     const body = (await response.json()) as LiveResponse;
     return {
       enabled: body.enabled !== false,
-      events: Array.isArray(body.events) ? body.events.filter(isLiveUpdate) : [],
+      events: Array.isArray(body.events)
+        ? body.events.filter(isLiveUpdate)
+        : [],
       pollAfterMs: clampPollInterval(body.pollAfterMs),
     };
   }
@@ -162,6 +224,8 @@ export class LiveUpdates {
   private dispatch(event: LiveUpdate): void {
     if (this.seenEventIds.has(event.id)) return;
     this.seenEventIds.add(event.id);
+    if (this.seenEventIds.size > 200)
+      this.seenEventIds.delete(this.seenEventIds.values().next().value!);
     document.dispatchEvent(
       new CustomEvent("aovboost:system-event", { detail: event }),
     );
@@ -178,7 +242,8 @@ function isLiveUpdate(value: unknown): value is LiveUpdate {
   return (
     typeof event.id === "string" &&
     typeof event.productId === "string" &&
-    (event.type === "price_drop_webhook" || event.type === "low_inventory_alert")
+    (event.type === "price_drop_webhook" ||
+      event.type === "low_inventory_alert")
   );
 }
 

@@ -27,6 +27,7 @@ model Session {
   collaborator        Boolean?  @default(false)
   emailVerified       Boolean?  @default(false)
 
+  @@index([shop])
   @@map("session")
 }
 
@@ -53,6 +54,9 @@ model Product {
 
   @@id([shop, id])
   @@index([shop])
+  @@index([shop, updatedAt])
+  @@index([shop, productType, updatedAt])
+  @@index([shop, handle])
 }
 
 model ProductAffinity {
@@ -124,33 +128,33 @@ model BundleItem {
 }
 
 model ShopperSession {
-  id               String         @id @default(cuid())
-  shop             String
-  anonymousId      String
-  customerId       String?
-  startedAt        DateTime       @default(now())
-  lastActivityAt   DateTime       @default(now())
-  journeyStage     String         @default("discovering")
-  salesState       String         @default("BROWSING")
-  intentScore      Float          @default(0)
-  hesitationScore  Float          @default(0)
-  shopperProfile   Json           @default("{}")
-  viewedProductIds String[]       @default([])
-  cartProductIds   String[]       @default([])
-  chatEngaged      Boolean        @default(false)
-  checkoutStarted  Boolean        @default(false)
-  purchaseCompleted Boolean       @default(false)
-  orderId          String?
-  orderValue       Decimal?       @db.Decimal(18, 2)
-  aiAttributedRevenue Decimal     @default(0) @db.Decimal(18, 2)
-  totalPageViews   Int            @default(0)
-  sessionDuration  Int            @default(0)
-  context          Json           @default("{}")
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-  events           ShopperEvent[]
-  offers           Offer[]
-  chatMessages     ChatMessage[]
+  id                     String                  @id @default(cuid())
+  shop                   String
+  anonymousId            String
+  customerId             String?
+  startedAt              DateTime                @default(now())
+  lastActivityAt         DateTime                @default(now())
+  journeyStage           String                  @default("discovering")
+  salesState             String                  @default("BROWSING")
+  intentScore            Float                   @default(0)
+  hesitationScore        Float                   @default(0)
+  shopperProfile         Json                    @default("{}")
+  viewedProductIds       String[]                @default([])
+  cartProductIds         String[]                @default([])
+  chatEngaged            Boolean                 @default(false)
+  checkoutStarted        Boolean                 @default(false)
+  purchaseCompleted      Boolean                 @default(false)
+  orderId                String?
+  orderValue             Decimal?                @db.Decimal(18, 2)
+  aiAttributedRevenue    Decimal                 @default(0) @db.Decimal(18, 2)
+  totalPageViews         Int                     @default(0)
+  sessionDuration        Int                     @default(0)
+  context                Json                    @default("{}")
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  events                 ShopperEvent[]
+  offers                 Offer[]
+  chatMessages           ChatMessage[]
   recommendationOutcomes RecommendationOutcome[]
 
   @@unique([shop, anonymousId])
@@ -192,6 +196,7 @@ model Offer {
   experiment     Experiment?    @relation(fields: [experimentId], references: [id], onDelete: SetNull)
 
   @@index([shop, widgetType, createdAt])
+  @@index([shop, createdAt])
   @@index([sessionId])
   @@index([shop, experimentId, widgetType, abVariant])
 }
@@ -229,36 +234,36 @@ model Experiment {
 }
 
 model AppSettings {
-  id                   String   @id @default(cuid())
-  shop                 String   @unique
-  chatEnabled          Boolean  @default(true)
-  chatGreeting         String   @default("Hi! Can I help you find the perfect product?")
-  bundlesEnabled       Boolean  @default(true)
-  upsellEnabled        Boolean  @default(true)
-  discountNudgeEnabled Boolean  @default(true)
-  discountThreshold    Decimal  @default(50) @db.Decimal(18, 2)
-  exitIntentEnabled    Boolean  @default(true)
-  postPurchaseEnabled  Boolean  @default(true)
-  aiTone               String   @default("friendly")
-  brandVoice           String?
-  storeKnowledge       String?
-  blockedProductIds    String[] @default([])
-  excludedCollectionIds String[] @default([])
-  preferredProductIds  String[] @default([])
-  upsellPriorityProductIds String[] @default([])
-  proactiveMessagesEnabled Boolean @default(true)
-  proactiveDelaySeconds Int @default(15)
-  maxProactivePrompts   Int @default(2)
-  maxProductRecommendations Int @default(3)
-  minimumProactiveConfidence Float @default(0.65)
-  minimumUpsellIntentScore Int @default(55)
-  hesitationDetectionEnabled Boolean @default(true)
-  discountPermission   Boolean @default(false)
-  allowedDiscountCodes String[] @default([])
-  bundleSupportEnabled Boolean @default(true)
-  analyticsEnabled     Boolean @default(true)
-  bundleDiscountId     String?
-  updatedAt            DateTime @updatedAt
+  id                         String   @id @default(cuid())
+  shop                       String   @unique
+  chatEnabled                Boolean  @default(true)
+  chatGreeting               String   @default("Hi! Can I help you find the perfect product?")
+  bundlesEnabled             Boolean  @default(true)
+  upsellEnabled              Boolean  @default(true)
+  discountNudgeEnabled       Boolean  @default(true)
+  discountThreshold          Decimal  @default(50) @db.Decimal(18, 2)
+  exitIntentEnabled          Boolean  @default(true)
+  postPurchaseEnabled        Boolean  @default(true)
+  aiTone                     String   @default("friendly")
+  brandVoice                 String?
+  storeKnowledge             String?
+  blockedProductIds          String[] @default([])
+  excludedCollectionIds      String[] @default([])
+  preferredProductIds        String[] @default([])
+  upsellPriorityProductIds   String[] @default([])
+  proactiveMessagesEnabled   Boolean  @default(true)
+  proactiveDelaySeconds      Int      @default(15)
+  maxProactivePrompts        Int      @default(2)
+  maxProductRecommendations  Int      @default(3)
+  minimumProactiveConfidence Float    @default(0.65)
+  minimumUpsellIntentScore   Int      @default(55)
+  hesitationDetectionEnabled Boolean  @default(true)
+  discountPermission         Boolean  @default(false)
+  allowedDiscountCodes       String[] @default([])
+  bundleSupportEnabled       Boolean  @default(true)
+  analyticsEnabled           Boolean  @default(true)
+  bundleDiscountId           String?
+  updatedAt                  DateTime @updatedAt
 }
 
 model RecommendationOutcome {
@@ -287,6 +292,7 @@ model RecommendationOutcome {
   session                ShopperSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([shop, productId, shownAt])
+  @@index([shop, shownAt])
   @@index([sessionId, shownAt])
   @@index([shop, orderId])
   @@index([shop, recommendationType, shownAt])
@@ -346,6 +352,7 @@ model Event {
   updatedAt DateTime @updatedAt
 
   @@unique([event, orderId, storeId], name: "event_orderId_storeId")
+  @@index([storeId, event, timestamp])
 }
 
 model VisitorSession {

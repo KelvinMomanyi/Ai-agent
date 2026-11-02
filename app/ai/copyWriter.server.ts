@@ -1,5 +1,7 @@
 import type { AppSettings } from "@prisma/client";
 import { callAI, parseAiJson } from "./client.server";
+import { createHash } from "node:crypto";
+import { getJsonCache, setJsonCache } from "../redis.server";
 import { COPY_WRITER_SYSTEM } from "./prompts";
 import type { WidgetCopy } from "./types";
 
@@ -13,7 +15,7 @@ export async function generateWidgetCopy(
   productContext: Record<string, unknown>,
   offerDetails: Record<string, unknown>,
   settings: CopySettings,
-  options: { useAI?: boolean } = {},
+  options: { useAI?: boolean; signal?: AbortSignal } = {},
 ): Promise<WidgetCopy> {
   const fallback = buildFallbackCopy(
     widgetType,
@@ -22,6 +24,19 @@ export async function generateWidgetCopy(
     settings,
   );
   if (options.useAI === false) return fallback;
+  const key = `copy:v2:${settings.shop}:${createHash("sha256")
+    .update(
+      JSON.stringify({
+        widgetType,
+        productContext,
+        offerDetails,
+        tone: settings.aiTone,
+        voice: settings.brandVoice,
+      }),
+    )
+    .digest("hex")}`;
+  const cached = await getJsonCache<WidgetCopy>(key);
+  if (cached) return cached;
   const brandVoiceSection = settings.brandVoice
     ? `Brand Voice:\n${settings.brandVoice}`
     : "";
@@ -33,6 +48,8 @@ export async function generateWidgetCopy(
     .replace("{brandVoiceSection}", brandVoiceSection);
 
   const aiResult = await callAI({
+    shop: settings.shop,
+    signal: options.signal,
     triggerName: `copy:${widgetType}`,
     systemPrompt,
     userPrompt: JSON.stringify({
@@ -48,7 +65,9 @@ export async function generateWidgetCopy(
   });
   const parsed = parseAiJson<Record<string, unknown>>(aiResult.content);
 
-  return normalizeCopy(widgetType, parsed, fallback);
+  const copy = normalizeCopy(widgetType, parsed, fallback);
+  if (!aiResult.fallbackUsed) await setJsonCache(key, copy, 1800);
+  return copy;
 }
 
 function getSchemaHint(widgetType: string) {

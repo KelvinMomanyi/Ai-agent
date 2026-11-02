@@ -1,6 +1,19 @@
-import { data as json, type LoaderFunctionArgs, useFetcher, useLoaderData } from "react-router";
+import {
+  data as json,
+  type LoaderFunctionArgs,
+  useFetcher,
+  useLoaderData,
+} from "react-router";
 import { useEffect, useRef } from "react";
-import { Badge, BlockStack, Card, InlineStack, Layout, Page, Text } from "@shopify/polaris";
+import {
+  Badge,
+  BlockStack,
+  Card,
+  InlineStack,
+  Layout,
+  Page,
+  Text,
+} from "@shopify/polaris";
 import { AovMetricCard } from "../components/dashboard/AovMetricCard";
 import { RevenueChart } from "../components/dashboard/RevenueChart";
 import { WidgetPerformanceTable } from "../components/dashboard/WidgetPerformanceTable";
@@ -28,15 +41,25 @@ type SyncResponse = {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
-  const [metrics, catalogReadiness, activeBundleCount, syncProgress, currencyResponse] = await Promise.all([
+  const [
+    metrics,
+    catalogReadiness,
+    activeBundleCount,
+    syncProgress,
+    currencyResponse,
+  ] = await Promise.all([
     getDashboardMetrics(session.shop),
     getCatalogReadiness(session.shop),
     prisma.bundle.count({ where: { shop: session.shop, isActive: true } }),
     getJsonCache<SyncProgress>(cacheKeys.syncProgress(session.shop)),
-    admin.graphql(`#graphql\nquery AOVBoostShopCurrency { shop { currencyCode } }`),
+    admin.graphql(
+      `#graphql\nquery AOVBoostShopCurrency { shop { currencyCode } }`,
+    ),
   ]);
   const currencyResult: any = await currencyResponse.json();
-  const currencyCode = /^[A-Z]{3}$/.test(currencyResult.data?.shop?.currencyCode)
+  const currencyCode = /^[A-Z]{3}$/.test(
+    currencyResult.data?.shop?.currencyCode,
+  )
     ? currencyResult.data.shop.currencyCode
     : "USD";
 
@@ -55,8 +78,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function AovBoostDashboard() {
-  const { metrics, providers, productCount, catalogReadiness, activeBundleCount, syncProgress, currencyCode } =
-    useLoaderData<typeof loader>();
+  const {
+    metrics,
+    providers,
+    productCount,
+    catalogReadiness,
+    activeBundleCount,
+    syncProgress,
+    currencyCode,
+  } = useLoaderData<typeof loader>();
   const syncFetcher = useFetcher<SyncResponse>();
   const automaticRepairStarted = useRef(false);
   const currentProgress = syncFetcher.data?.progress ?? syncProgress;
@@ -65,8 +95,8 @@ export default function AovBoostDashboard() {
     syncFetcher.data?.catalogReadiness ?? catalogReadiness;
   const syncShouldContinue = Boolean(
     currentProgress?.status &&
-      currentProgress.status !== "complete" &&
-      currentProgress.status !== "failed",
+    currentProgress.status !== "complete" &&
+    currentProgress.status !== "failed",
   );
   const syncIsSubmitting = syncFetcher.state !== "idle" || syncShouldContinue;
   const syncFailed =
@@ -74,10 +104,15 @@ export default function AovBoostDashboard() {
 
   useEffect(() => {
     if (syncFetcher.state !== "idle" || !syncShouldContinue) return;
-    syncFetcher.submit(
-      { intent: "continue" },
-      { method: "post", action: "/api/sync" },
+    const timer = window.setTimeout(
+      () =>
+        syncFetcher.submit(
+          { intent: "continue" },
+          { method: "post", action: "/api/sync" },
+        ),
+      1500,
     );
+    return () => window.clearTimeout(timer);
   }, [syncFetcher, syncShouldContinue]);
 
   useEffect(() => {
@@ -94,7 +129,12 @@ export default function AovBoostDashboard() {
       { intent: "restart" },
       { method: "post", action: "/api/sync" },
     );
-  }, [currentReadiness.resyncRequired, syncFailed, syncShouldContinue, syncFetcher]);
+  }, [
+    currentReadiness.resyncRequired,
+    syncFailed,
+    syncShouldContinue,
+    syncFetcher,
+  ]);
 
   return (
     <Page
@@ -105,9 +145,9 @@ export default function AovBoostDashboard() {
           ? "Syncing products"
           : currentReadiness.resyncRequired
             ? "Repair catalog sync"
-          : currentProductCount > 0
-            ? "Resync products"
-            : "Sync products",
+            : currentProductCount > 0
+              ? "Resync products"
+              : "Sync products",
         loading: syncIsSubmitting,
         disabled: syncIsSubmitting,
         onAction: () =>
@@ -169,7 +209,10 @@ export default function AovBoostDashboard() {
               <Text as="h2" variant="headingMd">
                 Revenue attributed to AOVBoost
               </Text>
-              <RevenueChart data={metrics.revenueSeries} currencyCode={currencyCode} />
+              <RevenueChart
+                data={metrics.revenueSeries}
+                currencyCode={currencyCode}
+              />
             </BlockStack>
           </Card>
         </Layout.Section>
@@ -180,7 +223,10 @@ export default function AovBoostDashboard() {
               <Text as="h2" variant="headingMd">
                 Widget performance
               </Text>
-              <WidgetPerformanceTable rows={metrics.widgetRows} currencyCode={currencyCode} />
+              <WidgetPerformanceTable
+                rows={metrics.widgetRows}
+                currencyCode={currencyCode}
+              />
             </BlockStack>
           </Card>
         </Layout.Section>
@@ -192,7 +238,13 @@ export default function AovBoostDashboard() {
                 Product catalog
               </Text>
               <InlineStack gap="200">
-                <Badge tone={currentReadiness.actionableProductCount > 0 ? "success" : "critical"}>
+                <Badge
+                  tone={
+                    currentReadiness.actionableProductCount > 0
+                      ? "success"
+                      : "critical"
+                  }
+                >
                   {`${currentReadiness.actionableProductCount.toLocaleString()} storefront-ready`}
                 </Badge>
                 <Badge tone="info">
@@ -205,7 +257,11 @@ export default function AovBoostDashboard() {
                 ) : null}
               </InlineStack>
               <Text as="p" tone={syncFailed ? "critical" : "subdued"}>
-                {getCatalogStatusText(currentReadiness, currentProgress, syncFailed)}
+                {getCatalogStatusText(
+                  currentReadiness,
+                  currentProgress,
+                  syncFailed,
+                )}
               </Text>
             </BlockStack>
           </Card>
@@ -221,12 +277,21 @@ export default function AovBoostDashboard() {
                 <Badge tone={activeBundleCount > 0 ? "success" : "attention"}>
                   {`${activeBundleCount.toLocaleString()} active bundles`}
                 </Badge>
-                <Badge tone={currentReadiness.actionableProductCount > 1 ? "success" : "critical"}>
+                <Badge
+                  tone={
+                    currentReadiness.actionableProductCount > 1
+                      ? "success"
+                      : "critical"
+                  }
+                >
                   {`${currentReadiness.actionableProductCount.toLocaleString()} recommendation-ready`}
                 </Badge>
               </InlineStack>
               <Text as="p" tone="subdued">
-                {getMerchandisingStatusText(activeBundleCount, currentReadiness)}
+                {getMerchandisingStatusText(
+                  activeBundleCount,
+                  currentReadiness,
+                )}
               </Text>
             </BlockStack>
           </Card>
@@ -265,12 +330,18 @@ function getCatalogStatusText(
   failed: boolean,
 ) {
   if (failed) {
-    return progress?.error || "Product sync failed. Check the app logs and Shopify product scopes.";
+    return (
+      progress?.error ||
+      "Product sync failed. Check the app logs and Shopify product scopes."
+    );
   }
   if (progress?.status && progress.status !== "complete") {
     const done = Number(progress.done || 0);
     const total = Number(progress.total || 0);
-    const count = total > 0 ? `${done.toLocaleString()} of ${total.toLocaleString()}` : done.toLocaleString();
+    const count =
+      total > 0
+        ? `${done.toLocaleString()} of ${total.toLocaleString()}`
+        : done.toLocaleString();
     return `Catalog sync is ${formatStatus(progress.status).toLowerCase()} (${count}).`;
   }
   if (readiness.resyncRequired) {

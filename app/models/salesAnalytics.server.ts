@@ -1,17 +1,6 @@
 import prisma from "../db.server";
-
-const SALES_EVENT_TYPES = [
-  "widget_impression",
-  "chat_opened",
-  "customer_message_sent",
-  "recommendation_shown",
-  "recommendation_clicked",
-  "recommendation_added",
-  "upsell_shown",
-  "upsell_added",
-  "checkout_started",
-  "checkout_start",
-] as const;
+import { cachedReport } from "./reportCache.server";
+import { salesQuery } from "./analyticsQueries.server";
 
 export type SalesAnalyticsReport = {
   chatImpressions: number;
@@ -40,44 +29,60 @@ export async function getSalesAnalytics(
   shop: string,
   from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
 ): Promise<SalesAnalyticsReport> {
-  const [sessions, events, outcomes, orders] = await Promise.all([
-    prisma.shopperSession.findMany({
-      where: { shop, updatedAt: { gte: from } },
-      select: {
-        id: true,
-        chatEngaged: true,
-        checkoutStarted: true,
-        purchaseCompleted: true,
-        orderValue: true,
-        aiAttributedRevenue: true,
-        shopperProfile: true,
-        context: true,
-      },
-    }),
-    prisma.shopperEvent.findMany({
-      where: {
-        shop,
-        createdAt: { gte: from },
-        type: { in: [...SALES_EVENT_TYPES] },
-      },
-      select: { sessionId: true, type: true, payload: true },
-    }),
-    prisma.recommendationOutcome.findMany({
-      where: { shop, shownAt: { gte: from } },
-      select: {
-        recommendationType: true,
-        clickedAt: true,
-        addedAt: true,
-        purchasedAt: true,
-        revenue: true,
-      },
-    }),
-    prisma.event.findMany({
-      where: { storeId: shop, event: "conversion", timestamp: { gte: from } },
-      select: { data: true },
-    }),
-  ]);
+  return cachedReport(shop, "sales", from, async () => {
+    const [row] = await prisma.$queryRaw<
+      Array<{ report: Record<string, number> }>
+    >(salesQuery(shop, from));
+    const r = row.report;
+    return {
+      chatImpressions: r.chatImpressions,
+      chatOpens: r.chatOpens,
+      customerMessages: r.customerMessages,
+      recommendationsShown: r.recommendationsShown,
+      recommendationClickRate: ratio(
+        r.recommendationClicks,
+        r.recommendationsShown,
+      ),
+      recommendationAddToCartRate: ratio(
+        r.recommendationAdds,
+        r.recommendationsShown,
+      ),
+      upsellsShown: r.upsellsShown,
+      upsellAcceptanceRate: ratio(r.upsellAdds, r.upsellsShown),
+      aiAssistedAddToCart: r.recommendationAdds + r.upsellAdds,
+      checkoutStarted: r.checkoutStarted,
+      orders: r.orders,
+      aiAssistedOrders: r.aiAssistedOrders,
+      aiAttributedRevenue: r.aiAttributedRevenue,
+      averageOrderValue: r.averageOrderValue,
+      aiAssistedAov: r.aiAssistedAov,
+      nonAiAov: r.nonAiAov,
+      aiEngagedConversionRate: ratio(r.engagedPurchased, r.engaged),
+      nonEngagedConversionRate: ratio(r.nonEngagedPurchased, r.nonEngaged),
+      objectionToPurchaseRate: ratio(r.objectionsPurchased, r.objections),
+      proactiveMessageConversionRate: ratio(r.proactivePurchased, r.proactive),
+    };
+  });
+}
 
+/** Reference reducer used to verify SQL reporting against existing attribution semantics. */
+export function summarizeSalesAnalytics(input: {
+  sessions: Array<{
+    chatEngaged: boolean;
+    purchaseCompleted: boolean;
+    checkoutStarted: boolean;
+    shopperProfile: unknown;
+    context: unknown;
+  }>;
+  events: Array<{ type: string; sessionId: string; payload: unknown }>;
+  outcomes: Array<{
+    recommendationType: string;
+    clickedAt: unknown;
+    addedAt: unknown;
+  }>;
+  orders: Array<{ data: unknown }>;
+}): SalesAnalyticsReport {
+  const { sessions, events, outcomes, orders } = input;
   const eventCount = (type: string) =>
     events.filter((event) => event.type === type).length;
   const uniqueEventSessions = (...types: string[]) =>

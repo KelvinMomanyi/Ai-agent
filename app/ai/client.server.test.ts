@@ -10,6 +10,39 @@ const originalEnvironment = {
 };
 
 describe("AI gateway grounding contract", () => {
+  it("cancels a provider request without trying another model after disconnect", async () => {
+    process.env.MISTRAL_API_KEY = "test-mistral";
+    const controller = new AbortController();
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const fetchMock = vi.fn(
+      (_url: unknown, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init!.signal!.addEventListener(
+            "abort",
+            () => reject(new Error("aborted")),
+            { once: true },
+          );
+          started();
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = callAI({
+      triggerName: "chat:cancel",
+      shop: "shop.test",
+      systemPrompt: "rules",
+      userPrompt: "hello",
+      signal: controller.signal,
+      fallback: "fallback",
+    });
+    await ready;
+    controller.abort();
+    expect((await result).fallbackUsed).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   beforeEach(() => {
     process.env.GOOGLE_API_KEY = "test-key";
     process.env.GOOGLE_AI_MODEL = "gemini-test-model";

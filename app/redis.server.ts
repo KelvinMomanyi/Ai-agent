@@ -1,15 +1,21 @@
 import { Redis } from "@upstash/redis";
+import { randomUUID } from "node:crypto";
 
 const upstash =
   process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
     ? new Redis({
         url: process.env.UPSTASH_REDIS_REST_URL,
         token: process.env.UPSTASH_REDIS_REST_TOKEN,
+        retry: { retries: 1, backoff: () => 100 },
+        signal: () => AbortSignal.timeout(1500),
       })
     : null;
 
 const memoryStore = new Map<string, { value: unknown; expiresAt?: number }>();
 let claimStoreWarningLogged = false;
+let redisRetryAt = 0;
+let redisWarningAt = 0;
+const MAX_MEMORY_ENTRIES = 1000;
 
 /**
  * Upstash's HTTP client works in serverless runtimes. The memory fallback keeps
@@ -49,7 +55,9 @@ export const redis = {
       (client) => client.incr(key),
       () => {
         const next = Number(getMemoryValue(key) || 0) + 1;
+        const expiresAt = memoryStore.get(key)?.expiresAt;
         setMemoryValue(key, String(next));
+        if (expiresAt) memoryStore.get(key)!.expiresAt = expiresAt;
         return next;
       },
     );
@@ -74,7 +82,7 @@ export const redis = {
       () => {
         const current = getMemorySet(key);
         members.forEach((member) => current.add(member));
-        memoryStore.set(key, { value: current });
+        setMemoryValue(key, current);
       },
     );
   },
@@ -87,7 +95,7 @@ export const redis = {
       () => {
         const current = getMemorySet(key);
         members.forEach((member) => current.delete(member));
-        memoryStore.set(key, { value: current });
+        setMemoryValue(key, current);
       },
     );
   },
@@ -130,9 +138,118 @@ export async function incrementRateLimit(
   key: string,
   ttlSeconds: number,
 ): Promise<number> {
-  const count = await redis.incr(key);
-  if (count === 1) await redis.expire(key, ttlSeconds);
-  return count;
+  return withRedis(
+    async (client) =>
+      Number(
+        await client.eval(
+          "local n=redis.call('INCR',KEYS[1]); if redis.call('TTL',KEYS[1])<0 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n",
+          [key],
+          [ttlSeconds],
+        ),
+      ),
+    () => {
+      const next = Number(getMemoryValue(key) || 0) + 1;
+      const expiresAt = memoryStore.get(key)?.expiresAt;
+      setMemoryValue(key, String(next), ttlSeconds);
+      if (expiresAt) memoryStore.get(key)!.expiresAt = expiresAt;
+      return next;
+    },
+  );
+}
+
+const AI_RESERVATION_SCRIPT = `
+local now=tonumber(ARGV[1]); local untilAt=tonumber(ARGV[2]); local id=ARGV[3]
+if redis.call('ZSCORE',KEYS[3],id) then return 1 end
+redis.call('ZREMRANGEBYSCORE',KEYS[3],'-inf',now); redis.call('ZREMRANGEBYSCORE',KEYS[4],'-inf',now)
+if tonumber(redis.call('GET',KEYS[1]) or '0')>=tonumber(ARGV[4]) or tonumber(redis.call('GET',KEYS[2]) or '0')>=tonumber(ARGV[5]) then return 0 end
+if redis.call('ZCARD',KEYS[3])>=tonumber(ARGV[6]) or redis.call('ZCARD',KEYS[4])>=tonumber(ARGV[7]) then return 0 end
+redis.call('INCR',KEYS[1]); redis.call('EXPIRE',KEYS[1],ARGV[8]); redis.call('INCR',KEYS[2]); redis.call('EXPIRE',KEYS[2],ARGV[8])
+redis.call('ZADD',KEYS[3],untilAt,id); redis.call('EXPIRE',KEYS[3],30); redis.call('ZADD',KEYS[4],untilAt,id); redis.call('EXPIRE',KEYS[4],30)
+return 1`;
+const localAiLeases = new Map<string, { shop: string; expiresAt: number }>();
+
+/** Count every provider attempt. Production AI fails closed when shared limits are unavailable. */
+export async function reserveAiAttempt(
+  shop?: string,
+): Promise<(() => Promise<void>) | null> {
+  if (
+    process.env.NODE_ENV === "production" &&
+    (!shop || !upstash || Date.now() < redisRetryAt)
+  )
+    return null;
+  const scope = encodeURIComponent(shop || "development");
+  const now = Date.now(),
+    date = new Date(now).toISOString().slice(0, 10);
+  const ttl =
+    Math.ceil((Date.parse(`${date}T00:00:00Z`) + 86_400_000 - now) / 1000) + 60;
+  const keys = [
+    `aovboost:{ai}:daily:${date}`,
+    `aovboost:{ai}:daily:${date}:${scope}`,
+    "aovboost:{ai}:active",
+    `aovboost:{ai}:active:${scope}`,
+  ];
+  const limits = [
+    boundedEnv("AOVBOOST_AI_GLOBAL_DAILY_LIMIT", 1000),
+    boundedEnv("AOVBOOST_AI_SHOP_DAILY_LIMIT", 200),
+    boundedEnv("AOVBOOST_AI_GLOBAL_CONCURRENCY", 8),
+    boundedEnv("AOVBOOST_AI_SHOP_CONCURRENCY", 2),
+  ];
+  const id = randomUUID();
+  if (upstash) {
+    try {
+      if (
+        Number(
+          await upstash.eval(AI_RESERVATION_SCRIPT, keys, [
+            now,
+            now + 30_000,
+            id,
+            ...limits,
+            ttl,
+          ]),
+        ) !== 1
+      )
+        return null;
+      return async () => {
+        try {
+          await upstash.eval(
+            "redis.call('ZREM',KEYS[1],ARGV[1]); redis.call('ZREM',KEYS[2],ARGV[1]); return 1",
+            keys.slice(2),
+            [id],
+          );
+        } catch {
+          /* Lease expiry releases capacity after an interrupted invocation. */
+        }
+      };
+    } catch (error) {
+      warnClaimStoreUnavailable(error);
+      return null;
+    }
+  }
+  for (const [key, lease] of localAiLeases)
+    if (lease.expiresAt <= now) localAiLeases.delete(key);
+  const globalCount = Number(getMemoryValue(keys[0]) || 0),
+    shopCount = Number(getMemoryValue(keys[1]) || 0);
+  if (
+    globalCount >= limits[0] ||
+    shopCount >= limits[1] ||
+    localAiLeases.size >= limits[2] ||
+    [...localAiLeases.values()].filter((lease) => lease.shop === scope)
+      .length >= limits[3]
+  )
+    return null;
+  setMemoryValue(keys[0], globalCount + 1, ttl);
+  setMemoryValue(keys[1], shopCount + 1, ttl);
+  localAiLeases.set(id, { shop: scope, expiresAt: now + 30_000 });
+  return async () => {
+    localAiLeases.delete(id);
+  };
+}
+
+function boundedEnv(name: string, fallback: number) {
+  const value = Number(process.env[name] ?? fallback);
+  return Number.isFinite(value) && value >= 0
+    ? Math.min(Math.floor(value), 1_000_000)
+    : fallback;
 }
 
 /**
@@ -158,7 +275,9 @@ export async function claimExpiringKey(
   }
 
   if (process.env.NODE_ENV === "production") {
-    warnClaimStoreUnavailable("UPSTASH_REDIS_REST_URL/TOKEN are not configured");
+    warnClaimStoreUnavailable(
+      "UPSTASH_REDIS_REST_URL/TOKEN are not configured",
+    );
     return false;
   }
 
@@ -196,7 +315,7 @@ function warnClaimStoreUnavailable(error: unknown) {
   if (claimStoreWarningLogged) return;
   claimStoreWarningLogged = true;
   console.warn(
-    "AOVBoost distributed claim store unavailable; live delivery is fail-closed:",
+    "AOVBoost distributed store unavailable; guarded operations are fail-closed:",
     error instanceof Error ? error.message : String(error),
   );
 }
@@ -205,14 +324,18 @@ async function withRedis<T>(
   operation: (client: Redis) => Promise<T>,
   fallback: () => T | Promise<T>,
 ): Promise<T> {
-  if (!upstash) return fallback();
+  if (!upstash || Date.now() < redisRetryAt) return fallback();
   try {
     return await operation(upstash);
   } catch (error) {
-    console.warn(
-      "AOVBoost Redis fallback active:",
-      error instanceof Error ? error.message : String(error),
-    );
+    redisRetryAt = Date.now() + 30_000;
+    if (Date.now() - redisWarningAt > 60_000) {
+      redisWarningAt = Date.now();
+      console.warn(
+        "AOVBoost Redis fallback active:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     return fallback();
   }
 }
@@ -228,9 +351,18 @@ function getMemoryValue<T = unknown>(key: string): T | null {
 }
 
 function setMemoryValue(key: string, value: unknown, ttlSeconds?: number) {
+  if (typeof value === "string" && value.length > 300_000) return;
+  if (!memoryStore.has(key) && memoryStore.size >= MAX_MEMORY_ENTRIES) {
+    for (const [entryKey, entry] of memoryStore) {
+      if (entry.expiresAt && entry.expiresAt <= Date.now())
+        memoryStore.delete(entryKey);
+    }
+    if (memoryStore.size >= MAX_MEMORY_ENTRIES)
+      memoryStore.delete(memoryStore.keys().next().value!);
+  }
   memoryStore.set(key, {
     value,
-    expiresAt: ttlSeconds ? Date.now() + ttlSeconds * 1000 : undefined,
+    expiresAt: Date.now() + (ttlSeconds ?? 300) * 1000,
   });
 }
 

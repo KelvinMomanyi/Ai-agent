@@ -105,6 +105,7 @@ async function start(): Promise<void> {
         offerPoller.requestOffer(trigger, payload),
       diagnose: () => offerPoller.getStatus(),
       destroy: () => {
+        eventBus.destroy();
         liveUpdates.destroy();
         triggerRouter.destroy();
         offerPoller.destroy();

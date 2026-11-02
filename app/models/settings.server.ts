@@ -1,5 +1,6 @@
 import type { AppSettings } from "@prisma/client";
 import prisma from "../db.server";
+import { getJsonCache, setJsonCache } from "../redis.server";
 
 export type PublicAppSettings = {
   chatEnabled: boolean;
@@ -30,7 +31,12 @@ export async function getAppSettings(shop: string) {
 }
 
 export async function getPublicAppSettings(shop: string) {
-  return toPublicAppSettings(await getAppSettings(shop));
+  const key = `public-settings:${shop}`;
+  const cached = await getJsonCache<PublicAppSettings>(key);
+  if (cached) return { ...cached, liveEventsEnabled: isLiveEventsEnabled() };
+  const settings = toPublicAppSettings(await getAppSettings(shop));
+  await setJsonCache(key, settings, 60);
+  return settings;
 }
 
 export function toPublicAppSettings(settings: AppSettings): PublicAppSettings {

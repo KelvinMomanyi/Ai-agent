@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   experimentFindMany: vi.fn(),
   offerFindMany: vi.fn(),
+  queryRaw: vi.fn(),
 }));
 
 vi.mock("../db.server", () => ({
   default: {
+    $queryRaw: mocks.queryRaw,
     experiment: { findMany: mocks.experimentFindMany },
     offer: { findMany: mocks.offerFindMany },
   },
@@ -28,11 +30,39 @@ describe("getExperimentAnalytics", () => {
       experiment("experiment-2", new Date("2026-08-02")),
       experiment("experiment-1", new Date("2026-08-01")),
     ]);
-    mocks.offerFindMany.mockResolvedValue([
-      offer("offer-1-control", "experiment-1", "control", false, 0),
-      offer("offer-1-treatment", "experiment-1", "treatment", true, 25),
-      offer("offer-2-control", "experiment-2", "control", true, 10),
-      offer("offer-2-treatment", "experiment-2", "treatment", false, 0),
+    mocks.queryRaw.mockResolvedValue([
+      {
+        experimentId: "experiment-1",
+        variant: "control",
+        impressions: 1,
+        clicks: 1,
+        conversions: 0,
+        revenue: 0,
+      },
+      {
+        experimentId: "experiment-1",
+        variant: "treatment",
+        impressions: 1,
+        clicks: 1,
+        conversions: 1,
+        revenue: 25,
+      },
+      {
+        experimentId: "experiment-2",
+        variant: "control",
+        impressions: 1,
+        clicks: 1,
+        conversions: 1,
+        revenue: 10,
+      },
+      {
+        experimentId: "experiment-2",
+        variant: "treatment",
+        impressions: 1,
+        clicks: 1,
+        conversions: 0,
+        revenue: 0,
+      },
     ]);
 
     const results = await getExperimentAnalytics("example.myshopify.com");
@@ -45,13 +75,8 @@ describe("getExperimentAnalytics", () => {
     expect(second?.control.conversions).toBe(1);
     expect(second?.control.revenue).toBe(10);
     expect(second?.treatment.conversions).toBe(0);
-    expect(mocks.offerFindMany).toHaveBeenCalledWith({
-      where: {
-        shop: "example.myshopify.com",
-        abVariant: { not: null },
-        experimentId: { not: null },
-      },
-    });
+    expect(mocks.offerFindMany).not.toHaveBeenCalled();
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -239,7 +264,11 @@ function shopperEvent(type: string, offerId: string, createdAt: string) {
   };
 }
 
-function shopperSession(id: string, journeyStage: string, chatEngaged: boolean) {
+function shopperSession(
+  id: string,
+  journeyStage: string,
+  chatEngaged: boolean,
+) {
   return {
     id,
     shop: "example.myshopify.com",

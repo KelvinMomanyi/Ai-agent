@@ -1,6 +1,6 @@
 import type { OfferDecision } from "../ai/types";
 import {
-  getCatalogSnapshot,
+  getCatalogProductsByIds,
   type CatalogCacheProduct,
 } from "./catalogCache.server";
 import {
@@ -44,10 +44,6 @@ const PRODUCT_WIDGET_TYPES = new Set([
   "post_purchase",
 ]);
 
-export async function getFullProductCatalog(shop: string) {
-  return (await getCatalogSnapshot(shop)).products;
-}
-
 export async function enforceCatalogBackedDecision(input: {
   shop: string;
   decision: OfferDecision;
@@ -55,7 +51,35 @@ export async function enforceCatalogBackedDecision(input: {
 }): Promise<OfferDecision> {
   if (!input.decision.widgetType) return input.decision;
 
-  const catalog = await getFullProductCatalog(input.shop);
+  const ids = new Set<string>();
+  const handles = new Set<string>();
+  let visited = 0;
+  const collect = (value: unknown, key = "", depth = 0): void => {
+    if (++visited > 2000 || depth > 10) return;
+    if (typeof value === "string" || typeof value === "number") {
+      const text = String(value);
+      if (/^gid:\/\/shopify\/Product\//.test(text)) ids.add(text);
+      else if (
+        ["productId", "targetId", "sourceId", "id"].includes(key) &&
+        /^\d+$/.test(text)
+      )
+        ids.add(`gid://shopify/Product/${text}`);
+      if (key === "handle") handles.add(text);
+      for (const match of text.matchAll(/\/products\/([a-z0-9-]+)/gi))
+        handles.add(match[1]);
+    } else if (Array.isArray(value))
+      value.slice(0, 100).forEach((item) => collect(item, key, depth + 1));
+    else if (value && typeof value === "object")
+      Object.entries(value).forEach(([field, item]) =>
+        collect(item, field, depth + 1),
+      );
+  };
+  collect(input.decision.payload);
+  const catalog = await getCatalogProductsByIds(
+    input.shop,
+    [...ids],
+    [...handles],
+  );
   const index = buildCatalogIndex(catalog, input.excludedProductIds || []);
   const payload = sanitizePayloadProducts(input.decision.payload, index);
 

@@ -1,9 +1,9 @@
+import { isInstalledShop } from "../models/installedShop.server";
 import {
   data as json,
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
 } from "react-router";
-import prisma from "../db.server";
 import { ingestStorefrontEvents } from "../models/event.server";
 import type { StorefrontEvent } from "../models/session.server";
 import { cacheKeys, incrementRateLimit } from "../redis.server";
@@ -112,18 +112,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ ok: false }, { status: 500, headers: withCors() });
   }
 };
-
-async function isInstalledShop(shop: string) {
-  const [session, legacyShop] = await Promise.all([
-    prisma.session.findFirst({ where: { shop }, select: { id: true } }),
-    prisma.shop.findUnique({
-      where: { shopDomain: shop },
-      select: { shopDomain: true },
-    }),
-  ]);
-
-  return Boolean(session || legacyShop);
-}
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);

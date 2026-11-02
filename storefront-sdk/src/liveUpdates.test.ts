@@ -11,6 +11,7 @@ const auth = {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  history.replaceState({}, "", "/products/test-product");
 });
 
 afterEach(() => {
@@ -19,6 +20,48 @@ afterEach(() => {
 });
 
 describe("LiveUpdates", () => {
+  it("backs off empty polls and suspends requests while hidden", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse({ enabled: true, events: [] }));
+    const live = new LiveUpdates({
+      apiBase: "/apps/aovboost",
+      sessionManager: sessionManagerStub() as any,
+    });
+    live.init();
+    await vi.advanceTimersByTimeAsync(2500);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    visibility.mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    live.destroy();
+  });
+
+  it("does not poll on unrelated storefront pages", async () => {
+    history.replaceState({}, "", "/pages/about");
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse({ enabled: true, events: [] }));
+    const live = new LiveUpdates({
+      apiBase: "/apps/aovboost",
+      sessionManager: sessionManagerStub() as any,
+    });
+    live.init();
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(fetchMock).not.toHaveBeenCalled();
+    live.destroy();
+  });
+
   it("polls with signed auth and forwards the existing system-event shape", async () => {
     const received: unknown[] = [];
     document.addEventListener(

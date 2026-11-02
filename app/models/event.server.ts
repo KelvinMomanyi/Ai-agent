@@ -6,6 +6,7 @@ import {
 } from "./session.server";
 import { markOfferClick, markOfferImpression } from "./offer.server";
 import { applyRecommendationEvents } from "./recommendationOutcome.server";
+import { getPublicAppSettings } from "./settings.server";
 
 export async function ingestStorefrontEvents(input: {
   shop: string;
@@ -13,10 +14,7 @@ export async function ingestStorefrontEvents(input: {
   customerId?: string | null;
   events: StorefrontEvent[];
 }) {
-  const settings = await prisma.appSettings.findUnique({
-    where: { shop: input.shop },
-    select: { analyticsEnabled: true },
-  });
+  const settings = await getPublicAppSettings(input.shop);
   if (settings?.analyticsEnabled === false) return null;
   // Browser events cannot attest to a purchase or its value.
   const events = input.events.filter(
@@ -28,9 +26,12 @@ export async function ingestStorefrontEvents(input: {
   input = { ...input, events };
   const session = await upsertShopperSessionFromEvents(input);
 
-  if (input.events.length > 0) {
+  const storedEvents = input.events.filter(
+    (event) => event.type !== "session_sync",
+  );
+  if (storedEvents.length > 0) {
     await prisma.shopperEvent.createMany({
-      data: input.events.map((event) => ({
+      data: storedEvents.map((event) => ({
         shop: input.shop,
         sessionId: session.id,
         type: event.type,

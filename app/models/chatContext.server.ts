@@ -1,7 +1,7 @@
 import type { ShopperSession } from "@prisma/client";
 import prisma from "../db.server";
 import {
-  getCatalogSnapshot,
+  getChatCatalog,
   type CatalogCacheProduct,
   type CatalogSnapshot,
 } from "./catalogCache.server";
@@ -67,9 +67,10 @@ export async function loadChatContextSources(input: {
   session: ShopperSession;
   pageContext?: StorefrontPageContext;
   clientHistory?: ChatMessageHistory;
+  query?: string;
 }): Promise<ChatContextSources> {
   const [catalog, behavior, conversation] = await Promise.all([
-    loadCatalogContext(input.shop),
+    loadCatalogContext(input),
     loadBehaviorContext(input.session, input.pageContext),
     loadConversationContext(
       input.shop,
@@ -276,11 +277,26 @@ export function formatConversationHistoryForPrompt(
     .join("\n");
 }
 
-async function loadCatalogContext(shop: string) {
+async function loadCatalogContext(input: {
+  shop: string;
+  session: ShopperSession;
+  pageContext?: StorefrontPageContext;
+  query?: string;
+}) {
+  const { shop } = input;
   try {
     return {
       status: "loaded" as const,
-      snapshot: await getCatalogSnapshot(shop),
+      snapshot: await getChatCatalog({
+        shop,
+        query: input.query,
+        productIds: [
+          input.pageContext?.productId || "",
+          ...input.session.cartProductIds.slice(0, 30),
+          ...input.session.viewedProductIds.slice(-10),
+        ],
+        handle: input.pageContext?.productHandle,
+      }),
     };
   } catch (error) {
     console.warn("AOVBoost chat catalog context unavailable:", {

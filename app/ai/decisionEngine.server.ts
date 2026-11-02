@@ -33,6 +33,7 @@ const WIDGET_TYPES = new Set([
 export async function getOfferDecision(
   input: DecisionInput,
 ): Promise<OfferDecision> {
+  if (input.signal?.aborted) return noOffer("Request cancelled.", "heuristic");
   const cartVariantIds =
     input.cartVariantIds || toStringArray(input.session.context.cartVariantIds);
   const cartItemCount = Number(
@@ -120,9 +121,12 @@ export async function getOfferDecision(
     bundles.length,
   );
   let decision = fallbackDecision;
+  let decisionAskedAi = false;
 
   if (shouldAskAi(input.trigger?.type, fallbackDecision)) {
     const aiResult = await callAI({
+      shop: input.shop,
+      signal: input.signal,
       triggerName: input.trigger?.type || "manual",
       systemPrompt: `${DECISION_ENGINE_SYSTEM}\n${getTriggerPromptGuidance(input.trigger?.type)}`,
       userPrompt: JSON.stringify(context),
@@ -131,11 +135,14 @@ export async function getOfferDecision(
       timeoutProfile: getTimeoutProfile(input.trigger?.type),
       fallback: JSON.stringify(fallbackDecision),
     });
+    if (input.signal?.aborted)
+      return noOffer("Request cancelled.", "heuristic");
     const parsed = normalizeDecision(
       parseAiJson<Partial<OfferDecision>>(aiResult.content),
       toDecisionProvider(aiResult.provider),
     );
     decision = parsed ?? fallbackDecision;
+    decisionAskedAi = true;
 
     console.log("AOVBoost trigger decision:", {
       triggerName: input.trigger?.type || "manual",
@@ -193,14 +200,17 @@ export async function getOfferDecision(
     enrichedPayload,
     input.settings,
     {
-      useAI: ![
-        "initial",
-        "navigation",
-        "assistant_bootstrap",
-        "social_proof",
-        "cart_item_added",
-        "add_to_cart",
-      ].includes(input.trigger?.type || ""),
+      signal: input.signal,
+      useAI:
+        !decisionAskedAi &&
+        ![
+          "initial",
+          "navigation",
+          "assistant_bootstrap",
+          "social_proof",
+          "cart_item_added",
+          "add_to_cart",
+        ].includes(input.trigger?.type || ""),
     },
   );
 

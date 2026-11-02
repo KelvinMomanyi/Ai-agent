@@ -15,13 +15,8 @@ const prisma =
         : ["error"],
   });
 
-if (process.env.NODE_ENV !== "production") {
-  global.prismaGlobal = prisma;
-} else {
-  process.on("beforeExit", async () => {
-    await prisma.$disconnect();
-  });
-}
+// Reuse the pool across modules and concurrent Fluid Compute requests.
+global.prismaGlobal = prisma;
 
 // Retry wrapper for connection issues
 export async function withRetry<T>(
@@ -34,7 +29,11 @@ export async function withRetry<T>(
       return await fn();
     } catch (error: any) {
       if (i === maxRetries - 1) throw error;
-      if (error.code === "ECONNREFUSED" || error.code === "ECONNRESET" || error.code === "ETIMEDOUT") {
+      if (
+        error.code === "ECONNREFUSED" ||
+        error.code === "ECONNRESET" ||
+        error.code === "ETIMEDOUT"
+      ) {
         await new Promise((resolve) => setTimeout(resolve, delayMs * (i + 1)));
         continue;
       }

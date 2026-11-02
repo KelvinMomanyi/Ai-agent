@@ -1,3 +1,5 @@
+import { isInstalledShop } from "../models/installedShop.server";
+import { findProductIdsByVariants } from "../models/productLookup.server";
 import {
   data as json,
   type ActionFunctionArgs,
@@ -8,7 +10,6 @@ import prisma from "../db.server";
 import { getOfferDecision } from "../ai/decisionEngine.server";
 import type { CurrentPageType, OfferDecision } from "../ai/types";
 import { enforceCatalogBackedDecision } from "../models/catalogGuard.server";
-import { getSyncedProductVariants } from "../models/productCatalogMapping";
 import {
   buildOfferCandidates,
   createOfferRecord,
@@ -42,6 +43,9 @@ import {
 import { reserveProactiveMessage } from "../sales/proactiveEngine.server";
 import { normalizeSalesState } from "../sales/salesStateMachine";
 import { toMerchantSalesSettings } from "../sales/settings";
+
+// Forward client disconnects to cancellable UI work on Vercel.
+export const config = { runtime: "nodejs", supportsCancellation: true };
 
 type OfferBody = {
   sessionId?: string;
@@ -240,6 +244,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
       : await getOfferDecision({
           shop,
+          signal: request.signal,
           session: decisionSession,
           currentProductId: body.currentProductId,
           currentPageType: normalizePageType(body.currentPageType),
@@ -451,19 +456,7 @@ async function resolveCartProductIds(shop: string, body: OfferBody) {
   ]);
   if (cartVariantIds.length === 0) return [];
 
-  const cartVariantKeys = new Set(cartVariantIds.flatMap(toVariantLookupKeys));
-  const products = await prisma.product.findMany({
-    where: { shop },
-    select: { id: true, metafields: true },
-  });
-
-  return products
-    .filter((product) =>
-      getProductVariantIds(product.metafields).some((variantId) =>
-        toVariantLookupKeys(variantId).some((key) => cartVariantKeys.has(key)),
-      ),
-    )
-    .map((product) => product.id);
+  return findProductIdsByVariants(shop, cartVariantIds);
 }
 
 function extractCartItemProductIds(items: OfferBody["cartItems"]) {
@@ -494,38 +487,6 @@ function extractCartItemVariantIds(items: OfferBody["cartItems"]) {
     .filter(Boolean);
 }
 
-function getProductVariantIds(metafields: unknown) {
-  const record = asRecord(metafields);
-  return uniqueStrings([
-    ...getSyncedProductVariants(metafields).map((variant) => variant.id),
-    record.defaultVariantId,
-    record.variantId,
-    record["aovboost.defaultVariantId"],
-    record["aovboost.variantId"],
-    asRecord(record.defaultVariantId).value,
-    asRecord(record.variantId).value,
-    asRecord(record["aovboost.defaultVariantId"]).value,
-    asRecord(record["aovboost.variantId"]).value,
-  ])
-    .map(String)
-    .filter((value) => value && value !== "[object Object]");
-}
-
-function toVariantLookupKeys(value: unknown) {
-  const text = String(value || "").trim();
-  if (!text) return [];
-
-  const withoutQuery = text.split("?")[0];
-  const lastSegment =
-    withoutQuery.split("/").filter(Boolean).pop() || withoutQuery;
-  return uniqueStrings([
-    text,
-    withoutQuery,
-    lastSegment,
-    `gid://shopify/ProductVariant/${lastSegment}`,
-  ]);
-}
-
 function toStringArray(value: unknown) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
@@ -554,18 +515,6 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
-}
-
-async function isInstalledShop(shop: string) {
-  const [session, legacyShop] = await Promise.all([
-    prisma.session.findFirst({ where: { shop }, select: { id: true } }),
-    prisma.shop.findUnique({
-      where: { shopDomain: shop },
-      select: { shopDomain: true },
-    }),
-  ]);
-
-  return Boolean(session || legacyShop);
 }
 
 async function getCachedAppSettings(shop: string): Promise<AppSettings> {

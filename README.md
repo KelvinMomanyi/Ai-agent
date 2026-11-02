@@ -171,14 +171,16 @@ irreversible, so verify database backups first.
 
 ## Architecture notes
 
+For resource limits, implemented optimizations and release requirements, see
+[the performance implementation guide](docs/performance-implementation-2026-11-02.md).
+
 - Storefront API requests are authenticated through Shopify app-proxy
   signatures plus a short-lived signed storefront session.
 - Order webhooks are the source of truth for normal conversion attribution.
 - Catalog synchronization is resumable and stored in PostgreSQL.
 - Chat requests assemble store, catalog, cart, visitor-signal, and server-side
   conversation context with independent fallbacks. The catalog prompt is a
-  bounded relevant slice of the shop's webhook-refreshed cache, not a full
-  catalog dump. Model-selected product and variant IDs are allowlisted before
+  bounded, relevance-ranked query of the shop's synced products in PostgreSQL. Model-selected product and variant IDs are allowlisted before
   canonical titles, prices, links, cards, variant chips, or actions are rendered.
 - Each chat request reads Shopify's live Ajax cart. Cart questions are answered
   deterministically from its item quantities, variants, subtotal, presentment

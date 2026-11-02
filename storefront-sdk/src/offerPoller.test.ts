@@ -10,6 +10,57 @@ afterEach(() => {
 });
 
 describe("OfferPoller", () => {
+  it("aborts an abandoned offer request without keeping it alive after page exit", async () => {
+    const started = deferred<void>();
+    let sentSignal: AbortSignal | undefined;
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        if (String(input) === "/cart.js")
+          return jsonResponse({ items: [], item_count: 0, total_price: 0 });
+        sentSignal = init!.signal as AbortSignal;
+        expect(init?.keepalive).toBeUndefined();
+        started.resolve();
+        return new Promise<Response>((_resolve, reject) =>
+          sentSignal!.addEventListener(
+            "abort",
+            () => reject(new Error("aborted")),
+            { once: true },
+          ),
+        );
+      });
+    const poller = new OfferPoller({
+      shop: "example.myshopify.com",
+      apiBase: "/apps/aovboost",
+      eventBus: {} as any,
+      sessionManager: sessionManagerStub() as any,
+      widgetManager: { getDismissedWidgets: () => [] } as any,
+    });
+    poller.init();
+    const request = poller.requestOffer("initial");
+    await started.promise;
+    window.dispatchEvent(new Event("pagehide"));
+    await request;
+    expect(sentSignal?.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    poller.destroy();
+  });
+
+  it("skips UI offer requests in a hidden tab", async () => {
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const poller = new OfferPoller({
+      shop: "example.myshopify.com",
+      apiBase: "/apps/aovboost",
+      eventBus: {} as any,
+      sessionManager: sessionManagerStub() as any,
+      widgetManager: {} as any,
+    });
+    expect(await poller.requestOffer("initial")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    poller.destroy();
+  });
+
   it("queues revenue and assistant requests instead of dropping an in-flight trigger", async () => {
     const firstOffer = deferred<Response>();
     const firstOfferStarted = deferred<void>();
@@ -129,12 +180,10 @@ describe("OfferPoller", () => {
         ? jsonResponse({ items: [], item_count: 0, total_price: 0 })
         : jsonResponse({ widgetType: "bundle", payload: {} }),
     );
-    const mountDecision = vi
-      .fn()
-      .mockReturnValue({
-        status: "suppressed",
-        reason: "bundle_requires_product_page",
-      });
+    const mountDecision = vi.fn().mockReturnValue({
+      status: "suppressed",
+      reason: "bundle_requires_product_page",
+    });
     const poller = new OfferPoller({
       shop: "example.myshopify.com",
       apiBase: "/apps/aovboost",

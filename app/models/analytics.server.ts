@@ -1,4 +1,12 @@
-import type { Event, Offer, ShopperEvent, ShopperSession } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { cachedReport } from "./reportCache.server";
+import { revenueQuery } from "./analyticsQueries.server";
+import type {
+  Event,
+  Offer,
+  ShopperEvent,
+  ShopperSession,
+} from "@prisma/client";
 import prisma from "../db.server";
 
 type ConversionEventRecord = Pick<Event, "data" | "timestamp">;
@@ -76,65 +84,26 @@ export async function getDashboardMetrics(
   shop: string,
   from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
 ): Promise<DashboardMetrics> {
-  const [offers, chatEngaged, conversionEvents] = await Promise.all([
-    prisma.offer.findMany({
-      where: { shop, createdAt: { gte: from } },
-      orderBy: { createdAt: "asc" },
-    }),
-    prisma.shopperSession.count({
-      where: { shop, chatEngaged: true, updatedAt: { gte: from } },
-    }),
-    prisma.event.findMany({
-      where: { storeId: shop, event: "conversion", timestamp: { gte: from } },
-      select: { data: true, timestamp: true },
-    }),
-  ]);
-
-  return summarizeDashboardMetrics({ offers, chatEngaged, conversionEvents });
+  return (await getRevenueAnalytics(shop, from)).dashboard;
 }
 
 export async function getRevenueAnalytics(
   shop: string,
   from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
 ): Promise<RevenueAnalyticsReport> {
-  const [offers, sessions, shopperEvents, conversionEvents, experiments] =
-    await Promise.all([
-      prisma.offer.findMany({
-        where: { shop, createdAt: { gte: from } },
-        orderBy: { createdAt: "asc" },
+  return cachedReport(shop, "revenue", from, async () => {
+    const [row] = await prisma.$queryRaw<
+      Array<{ report: Omit<RevenueAnalyticsReport, "insights"> }>
+    >(revenueQuery(shop, from));
+    const report = row.report;
+    return {
+      ...report,
+      insights: buildAuthoritativeInsights({
+        widgetRows: report.dashboard.widgetRows,
+        bundleShare: report.bundleShare,
+        impressions: report.funnel.impressions,
       }),
-      prisma.shopperSession.findMany({
-        where: { shop, updatedAt: { gte: from } },
-        select: { id: true, journeyStage: true, chatEngaged: true },
-      }),
-      prisma.shopperEvent.findMany({
-        where: {
-          shop,
-          createdAt: { gte: from },
-          type: {
-            in: ["widget_impression", "impression", "widget_click", "click"],
-          },
-        },
-        orderBy: { createdAt: "asc" },
-        select: { type: true, payload: true, createdAt: true },
-      }),
-      prisma.event.findMany({
-        where: { storeId: shop, event: "conversion", timestamp: { gte: from } },
-        orderBy: { timestamp: "asc" },
-        select: { data: true, timestamp: true },
-      }),
-      prisma.experiment.findMany({
-        where: { shop },
-        select: { id: true, name: true },
-      }),
-    ]);
-
-  return summarizeRevenueAnalytics({
-    offers,
-    sessions,
-    shopperEvents,
-    conversionEvents,
-    experiments,
+    };
   });
 }
 
@@ -146,7 +115,13 @@ export function summarizeDashboardMetrics(input: {
   const { offers, chatEngaged, conversionEvents } = input;
   const byWidget = new Map<
     string,
-    { widgetType: string; impressions: number; clicks: number; conversions: number; revenue: number }
+    {
+      widgetType: string;
+      impressions: number;
+      clicks: number;
+      conversions: number;
+      revenue: number;
+    }
   >();
   const series = new Map<string, number>();
   let attributedRevenue = 0;
@@ -155,15 +130,13 @@ export function summarizeDashboardMetrics(input: {
   const offerRevenue = new Map<string, number>();
 
   for (const offer of offers) {
-    const row =
-      byWidget.get(offer.widgetType) ||
-      {
-        widgetType: offer.widgetType,
-        impressions: 0,
-        clicks: 0,
-        conversions: 0,
-        revenue: 0,
-      };
+    const row = byWidget.get(offer.widgetType) || {
+      widgetType: offer.widgetType,
+      impressions: 0,
+      clicks: 0,
+      conversions: 0,
+      revenue: 0,
+    };
 
     if (offer.shown) {
       row.impressions += 1;
@@ -213,11 +186,16 @@ export function summarizeDashboardMetrics(input: {
   for (const offer of offers) {
     if (!offer.converted || offersSeenInOrders.has(offer.id)) continue;
     const date = offer.createdAt.toISOString().slice(0, 10);
-    series.set(date, (series.get(date) || 0) + Number(offer.revenueImpact || 0));
+    series.set(
+      date,
+      (series.get(date) || 0) + Number(offer.revenueImpact || 0),
+    );
   }
 
   const avgAov =
-    attributedOrderCount > 0 ? attributedOrderRevenue / attributedOrderCount : 0;
+    attributedOrderCount > 0
+      ? attributedOrderRevenue / attributedOrderCount
+      : 0;
   const baselineAov =
     baselineOrderCount > 0 ? baselineOrderRevenue / baselineOrderCount : 0;
 
@@ -371,7 +349,8 @@ function buildOfferTimeSeries(offers: Offer[], times: OfferActionTimes) {
   for (const offer of offers) {
     dayFor(offer.createdAt).generated += 1;
     if (offer.shown) {
-      dayFor(times.impressions.get(offer.id) || offer.createdAt).impressions += 1;
+      dayFor(times.impressions.get(offer.id) || offer.createdAt).impressions +=
+        1;
     }
     if (offer.clicked) {
       dayFor(times.clicks.get(offer.id) || offer.createdAt).clicks += 1;
@@ -389,10 +368,7 @@ function buildOfferTimeSeries(offers: Offer[], times: OfferActionTimes) {
 }
 
 function summarizeOffers(offers: Offer[]) {
-  const groups = new Map<
-    string,
-    RevenueAnalyticsReport["offerRows"][number]
-  >();
+  const groups = new Map<string, RevenueAnalyticsReport["offerRows"][number]>();
   for (const offer of offers) {
     const name = getOfferName(offer);
     const key = `${offer.widgetType}:${name}`;
@@ -492,7 +468,8 @@ function summarizeJourneyStages(sessions: AnalyticsSession[], offers: Offer[]) {
   }
 
   return Array.from(groups.values()).sort(
-    (left, right) => right.revenue - left.revenue || right.sessions - left.sessions,
+    (left, right) =>
+      right.revenue - left.revenue || right.sessions - left.sessions,
   );
 }
 
@@ -502,7 +479,9 @@ function buildAuthoritativeInsights(input: {
   impressions: number;
 }) {
   if (input.impressions === 0) {
-    return ["Performance insights appear after an offer impression is recorded."];
+    return [
+      "Performance insights appear after an offer impression is recorded.",
+    ];
   }
 
   const revenueLeader = [...input.widgetRows].sort(
@@ -571,25 +550,51 @@ export async function getExperimentAnalytics(shop: string) {
   const experiments = await prisma.experiment.findMany({
     where: { shop },
     orderBy: { startedAt: "desc" },
+    take: 100,
   });
 
-  const offers = await prisma.offer.findMany({
-    where: {
-      shop,
-      abVariant: { not: null },
-      experimentId: { not: null },
-    },
-  });
-
+  const rows = experiments.length
+    ? await prisma.$queryRaw<
+        Array<{
+          experimentId: string;
+          variant: string;
+          impressions: number;
+          clicks: number;
+          conversions: number;
+          revenue: number;
+        }>
+      >(Prisma.sql`
+    SELECT o."experimentId", o."abVariant" variant, COUNT(*) FILTER (WHERE o.shown)::int impressions,
+      COUNT(*) FILTER (WHERE o.clicked)::int clicks, COUNT(*) FILTER (WHERE o.converted)::int conversions,
+      COALESCE(SUM(o."revenueImpact"), 0)::float revenue
+    FROM "Offer" o JOIN "Experiment" e ON e.id = o."experimentId" AND e.shop = o.shop AND e."widgetType" = o."widgetType"
+    WHERE o.shop = ${shop} AND o."experimentId" IN (${Prisma.join(experiments.map((e) => e.id))}) AND o."abVariant" IS NOT NULL
+    GROUP BY o."experimentId", o."abVariant"
+  `)
+    : [];
+  const indexed = new Map(
+    rows.map((row) => [`${row.experimentId}:${row.variant}`, row]),
+  );
   return experiments.map((experiment) => {
-    const relevant = offers.filter(
-      (offer) =>
-        offer.experimentId === experiment.id &&
-        offer.widgetType === experiment.widgetType,
-    );
-    const control = summarizeVariant(relevant, "control");
-    const treatment = summarizeVariant(relevant, "treatment");
-
+    const summary = (variant: string) => {
+      const row = indexed.get(`${experiment.id}:${variant}`) || {
+        impressions: 0,
+        clicks: 0,
+        conversions: 0,
+        revenue: 0,
+      };
+      return {
+        impressions: row.impressions,
+        clicks: row.clicks,
+        conversions: row.conversions,
+        revenue: row.revenue,
+        ctr: row.impressions ? row.clicks / row.impressions : 0,
+        conversionRate: row.impressions ? row.conversions / row.impressions : 0,
+        aov: row.conversions ? row.revenue / row.conversions : 0,
+      };
+    };
+    const control = summary("control"),
+      treatment = summary("treatment");
     return {
       ...experiment,
       control,
@@ -599,30 +604,9 @@ export async function getExperimentAnalytics(shop: string) {
   });
 }
 
-function summarizeVariant(offers: Offer[], variant: string) {
-  const scoped = offers.filter((offer) => offer.abVariant === variant);
-  const impressions = scoped.filter((offer) => offer.shown).length;
-  const clicks = scoped.filter((offer) => offer.clicked).length;
-  const conversions = scoped.filter((offer) => offer.converted).length;
-  const revenue = scoped.reduce(
-    (sum, offer) => sum + Number(offer.revenueImpact || 0),
-    0,
-  );
-
-  return {
-    impressions,
-    clicks,
-    conversions,
-    ctr: impressions > 0 ? clicks / impressions : 0,
-    conversionRate: impressions > 0 ? conversions / impressions : 0,
-    aov: conversions > 0 ? revenue / conversions : 0,
-    revenue,
-  };
-}
-
 function calculateTwoProportionZTest(
   treatment: { conversions: number; impressions: number },
-  control: { conversions: number; impressions: number }
+  control: { conversions: number; impressions: number },
 ): boolean {
   const n1 = treatment.impressions;
   const n2 = control.impressions;

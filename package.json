@@ -54,6 +54,7 @@
     "vite-tsconfig-paths": "6.0.4"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.14",
     "@shopify/api-codegen-preset": "^2.0.1",
     "@types/eslint": "^9.6.1",
     "@types/jsonwebtoken": "^9.0.10",

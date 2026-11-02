@@ -16,7 +16,7 @@ vi.mock("../db.server", () => ({
   },
 }));
 
-import { getSalesAnalytics } from "./salesAnalytics.server";
+import { summarizeSalesAnalytics } from "./salesAnalytics.server";
 
 describe("AI sales attribution analytics", () => {
   beforeEach(() => {
@@ -95,7 +95,12 @@ describe("AI sales attribution analytics", () => {
   });
 
   it("credits only materially assisted orders and reports both AOV cohorts", async () => {
-    const report = await getSalesAnalytics("example.myshopify.com");
+    const report = summarizeSalesAnalytics({
+      sessions: await mocks.sessionFindMany(),
+      events: await mocks.eventFindMany(),
+      outcomes: await mocks.outcomeFindMany(),
+      orders: await mocks.orderFindMany(),
+    });
 
     expect(report.chatImpressions).toBe(1);
     expect(report.recommendationClickRate).toBe(1);

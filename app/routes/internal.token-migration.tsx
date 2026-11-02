@@ -5,6 +5,15 @@ import {
   normalizeOfflineTokenMigrationLimit,
 } from "../services/offline-token-migration-batch.server";
 
+export const loader = () =>
+  Response.json(
+    { error: "Method not allowed" },
+    {
+      status: 405,
+      headers: { Allow: "POST", "Cache-Control": "no-store" },
+    },
+  );
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });

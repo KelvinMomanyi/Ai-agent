@@ -1,4 +1,4 @@
-import type { Prisma, Product, ProductAffinity } from "@prisma/client";
+import { Prisma, type Product, type ProductAffinity } from "@prisma/client";
 import prisma from "../db.server";
 import { cacheKeys, getJsonCache, redis, setJsonCache } from "../redis.server";
 import {
@@ -140,6 +140,7 @@ async function getCatalogFallbackRecommendations(input: {
       },
       include: { orderStats: true },
       orderBy: [{ updatedAt: "desc" }],
+      take: 100,
     }),
   ]);
 
@@ -235,6 +236,7 @@ async function filterAffinitiesToExistingProducts(
   );
 }
 
+/** Refresh only a fixed candidate set; never fan out over the whole catalog. */
 export async function recomputeAffinities(
   shop: string,
   productId: string,
@@ -244,173 +246,171 @@ export async function recomputeAffinities(
     include: { orderStats: true },
   });
   if (!source) return;
-
   const products = await prisma.product.findMany({
     where: {
       shop,
       id: { not: productId },
+      OR: [
+        ...(source.productType ? [{ productType: source.productType }] : []),
+        { tags: { hasSome: source.tags } },
+        { collectionIds: { hasSome: source.collectionIds } },
+      ],
     },
     include: { orderStats: true },
+    orderBy: { updatedAt: "desc" },
+    take: 100,
   });
-
-  await Promise.all(
-    products.map(async (target) => {
-      const existing = await prisma.productAffinity.findUnique({
-        where: {
-          shop_sourceId_targetId: {
-            shop,
-            sourceId: source.id,
-            targetId: target.id,
-          },
-        },
-      });
-      const score = computeAffinityScore(
-        source,
-        target,
-        existing?.orderCount || 0,
-      );
-      const reason = getAffinityReason(
-        source,
-        target,
-        existing?.orderCount || 0,
-      );
-
-      if (score <= 0 && !existing) return;
-
-      await prisma.productAffinity.upsert({
-        where: {
-          shop_sourceId_targetId: {
-            shop,
-            sourceId: source.id,
-            targetId: target.id,
-          },
-        },
-        update: { score, reason },
-        create: {
-          shop,
-          sourceId: source.id,
-          targetId: target.id,
-          score,
-          reason,
-          orderCount: existing?.orderCount || 0,
-        },
-      });
-    }),
+  const existing = await prisma.productAffinity.findMany({
+    where: {
+      shop,
+      sourceId: productId,
+      targetId: { in: products.map((p) => p.id) },
+    },
+  });
+  const counts = new Map(
+    existing.map((entry) => [entry.targetId, entry.orderCount]),
   );
-
+  for (let offset = 0; offset < products.length; offset += 4) {
+    await Promise.all(
+      products.slice(offset, offset + 4).map((target) => {
+        const orderCount = counts.get(target.id) || 0;
+        const data = {
+          score: computeAffinityScore(source, target, orderCount),
+          reason: getAffinityReason(source, target, orderCount),
+        };
+        return prisma.productAffinity.upsert({
+          where: {
+            shop_sourceId_targetId: {
+              shop,
+              sourceId: source.id,
+              targetId: target.id,
+            },
+          },
+          update: data,
+          create: {
+            shop,
+            sourceId: source.id,
+            targetId: target.id,
+            orderCount,
+            ...data,
+          },
+        });
+      }),
+    );
+  }
   await redis.del(cacheKeys.affinity(shop, productId));
 }
 
+/** One idempotent transaction; cost depends on the order, never catalog size. */
 export async function incrementOrderAffinities(
   shop: string,
   productIds: string[],
   orderId: string,
   lineItems: Array<{ productId: string; variantId: string }> = [],
 ) {
-  const uniqueProductIds = Array.from(new Set(productIds.filter(Boolean)));
-  if (uniqueProductIds.length < 1 || !orderId) return;
-
-  let knownProductIds: string[];
+  const ids = Array.from(new Set(productIds.filter(Boolean)));
+  if (!ids.length || !orderId) return;
+  let knownIds: string[];
   try {
-    knownProductIds = await prisma.$transaction(async (tx) => {
-      const marker = await tx.event.findUnique({
-        where: {
-          event_orderId_storeId: {
-            event: "order_affinities_processed",
-            orderId,
-            storeId: shop,
-          },
-        },
-        select: { id: true },
-      });
-      if (marker) return [];
-
-      const products = await tx.product.findMany({
-        where: { shop, id: { in: uniqueProductIds } },
-        select: { id: true },
-      });
-      const knownIds = products.map(({ id }) => id);
-
-      await tx.event.create({
-        data: {
+    knownIds = await prisma.$transaction(
+      async (tx) => {
+        const marker = {
           event: "order_affinities_processed",
           orderId,
           storeId: shop,
-          timestamp: new Date(),
-          data: { productIds: knownIds },
-        },
-      });
-
-      for (const productId of knownIds) {
-        await tx.productOrderStat.upsert({
-          where: { shop_productId: { shop, productId } },
-          update: { orderCount: { increment: 1 } },
-          create: { shop, productId, orderCount: 1 },
+        };
+        if (
+          await tx.event.findUnique({
+            where: { event_orderId_storeId: marker },
+            select: { id: true },
+          })
+        )
+          return [];
+        const products = await tx.product.findMany({
+          where: { shop, id: { in: ids } },
+          select: { id: true },
         });
-      }
-
-      const knownIdSet = new Set(knownIds);
-      const orderedVariants = Array.from(
-        new Map(
-          lineItems
-            .filter(
-              (line) =>
-                knownIdSet.has(line.productId) &&
-                line.variantId.startsWith("gid://shopify/ProductVariant/"),
-            )
-            .map((line) => [`${line.productId}:${line.variantId}`, line]),
-        ).values(),
-      );
-      for (const line of orderedVariants) {
-        await tx.productVariantOrderStat.upsert({
-          where: {
-            shop_productId_variantId: {
-              shop,
-              productId: line.productId,
-              variantId: line.variantId,
-            },
-          },
-          update: { orderCount: { increment: 1 } },
-          create: {
-            shop,
-            productId: line.productId,
-            variantId: line.variantId,
-            orderCount: 1,
+        const known = products.map((p) => p.id).sort();
+        await tx.event.create({
+          data: {
+            ...marker,
+            timestamp: new Date(),
+            data: { productIds: known },
           },
         });
-      }
-
-      for (const sourceId of knownIds) {
-        for (const targetId of knownIds) {
-          if (sourceId === targetId) continue;
-          await tx.productAffinity.upsert({
-            where: { shop_sourceId_targetId: { shop, sourceId, targetId } },
-            update: { orderCount: { increment: 1 } },
-            create: {
-              shop,
-              sourceId,
-              targetId,
-              score: 0.5,
-              reason: "frequently bought together",
-              orderCount: 1,
-            },
+        if (!known.length) return known;
+        await tx.productOrderStat.createMany({
+          data: known.map((productId) => ({ shop, productId, orderCount: 0 })),
+          skipDuplicates: true,
+        });
+        await tx.productOrderStat.updateMany({
+          where: { shop, productId: { in: known } },
+          data: { orderCount: { increment: 1 } },
+        });
+        const knownSet = new Set(known);
+        const variants = Array.from(
+          new Map(
+            lineItems
+              .filter(
+                (line) =>
+                  knownSet.has(line.productId) &&
+                  line.variantId.startsWith("gid://shopify/ProductVariant/"),
+              )
+              .map((line) => [line.variantId, line]),
+          ).values(),
+        );
+        if (variants.length) {
+          await tx.productVariantOrderStat.createMany({
+            data: variants.map((line) => ({ shop, ...line, orderCount: 0 })),
+            skipDuplicates: true,
+          });
+          await tx.productVariantOrderStat.updateMany({
+            where: { shop, OR: variants },
+            data: { orderCount: { increment: 1 } },
           });
         }
-      }
-
-      return knownIds;
-    });
+        // Limit each source to 20 co-purchase neighbors, even on unusually large orders.
+        const pairs = known.flatMap((sourceId) =>
+          known
+            .filter((id) => id !== sourceId)
+            .slice(0, 20)
+            .map((targetId) => ({ sourceId, targetId })),
+        );
+        if (pairs.length) {
+          await tx.$executeRaw(Prisma.sql`
+          INSERT INTO "ProductAffinity" (id, shop, "sourceId", "targetId", score, reason, "orderCount")
+          SELECT 'pair:' || md5(${shop} || ':' || x."sourceId" || ':' || x."targetId"), ${shop}, x."sourceId", x."targetId", 0.5, 'frequently bought together', 1
+          FROM jsonb_to_recordset(${JSON.stringify(pairs)}::jsonb) AS x("sourceId" text, "targetId" text)
+          ON CONFLICT (shop, "sourceId", "targetId") DO UPDATE SET "orderCount" = "ProductAffinity"."orderCount" + 1
+        `);
+          await tx.$executeRaw(Prisma.sql`
+          UPDATE "ProductAffinity" a SET score = LEAST(1.0,
+            0.5 * a."orderCount" / sqrt(GREATEST(1.0, sa."orderCount"::float * sb."orderCount"))
+            + 0.3 * (SELECT COUNT(*)::float FROM (SELECT unnest(pa.tags) INTERSECT SELECT unnest(pb.tags)) t) /
+              GREATEST(1, (SELECT COUNT(*) FROM (SELECT unnest(pa.tags) UNION SELECT unnest(pb.tags)) t))
+            + 0.2 * (SELECT COUNT(*)::float FROM (SELECT unnest(pa."collectionIds") INTERSECT SELECT unnest(pb."collectionIds")) t) /
+              GREATEST(1, (SELECT COUNT(*) FROM (SELECT unnest(pa."collectionIds") UNION SELECT unnest(pb."collectionIds")) t))),
+            reason = 'frequently bought together'
+          FROM jsonb_to_recordset(${JSON.stringify(pairs)}::jsonb) AS x("sourceId" text, "targetId" text),
+            "ProductOrderStat" sa, "ProductOrderStat" sb, "Product" pa, "Product" pb
+          WHERE a.shop = ${shop} AND a."sourceId" = x."sourceId" AND a."targetId" = x."targetId"
+            AND sa.shop = a.shop AND sa."productId" = a."sourceId" AND sb.shop = a.shop AND sb."productId" = a."targetId"
+            AND pa.shop = a.shop AND pa.id = a."sourceId" AND pb.shop = a.shop AND pb.id = a."targetId"
+        `);
+        }
+        return known;
+      },
+      { timeout: 15_000 },
+    );
   } catch (error) {
-    // A concurrent delivery can race between the marker lookup and insert.
-    // The unique marker makes the transaction exactly-once for this order.
-    if ((error as { code?: string })?.code === "P2002") return;
+    if ((error as { code?: string }).code === "P2002") return;
     throw error;
   }
-
-  for (let index = 0; index < knownProductIds.length; index += 4) {
-    const batch = knownProductIds.slice(index, index + 4);
+  for (let offset = 0; offset < knownIds.length; offset += 4) {
     await Promise.all(
-      batch.map((productId) => recomputeAffinities(shop, productId)),
+      knownIds
+        .slice(offset, offset + 4)
+        .map((id) => redis.del(cacheKeys.affinity(shop, id))),
     );
   }
 }

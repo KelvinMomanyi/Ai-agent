@@ -34,6 +34,7 @@ type StoredStorefrontSession = {
   sessionToken: string;
   expiresAt: number;
   settings?: StorefrontSettings;
+  settingsLoadedAt?: number;
 };
 
 export type StorefrontSettings = {
@@ -76,10 +77,12 @@ export class SessionManager {
   private cartRemovalCount = 0;
   private checkoutStarted = false;
   private cartValue = 0;
-  private startedAt = Date.now();
   private lastCartActionAt = 0;
   private lastEventType = "";
-  private syncTimer: number | undefined;
+  private activeMilliseconds = 0;
+  private checkpointAt = Date.now();
+  private lastInteractionAt = Date.now();
+  private wasVisible = true;
   private authRefreshPromise: Promise<void> | undefined;
 
   constructor(
@@ -92,14 +95,22 @@ export class SessionManager {
     if (!authenticated) {
       this.bootstrapLocalSession();
     } else {
-      await this.loadSettings();
+      if (Object.keys(this.settings).length === 0) await this.loadSettings();
     }
-    this.syncTimer = window.setInterval(() => this.sync(), 30000);
-    window.addEventListener("pagehide", () => this.sync());
+    this.wasVisible = document.visibilityState !== "hidden";
+    this.checkpointAt = Date.now();
+    document.addEventListener("visibilitychange", this.handleVisibility);
+    for (const type of ["pointerdown", "keydown", "touchstart", "scroll"]) {
+      document.addEventListener(type, this.handleActivity, { passive: true });
+    }
   }
 
   destroy(): void {
-    if (this.syncTimer) window.clearInterval(this.syncTimer);
+    this.accumulateActiveTime();
+    document.removeEventListener("visibilitychange", this.handleVisibility);
+    for (const type of ["pointerdown", "keydown", "touchstart", "scroll"]) {
+      document.removeEventListener(type, this.handleActivity);
+    }
   }
 
   recordEvent(event: StorefrontEvent): void {
@@ -191,7 +202,7 @@ export class SessionManager {
   }
 
   getSnapshot(): SessionSnapshot {
-    const sessionDuration = Math.round((Date.now() - this.startedAt) / 1000);
+    const sessionDuration = this.getSnapshotDuration();
     const productViews = Array.from(this.productViewCounts.values()).reduce(
       (sum, count) => sum + count,
       0,
@@ -244,14 +255,16 @@ export class SessionManager {
       journeyStage: this.journeyStage,
       intentScore,
       hesitationScore,
-      viewedProductIds: Array.from(this.viewedProductIds),
+      viewedProductIds: Array.from(this.viewedProductIds).slice(-50),
       cartProductIds: Array.from(this.cartProductIds),
       totalPageViews: this.pageViews,
       sessionDuration,
       cartValue: this.cartValue,
       context: {
         maxScrollDepth: this.maxScrollDepth,
-        productViewCounts: Object.fromEntries(this.productViewCounts),
+        productViewCounts: Object.fromEntries(
+          Array.from(this.productViewCounts).slice(-50),
+        ),
         cartActionCount: this.cartActionCount,
         cartItemCount: this.cartItemCount,
         cartVariantIds: Array.from(this.cartVariantIds),
@@ -370,43 +383,48 @@ export class SessionManager {
     sdk.sessionToken = this.sessionToken;
   }
 
-  private sync(): void {
-    if (!this.anonymousId || !this.sessionToken) {
-      void this.ensureAuthenticated();
-      return;
-    }
-
+  getTelemetryEvent() {
     const snapshot = this.getSnapshot();
-    const body = JSON.stringify({
-      ...this.getAuthPayload(),
-      events: [
-        {
-          type: "session_sync",
-          ts: Date.now(),
-          sessionId: this.anonymousId,
-          shop: this.shop,
-          url: window.location.href,
-          referrer: document.referrer,
-          snapshot,
-          ...snapshot,
-        },
-      ],
-    });
-
-    fetch(this.endpoint("/events"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-AOVBoost-Shop": this.shop,
-      },
-      body,
-      keepalive: true,
-    })
-      .then((response) => {
-        if (response.status === 401) void this.refreshAuth();
-      })
-      .catch(() => {});
+    return {
+      type: "session_sync",
+      ts: Date.now(),
+      sessionId: this.anonymousId,
+      shop: this.shop,
+      url: window.location.href,
+      referrer: document.referrer,
+      snapshot,
+      ...snapshot,
+    };
   }
+
+  isActive(): boolean {
+    return (
+      document.visibilityState !== "hidden" &&
+      Date.now() - this.lastInteractionAt < 90_000
+    );
+  }
+
+  private accumulateActiveTime() {
+    const now = Date.now();
+    if (this.wasVisible) {
+      this.activeMilliseconds += Math.max(
+        0,
+        Math.min(now, this.lastInteractionAt + 90_000) - this.checkpointAt,
+      );
+    }
+    this.checkpointAt = now;
+  }
+
+  private handleActivity = () => {
+    this.accumulateActiveTime();
+    this.lastInteractionAt = Date.now();
+  };
+
+  private handleVisibility = () => {
+    this.accumulateActiveTime();
+    this.wasVisible = document.visibilityState !== "hidden";
+    if (this.wasVisible) this.lastInteractionAt = Date.now();
+  };
 
   private updateJourneyStage(): void {
     if (this.cartProductIds.size > 0) {
@@ -447,6 +465,11 @@ export class SessionManager {
     if (stored) {
       this.anonymousId = stored.sessionId;
       this.sessionToken = stored.sessionToken;
+      if (
+        stored.settings &&
+        Date.now() - (stored.settingsLoadedAt || 0) < 60_000
+      )
+        this.settings = stored.settings;
       return;
     }
 
@@ -473,7 +496,16 @@ export class SessionManager {
       if (!response.ok) return;
       const body = asRecord(await response.json());
       const settings = asRecord(body?.settings);
-      if (settings) this.settings = settings as StorefrontSettings;
+      if (settings) {
+        this.settings = settings as StorefrontSettings;
+        const stored = this.getStoredStorefrontSession();
+        if (stored)
+          this.storeStorefrontSession({
+            ...stored,
+            settings: this.settings,
+            settingsLoadedAt: Date.now(),
+          });
+      }
     } catch {
       // Keep the most recently loaded settings when the network is unavailable.
     }
@@ -503,7 +535,10 @@ export class SessionManager {
     try {
       window.localStorage.setItem(
         SIGNED_SESSION_STORAGE_KEY,
-        JSON.stringify(session),
+        JSON.stringify({
+          ...session,
+          settingsLoadedAt: session.settingsLoadedAt ?? Date.now(),
+        }),
       );
       window.localStorage.setItem(STORAGE_KEY, session.sessionId);
     } catch {
@@ -531,7 +566,8 @@ export class SessionManager {
   }
 
   private getSnapshotDuration(): number {
-    return Math.round((Date.now() - this.startedAt) / 1000);
+    this.accumulateActiveTime();
+    return Math.round(this.activeMilliseconds / 1000);
   }
 }
 

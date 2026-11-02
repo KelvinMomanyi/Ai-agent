@@ -1,3 +1,5 @@
+import { reserveAiAttempt } from "../redis.server";
+
 export type AiProvider = "gemini" | "groq" | "mistral" | "deepseek" | "none";
 
 export type AiGatewayRequest = {
@@ -8,6 +10,8 @@ export type AiGatewayRequest = {
   maxTokens?: number;
   timeoutProfile?: "urgent" | "normal" | "relaxed";
   fallback?: string;
+  shop?: string;
+  signal?: AbortSignal;
 };
 
 export type AiGatewayResult = {
@@ -156,6 +160,7 @@ export async function callAI(
   lastAiProvider = "none";
 
   for (const service of getAvailableServices()) {
+    if (request.signal?.aborted) break;
     const remainingMs = deadlineAt - Date.now();
     if (remainingMs <= 200) {
       errors.push({
@@ -165,12 +170,25 @@ export async function callAI(
       break;
     }
 
+    const release = await reserveAiAttempt(request.shop);
+    if (!release) {
+      errors.push({
+        provider: service.name,
+        message: "Shared AI budget or concurrency limit reached",
+      });
+      break;
+    }
     try {
       const response = await fetch(service.url, {
         method: "POST",
         headers: service.headers,
         body: JSON.stringify(service.buildBody(request)),
-        signal: AbortSignal.timeout(Math.min(timeoutMs, remainingMs)),
+        signal: request.signal
+          ? AbortSignal.any([
+              request.signal,
+              AbortSignal.timeout(Math.min(timeoutMs, remainingMs)),
+            ])
+          : AbortSignal.timeout(Math.min(timeoutMs, remainingMs)),
       });
 
       if (!response.ok) {
@@ -207,10 +225,13 @@ export async function callAI(
       markModelDown(service.name);
       logGatewayAttempt(request, service.name, startedAt, false, message);
     } catch (error) {
+      if (request.signal?.aborted) break;
       const message = getErrorMessage(error);
       errors.push({ provider: service.name, message });
       markModelDown(service.name);
       logGatewayAttempt(request, service.name, startedAt, false, message);
+    } finally {
+      await release();
     }
   }
 
@@ -288,7 +309,9 @@ function getTimeoutMs(
   profile: NonNullable<AiGatewayRequest["timeoutProfile"]>,
 ) {
   const timeout = TIMEOUT_MS[profile];
-  return Number.isFinite(timeout) && timeout > 0 ? timeout : TIMEOUT_MS.normal;
+  return Number.isFinite(timeout) && timeout > 0
+    ? Math.min(timeout, 10_000)
+    : TIMEOUT_MS.normal;
 }
 
 function getTotalTimeoutMs(
@@ -296,7 +319,7 @@ function getTotalTimeoutMs(
 ) {
   const timeout = TOTAL_TIMEOUT_MS[profile];
   return Number.isFinite(timeout) && timeout > 0
-    ? timeout
+    ? Math.min(timeout, 15_000)
     : TOTAL_TIMEOUT_MS.normal;
 }
 

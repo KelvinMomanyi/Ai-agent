@@ -36,6 +36,7 @@ export interface OfferCandidate {
 
 export interface DecisionInput {
   shop: string;
+  signal?: AbortSignal;
   session: ShopperSessionSnapshot;
   currentProductId?: string;
   currentPageType: CurrentPageType;

@@ -30,6 +30,12 @@ export class EventBus {
   private searchTimer: number | undefined;
   private lastSearchQuery = "";
   private recentEventKeys = new Map<string, number>();
+  private heartbeatTimer: number | undefined;
+  private destroyed = false;
+  private lastFlushAt = 0;
+  private inFlight = 0;
+  private retryAt = 0;
+  private lastSnapshotSignature = "";
 
   constructor(private options: EventBusOptions) {}
 
@@ -49,12 +55,21 @@ export class EventBus {
       const detail = normalizePayload(event.detail);
       this.track(String(detail.type || "widget_event"), detail);
     }) as EventListener);
-    window.addEventListener("pagehide", () => this.flush());
+    window.addEventListener("pagehide", this.handlePageHide);
+    document.addEventListener("visibilitychange", this.handleVisibility);
+    this.heartbeatTimer = window.setInterval(() => {
+      if (
+        Date.now() - this.lastFlushAt >= 120_000 &&
+        this.options.sessionManager.isActive?.()
+      )
+        this.flush(true);
+    }, 30_000);
 
     this.trackPageView();
   }
 
   track(type: string, payload: EventPayload = {}): void {
+    if (this.destroyed) return;
     if (!hasTrackingConsent(window.AOVBoost || {})) {
       this.queue = [];
       return;
@@ -93,11 +108,43 @@ export class EventBus {
     document.dispatchEvent(
       new CustomEvent("aovboost:event", { detail: event }),
     );
-    this.scheduleFlush();
+    this.scheduleFlush(
+      [
+        "add_to_cart",
+        "remove_from_cart",
+        "cart_update",
+        "checkout_started",
+        "checkout_start",
+        "widget_click",
+        "recommendation_added",
+      ].includes(type)
+        ? 100
+        : 5000,
+    );
   }
 
-  flush(): void {
-    if (!hasTrackingConsent(window.AOVBoost || {})) {
+  destroy(): void {
+    this.flush(true);
+    this.destroyed = true;
+    window.clearInterval(this.heartbeatTimer);
+    window.clearTimeout(this.flushTimer);
+    window.clearTimeout(this.searchTimer);
+    window.removeEventListener("pagehide", this.handlePageHide);
+    document.removeEventListener("visibilitychange", this.handleVisibility);
+  }
+
+  private handlePageHide = () => this.flush(true);
+  private handleVisibility = () => {
+    if (document.visibilityState === "hidden") this.flush(true);
+    else if (this.queue.length) this.scheduleFlush(100);
+  };
+
+  flush(includeSnapshot = false): void {
+    if (
+      this.destroyed ||
+      !hasTrackingConsent(window.AOVBoost || {}) ||
+      this.options.sessionManager.getSettings?.().analyticsEnabled === false
+    ) {
       this.queue = [];
       return;
     }
@@ -106,15 +153,29 @@ export class EventBus {
       this.flushTimer = undefined;
     }
 
-    if (this.queue.length === 0) return;
+    if (this.queue.length === 0 && !includeSnapshot) return;
+    if (!includeSnapshot && Date.now() < this.retryAt) {
+      this.scheduleFlush(this.retryAt - Date.now());
+      return;
+    }
+    if (this.inFlight > 0 && !includeSnapshot) {
+      if (this.queue.length) this.scheduleFlush(5000);
+      return;
+    }
+    if (document.visibilityState === "hidden" && !includeSnapshot) return;
     if (!this.options.sessionManager.getAuthPayload().sessionToken) {
       void this.flushAfterAuth();
       return;
     }
 
+    const snapshot = this.options.sessionManager.getTelemetryEvent?.();
+    const signature = snapshot ? JSON.stringify({ ...snapshot, ts: 0 }) : "";
+    if (!this.queue.length && signature === this.lastSnapshotSignature) return;
     const events: AovboostEvent[] = [];
-    let bytes = 0;
-    while (this.queue.length && events.length < 25) {
+    let bytes = snapshot
+      ? new TextEncoder().encode(JSON.stringify(snapshot)).length
+      : 0;
+    while (this.queue.length && events.length < 24) {
       const next = this.queue[0];
       const size = new TextEncoder().encode(JSON.stringify(next)).length;
       if (size > 40_000) {
@@ -125,8 +186,13 @@ export class EventBus {
       events.push(this.queue.shift()!);
       bytes += size;
     }
+    if (snapshot && bytes < 48_000 && this.queue.length === 0) {
+      events.push(snapshot);
+      this.lastSnapshotSignature = signature;
+    }
     if (this.queue.length) this.scheduleFlush();
     if (!events.length) return;
+    this.lastFlushAt = Date.now();
     void this.postEvents(events);
   }
 
@@ -142,9 +208,13 @@ export class EventBus {
     }
   }
 
-  private scheduleFlush(): void {
-    if (this.flushTimer) return;
-    this.flushTimer = window.setTimeout(() => this.flush(), 2000);
+  private scheduleFlush(delay = 5000): void {
+    if (this.destroyed) return;
+    if (this.flushTimer) {
+      if (delay !== 100) return;
+      window.clearTimeout(this.flushTimer);
+    }
+    this.flushTimer = window.setTimeout(() => this.flush(), delay);
   }
 
   private endpoint(path: string): string {
@@ -152,47 +222,65 @@ export class EventBus {
     return `${base.replace(/\/$/, "")}${path}`;
   }
 
+  private requeue(events: AovboostEvent[]) {
+    this.queue.unshift(
+      ...events.filter((event) => event.type !== "session_sync"),
+    );
+    if (this.queue.length > 200) this.queue.length = 200;
+  }
+
   private async postEvents(
     events: AovboostEvent[],
     retriedAuth = false,
   ): Promise<void> {
-    const auth = await this.options.sessionManager.getSignedAuthPayload();
-    if (!auth) {
-      this.queue.unshift(...events);
-      return;
-    }
-
+    if (!retriedAuth) this.inFlight += 1;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
     try {
+      const auth = await this.options.sessionManager.getSignedAuthPayload();
+      if (!auth) {
+        this.requeue(events);
+        this.retryAt = Date.now() + 30_000;
+        return;
+      }
       const response = await fetch(this.endpoint("/events"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-AOVBoost-Shop": this.options.shop,
         },
-        body: JSON.stringify({
-          ...auth,
-          events,
-        }),
+        body: JSON.stringify({ ...auth, events }),
         keepalive: true,
+        signal: controller.signal,
       });
-
       if (response.status === 401 && !retriedAuth) {
         const recovered =
           await this.options.sessionManager.applySessionFromResponse(response);
         if (!recovered) await this.options.sessionManager.refreshAuth();
-        if (!this.options.sessionManager.getAuthPayload().sessionToken) {
-          this.queue.unshift(...events);
-          return;
-        }
         await this.postEvents(events, true);
-        return;
-      }
-
-      if (!response.ok && response.status !== 401) {
-        this.queue.unshift(...events);
+      } else if (
+        response.status === 429 ||
+        response.status >= 500 ||
+        response.status === 401
+      ) {
+        this.requeue(events);
+        const seconds = Number(response.headers.get("Retry-After"));
+        this.retryAt =
+          Date.now() +
+          (Number.isFinite(seconds) && seconds > 0
+            ? Math.min(seconds * 1000, 120_000)
+            : 30_000);
       }
     } catch {
-      this.queue.unshift(...events);
+      this.requeue(events);
+      this.retryAt = Date.now() + 30_000;
+    } finally {
+      window.clearTimeout(timeout);
+      if (!retriedAuth) {
+        this.inFlight -= 1;
+        if (this.queue.length)
+          this.scheduleFlush(Math.max(5000, this.retryAt - Date.now()));
+      }
     }
   }
 

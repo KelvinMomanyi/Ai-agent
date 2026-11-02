@@ -242,6 +242,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Invalidate cached settings
     await redis.del(`settings:${session.shop}`);
+    await redis.del(`public-settings:${session.shop}`);
 
     return json({
       success: true,
