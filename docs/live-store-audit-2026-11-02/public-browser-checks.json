@@ -1,0 +1,26 @@
+{
+  "recordedAt": "2026-11-02T15:16:11.529Z",
+  "checks": [
+    {
+      "url": "https://newsliderapp.myshopify.com/password",
+      "name": "storefront-access-gate",
+      "status": 200,
+      "title": "NewSliderApp",
+      "bodyText": "NewSliderApp\n\nThis store is password protected. Use the password to enter the store.\n\nEnter store password\nEnter\nAre you the store owner? Log in here",
+      "sdkReady": false
+    },
+    {
+      "url": "https://ai-agent-dusky-nine.vercel.app/",
+      "name": "app-public-entry",
+      "status": 200,
+      "title": "",
+      "bodyText": "AOVBoost\n\nYour AI Sales Agent for Smart Cross-Sells\n\nShop domain\ne.g: my-shop-domain.myshopify.com\nLog in\nSmart product recommendations. Show relevant cross-sell and upsell products based on what customers are browsing or adding to cart.\nAutomatic placement on product and cart pages. Instantly display offers without editing your theme or configuring placement manually.\nReal-time AOV tracking. Monitor how much extra revenue each cross-sell recommendation is generating.\nWorks seamlessly with your existing Shopify theme. No coding needed and fully responsive on desktop and mobile.",
+      "sdkReady": false
+    },
+    {
+      "name": "unsigned-session-denied",
+      "status": 401,
+      "body": "{\"error\":\"Unauthorized\"}"
+    }
+  ]
+}

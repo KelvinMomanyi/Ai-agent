@@ -1,0 +1,188 @@
+{
+  "recordedAt": "2026-11-02T14:47:18.064Z",
+  "shops": [
+    {
+      "shopDomain": "app-review-76f8b2af-r91212-a0-primary.myshopify.com",
+      "installedAt": "2026-09-07T03:53:32.593Z",
+      "scope": "read_orders,read_products,write_discounts",
+      "products": 15,
+      "newestProductUpdatedAt": "2026-09-07T04:00:19.770Z",
+      "offlineSession": {
+        "expires": "2026-09-07T04:53:31.538Z",
+        "scope": "read_orders,read_products,write_discounts",
+        "refreshTokenExpires": "2026-12-06T03:53:31.538Z"
+      },
+      "settings": {
+        "chatEnabled": true,
+        "bundlesEnabled": true,
+        "upsellEnabled": true,
+        "analyticsEnabled": true,
+        "proactiveMessagesEnabled": true,
+        "discountPermission": false,
+        "updatedAt": "2026-09-07T03:55:44.498Z",
+        "hasStoreKnowledge": false,
+        "hasBrandVoice": false
+      },
+      "sync": {
+        "phase": "complete",
+        "syncedCount": 15,
+        "error": null,
+        "updatedAt": "2026-09-07T04:00:21.653Z"
+      },
+      "lastShopperActivity": "2026-09-07T04:04:39.639Z"
+    },
+    {
+      "shopDomain": "daniel-store-wh0b7w15.myshopify.com",
+      "installedAt": "2026-09-04T22:31:17.612Z",
+      "scope": "read_orders,read_products,write_discounts",
+      "products": 0,
+      "newestProductUpdatedAt": null,
+      "offlineSession": {
+        "expires": "2026-09-04T23:31:16.559Z",
+        "scope": "read_orders,read_products,write_discounts",
+        "refreshTokenExpires": "2026-12-03T22:31:16.559Z"
+      },
+      "settings": null,
+      "sync": null,
+      "lastShopperActivity": null
+    },
+    {
+      "shopDomain": "gilded-lily-jewelry.myshopify.com",
+      "installedAt": "2026-09-23T20:17:07.271Z",
+      "scope": "read_orders,read_products,write_discounts",
+      "products": 0,
+      "newestProductUpdatedAt": null,
+      "offlineSession": {
+        "expires": "2026-09-23T23:26:12.616Z",
+        "scope": "read_orders,read_products,write_discounts",
+        "refreshTokenExpires": "2026-12-22T22:26:12.616Z"
+      },
+      "settings": null,
+      "sync": null,
+      "lastShopperActivity": null
+    },
+    {
+      "shopDomain": "gloria-ck6dmnrc.myshopify.com",
+      "installedAt": "2026-09-11T17:58:35.499Z",
+      "scope": "read_orders,read_products,write_discounts",
+      "products": 0,
+      "newestProductUpdatedAt": null,
+      "offlineSession": {
+        "expires": "2026-09-11T18:58:34.428Z",
+        "scope": "read_orders,read_products,write_discounts",
+        "refreshTokenExpires": "2026-12-10T17:58:34.428Z"
+      },
+      "settings": null,
+      "sync": null,
+      "lastShopperActivity": null
+    },
+    {
+      "shopDomain": "newsliderapp.myshopify.com",
+      "installedAt": "2026-08-04T12:52:36.166Z",
+      "scope": "read_orders,read_products,write_discounts",
+      "products": 495,
+      "newestProductUpdatedAt": "2026-09-04T09:52:28.471Z",
+      "offlineSession": {
+        "expires": "2026-09-07T04:18:59.208Z",
+        "scope": "read_orders,read_products,write_discounts",
+        "refreshTokenExpires": "2026-12-06T03:18:59.208Z"
+      },
+      "settings": {
+        "chatEnabled": true,
+        "bundlesEnabled": true,
+        "upsellEnabled": true,
+        "analyticsEnabled": true,
+        "proactiveMessagesEnabled": true,
+        "discountPermission": false,
+        "updatedAt": "2026-08-04T12:52:36.281Z",
+        "hasStoreKnowledge": false,
+        "hasBrandVoice": false
+      },
+      "sync": {
+        "phase": "complete",
+        "syncedCount": 495,
+        "error": null,
+        "updatedAt": "2026-09-04T09:53:12.467Z"
+      },
+      "lastShopperActivity": "2026-09-13T17:18:26.350Z"
+    },
+    {
+      "shopDomain": "quickstart-f2795ad8.myshopify.com",
+      "installedAt": "2026-06-09T10:38:47.720Z",
+      "scope": "read_orders,read_products,write_discounts",
+      "products": 0,
+      "newestProductUpdatedAt": null,
+      "offlineSession": {
+        "expires": "2026-11-02T08:37:37.657Z",
+        "scope": "read_orders,read_products,write_discounts",
+        "refreshTokenExpires": "2027-01-31T07:37:37.657Z"
+      },
+      "settings": {
+        "chatEnabled": true,
+        "bundlesEnabled": true,
+        "upsellEnabled": true,
+        "analyticsEnabled": true,
+        "proactiveMessagesEnabled": true,
+        "discountPermission": false,
+        "updatedAt": "2026-06-14T09:52:45.976Z",
+        "hasStoreKnowledge": false,
+        "hasBrandVoice": false
+      },
+      "sync": null,
+      "lastShopperActivity": "2026-09-03T09:46:46.061Z"
+    },
+    {
+      "shopDomain": "teretret.myshopify.com",
+      "installedAt": "2026-09-04T07:27:43.760Z",
+      "scope": "read_orders,read_products,write_discounts",
+      "products": 25,
+      "newestProductUpdatedAt": "2026-09-04T09:49:05.603Z",
+      "offlineSession": {
+        "expires": "2026-09-04T10:31:35.488Z",
+        "scope": "read_orders,read_products,write_discounts",
+        "refreshTokenExpires": "2026-12-03T09:31:35.488Z"
+      },
+      "settings": null,
+      "sync": {
+        "phase": "complete",
+        "syncedCount": 25,
+        "error": null,
+        "updatedAt": "2026-09-04T09:49:12.239Z"
+      },
+      "lastShopperActivity": null
+    },
+    {
+      "shopDomain": "willardltd.myshopify.com",
+      "installedAt": "2026-08-31T22:42:50.191Z",
+      "scope": "read_orders,read_products,write_discounts",
+      "products": 0,
+      "newestProductUpdatedAt": null,
+      "offlineSession": {
+        "expires": "2026-08-31T23:42:48.105Z",
+        "scope": "read_orders,read_products,write_discounts",
+        "refreshTokenExpires": "2026-11-29T22:42:49.105Z"
+      },
+      "settings": null,
+      "sync": null,
+      "lastShopperActivity": null
+    }
+  ],
+  "migrations": [
+    {
+      "migration_name": "20261102150000_performance_indexes",
+      "finished_at": "2026-11-02T13:48:41.688Z"
+    },
+    {
+      "migration_name": "20260903100000_ai_sales_agent",
+      "finished_at": "2026-09-03T09:46:46.157Z"
+    },
+    {
+      "migration_name": "20260816120000_store_specific_chat_knowledge",
+      "finished_at": "2026-08-16T08:03:49.406Z"
+    },
+    {
+      "migration_name": "20260811210000_repair_session_refresh_columns",
+      "finished_at": "2026-08-11T18:58:07.969Z"
+    }
+  ]
+}

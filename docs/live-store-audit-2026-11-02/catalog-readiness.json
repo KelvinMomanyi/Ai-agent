@@ -1,0 +1,56 @@
+{
+  "recordedAt": "2026-11-02T15:16:01.362Z",
+  "rows": [
+    {
+      "shop": "newsliderapp.myshopify.com",
+      "counts": [
+        {
+          "total": 495,
+          "available": 495,
+          "actionable": 495,
+          "missing": 0
+        }
+      ],
+      "metadata": {
+        "total": 495,
+        "withVariantArrays": 495,
+        "unpublishedFlag": 495,
+        "truncatedVariants": 0
+      }
+    },
+    {
+      "shop": "teretret.myshopify.com",
+      "counts": [
+        {
+          "total": 25,
+          "available": 24,
+          "actionable": 24,
+          "missing": 0
+        }
+      ],
+      "metadata": {
+        "total": 25,
+        "withVariantArrays": 25,
+        "unpublishedFlag": 25,
+        "truncatedVariants": 0
+      }
+    },
+    {
+      "shop": "app-review-76f8b2af-r91212-a0-primary.myshopify.com",
+      "counts": [
+        {
+          "total": 15,
+          "available": 13,
+          "actionable": 13,
+          "missing": 0
+        }
+      ],
+      "metadata": {
+        "total": 15,
+        "withVariantArrays": 15,
+        "unpublishedFlag": 15,
+        "truncatedVariants": 0
+      }
+    }
+  ]
+}

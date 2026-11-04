@@ -1,0 +1,71 @@
+AOVBOOST PRODUCT IMPROVEMENT PLAN
+Prepared: 2 November 2026
+
+AOVBoost could become worthwhile, but I would narrow its purpose and make its value much easier to experience. The evidence points to weaknesses in positioning, demonstration, and setup. We still need listing traffic and conversion data to determine why new installs are low.
+
+The current listing starts at $19/month, has no reviews, and promises broad AI recommendations. Merchants can already get product recommendations through Shopify's free Search & Discovery app. AOVBoost needs a more specific reason to choose it.
+
+Sources:
+AOVBoost listing: https://apps.shopify.com/aovboost-1
+Shopify Search & Discovery: https://apps.shopify.com/search-and-discovery
+
+1. FIX THE PUBLIC DEMO IMMEDIATELY
+
+I followed the App Store's demo link. It opens a store containing Shopify-generated test products, but neither its homepage nor the product page I checked loaded AOVBoost. This wastes a valuable opportunity to convince a prospective merchant.
+
+Build a polished demo with realistic complementary products and a clear instruction: "Add this product to see AOVBoost recommend a matching accessory."
+
+2. MAKE CART RECOMMENDATIONS THE MAIN PRODUCT
+
+The app currently combines chat, bundles, behavioral triggers, popups, banners, and post-purchase features. That makes the central benefit harder to understand.
+
+Lead with this promise:
+
+"Show relevant add-ons inside the cart, using products and rules you approve."
+
+Start with two excellent recommendations after a successful cart addition. Make chat and the other surfaces optional. The original purchase should remain fast and uninterrupted.
+
+3. CHOOSE ONE MERCHANT SEGMENT AND SOLVE ITS MATCHING PROBLEM WELL
+
+The first hypothesis would be beauty or haircare stores with clear complementary products: shampoo and conditioner, a treatment and its accessories, or a complete routine.
+
+The differentiator would be useful, merchant-approved product relationships, with clear explanations and exclusions. Validate that niche with merchants before committing to it.
+
+AI could suggest pairings during setup; merchants approve or replace them. Reuse those approved relationships during shopping. This also helps control server costs.
+
+4. MAKE INSTALLATION LEAD DIRECTLY TO A WORKING OFFER
+
+The audit found five of eight recorded installations had no synced catalog. Those records include inactive or test stores, so this is not a measured customer failure rate, but it exposes a setup gap.
+
+Replace the initial dashboard with a short path:
+
+Sync products -> Approve suggested pairings -> Preview an offer -> Enable the embed -> Verify it appeared.
+
+Automatically resume interrupted syncs. Replace raw product IDs with product pickers. Move AI-provider status and advanced tuning away from the main merchant experience.
+
+5. SHOW EVIDENCE THAT HELPS MERCHANTS DECIDE WHETHER TO KEEP PAYING
+
+Prioritize offers viewed, accepted recommendations, recommended items purchased, and clearly labeled attributed revenue.
+
+Attributed revenue does not establish additional revenue caused by the app. Use a comparison group when traffic supports it, and monitor conversion alongside order value. Merchants need confidence that recommendations improve the business without hurting checkout.
+
+6. REDUCE THE RISK OF TRYING AN UNPROVEN APP
+
+Test a bounded free pilot with transparent usage limits and no unexpected overages. The current seven-day trial may give a small store little opportunity to evaluate results. Keep ongoing free usage capped to protect operating costs.
+
+Refresh the listing around one concrete use case, an actual storefront demonstration, and honest results from pilot merchants. Established competitors already offer AI recommendations, customization, and substantial review histories.
+
+Competitor reference:
+Frequently Bought Together: https://apps.shopify.com/frequently-bought-together
+
+NEXT MONTH'S PRIORITIES
+
+Fix the demo and onboarding, deliver the focused cart experience, and work closely with five active stores in one segment. Observe their setup and ask what would justify paying to keep it.
+
+Also measure where the funnel fails:
+
+- Few listing visits: improve distribution.
+- Listing visits without installs: strengthen the listing and offer.
+- Installs without working widgets: improve setup.
+
+That distinction will prevent another large feature build from addressing the wrong problem.
