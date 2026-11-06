@@ -78,6 +78,15 @@ export abstract class BaseWidget {
   isDestroyed(): boolean {
     return this.disposed;
   }
+  getElement(): HTMLElement {
+    return this.container;
+  }
+  recordVerifiedImpression(strategy: string): void {
+    if (this.impressionRecorded || this.disposed || this.payload.previewMode)
+      return;
+    this.impressionRecorded = true;
+    this.track("widget_impression", { strategy, verified: true });
+  }
 
   reattach(target: HTMLElement): void {
     if (this.disposed) return;
@@ -94,6 +103,7 @@ export abstract class BaseWidget {
   }
 
   private observeImpression() {
+    if (this.payload.verifiedDisplayManaged || this.payload.previewMode) return;
     if (this.impressionRecorded || this.disposed) return;
     this.impressionObserver?.disconnect();
     this.impressionListeners?.abort();
@@ -201,6 +211,7 @@ export abstract class BaseWidget {
   }
 
   protected trackDismiss(): void {
+    if (this.payload.previewMode) return;
     this.track("widget_dismiss", {
       productIds: getProducts(this.payload).map(({ id }) => id),
     });
@@ -229,6 +240,7 @@ export abstract class BaseWidget {
   }
 
   protected track(type: string, extra: Record<string, unknown>): void {
+    if (this.payload.previewMode) return;
     const globalTrack = (window as any).AOVBoostSDK?.track;
     const payload = {
       type,

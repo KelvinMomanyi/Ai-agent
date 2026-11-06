@@ -1,7 +1,12 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+const engine = JSON.parse(
+  readFileSync(resolve(__dirname, ".theme-engine.json"), "utf8"),
+);
 
 export default defineConfig({
+  define: { __AOVBOOST_THEME_ENGINE_ASSET__: JSON.stringify(engine.file) },
   publicDir: false,
   build: {
     target: "es2020",

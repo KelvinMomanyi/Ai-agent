@@ -110,6 +110,8 @@ describe("setup checklist", () => {
       const steps = computeSetupChecklist({
         ...input,
         lastStorefrontActivityAt: new Date(now.getTime() - days * 86_400_000),
+        themeStatus: "verified",
+        themeVerifiedAt: new Date(now.getTime() - days * 86400000),
       });
       expect(state(steps, "verify")).toBe("complete");
       expect(state(steps, "embed")).toBe("complete");
@@ -125,6 +127,8 @@ describe("setup checklist", () => {
             lastStorefrontActivityAt: new Date(
               now.getTime() - days * 86_400_000,
             ),
+            themeStatus: "verified",
+            themeVerifiedAt: new Date(now.getTime() - days * 86400000),
           }),
           "verify",
         ),

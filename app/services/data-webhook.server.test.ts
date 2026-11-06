@@ -17,6 +17,8 @@ import {
 const mocks = vi.hoisted(() => {
   const tables = [
     "productPairingState",
+    "themeReport",
+    "themeProfile",
     "monthlyUsage",
     "entitlementSnapshot",
     "holdoutOrder",
@@ -103,7 +105,11 @@ vi.mock("../models/product.server", () => ({
   incrementOrderAffinities: vi.fn(),
   upsertProduct: vi.fn(),
 }));
-vi.mock("../jobs/pairingAutopilot.server", () => ({ schedulePairingDrain: vi.fn(), markPairingDirty: vi.fn(), markPairingDeletionDirty: vi.fn() }));
+vi.mock("../jobs/pairingAutopilot.server", () => ({
+  schedulePairingDrain: vi.fn(),
+  markPairingDirty: vi.fn(),
+  markPairingDeletionDirty: vi.fn(),
+}));
 
 import { action } from "../routes/api.webhooks";
 

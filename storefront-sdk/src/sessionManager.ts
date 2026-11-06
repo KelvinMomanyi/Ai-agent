@@ -1,5 +1,7 @@
 export type JourneyStage = "discovering" | "comparing" | "deciding" | "buying";
 import type { HoldoutMeasurement } from "../../shared/holdout";
+import type { ThemeRuntimeConfig } from "../../shared/themeCompatibility";
+import { readThemeIdentity } from "./theme/identity";
 
 export type SessionSnapshot = {
   anonymousId: string;
@@ -40,6 +42,7 @@ type StoredStorefrontSession = {
 };
 
 export type StorefrontSettings = {
+  themeCompatibility?: ThemeRuntimeConfig;
   holdout?: boolean;
   focusedMode?: boolean;
   chatEnabled?: boolean;
@@ -388,6 +391,12 @@ export class SessionManager {
 
     this.anonymousId = session.sessionId;
     this.sessionToken = session.sessionToken;
+    const raw = asRecord(value);
+    if (session.settings && raw?.theme)
+      session.settings = {
+        ...session.settings,
+        themeCompatibility: raw.theme as ThemeRuntimeConfig,
+      };
     if (session.settings) this.settings = session.settings;
     this.applyMeasurement(session.measurement);
     this.storeStorefrontSession(session);
@@ -501,13 +510,18 @@ export class SessionManager {
       this.measurement = stored.measurement || null;
       if (
         stored.settings &&
+        (stored.settings.themeCompatibility?.themeId || "unknown") ===
+          readThemeIdentity().themeId &&
         Date.now() - (stored.settingsLoadedAt || 0) < 60_000
       )
         this.settings = stored.settings;
       return;
     }
 
-    const response = await fetch(this.endpoint("/session"), {
+    const query = new URLSearchParams({
+      theme: JSON.stringify(readThemeIdentity()),
+    });
+    const response = await fetch(`${this.endpoint("/session")}?${query}`, {
       method: "GET",
       headers: {
         Accept: "application/json",
@@ -535,11 +549,15 @@ export class SessionManager {
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.sessionToken}`,
         },
-        body: JSON.stringify(this.getAuthPayload()),
+        body: JSON.stringify({
+          ...this.getAuthPayload(),
+          theme: readThemeIdentity(),
+        }),
       });
       if (!response.ok) return;
       const body = asRecord(await response.json());
       const settings = asRecord(body?.settings);
+      if (settings && body?.theme) settings.themeCompatibility = body.theme;
       if (body && "measurement" in body)
         this.applyMeasurement(body.measurement);
       if (settings) {

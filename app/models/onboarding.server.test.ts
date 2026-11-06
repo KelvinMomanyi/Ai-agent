@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CatalogReadiness } from "./productCatalogMapping";
 const mocks = vi.hoisted(() => ({
+  theme: vi.fn(),
   settings: vi.fn(),
   event: vi.fn(),
   session: vi.fn(),
@@ -15,13 +16,21 @@ vi.mock("../db.server", () => ({
     productRelationship: { count: mocks.pairingCount },
   },
 }));
+vi.mock("./themeCompatibility.server", () => ({
+  getThemeSummary: mocks.theme,
+}));
 import {
   getSetupChecklist,
   recordAuthenticatedStorefrontSession,
 } from "./onboarding.server";
 const now = new Date("2026-11-05T12:00:00Z");
 const readiness = { actionableProductCount: 3 } as CatalogReadiness;
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.theme.mockResolvedValue({
+    profile: { status: "verified", lastVerifiedAt: now },
+  });
+});
 
 describe("tenant-scoped onboarding state", () => {
   it("completes pairing setup only after a tenant has approved a complement", async () => {
@@ -68,13 +77,16 @@ describe("tenant-scoped onboarding state", () => {
       select: { onboardingPreviewedAt: true },
     });
   });
-  it("also verifies an existing authenticated shopper session", async () => {
+  it("keeps authenticated connectivity separate from theme display verification", async () => {
+    mocks.theme.mockResolvedValue({
+      profile: { status: "learning", lastVerifiedAt: null },
+    });
     mocks.session.mockResolvedValue({ lastActivityAt: now });
     expect(
       (await getSetupChecklist("one.myshopify.com", readiness, null, now)).find(
         ({ id }) => id === "verify",
       )?.state,
-    ).toBe("complete");
+    ).toBe("pending");
   });
   it("stores a bounded anonymous receipt covered by the existing Event tenant purge", async () => {
     await recordAuthenticatedStorefrontSession("one.myshopify.com", now);

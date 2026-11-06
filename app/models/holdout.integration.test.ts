@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   legacy: Object.fromEntries(
     [
       "productPairingState",
+      "themeReport",
+      "themeProfile",
       "monthlyUsage",
       "entitlementSnapshot",
       "offer",

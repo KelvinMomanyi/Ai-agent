@@ -5,6 +5,10 @@ import { recordAuthenticatedStorefrontSession } from "../models/onboarding.serve
 import { enrollHoldout } from "../models/holdout.server";
 import { schedulePairingDrain } from "../jobs/pairingAutopilot.server";
 import {
+  getThemeConfig,
+  scheduleThemeSession,
+} from "../models/themeCompatibility.server";
+import {
   isStorefrontAuthError,
   issueStorefrontSession,
   renewalSessionId,
@@ -53,8 +57,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       );
     }
     schedulePairingDrain(shop);
+    const rawTheme = new URL(request.url).searchParams.get("theme");
+    let theme;
+    if (rawTheme && rawTheme.length <= 512) {
+      try {
+        const identity = JSON.parse(rawTheme);
+        theme = await getThemeConfig(shop, identity);
+        scheduleThemeSession(shop, initial.sessionId, identity);
+      } catch {
+        /* Advisory theme detection never breaks a signed session. */
+      }
+    }
     return json(
-      { ...storefrontSession, settings, measurement },
+      {
+        ...storefrontSession,
+        settings,
+        measurement,
+        ...(theme ? { theme } : {}),
+      },
       {
         headers: withCors({ "Cache-Control": "no-store" }),
       },

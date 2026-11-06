@@ -263,6 +263,31 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("serialized storefront response privacy and pairing cache", () => {
+  it("honors the cart placement off switch before ranking or offer creation while retaining measurement", async () => {
+    mocks.cache.mockImplementation(async (key) =>
+      key === `settings:${shop}`
+        ? { ...settings, placementPreference: "off" }
+        : null,
+    );
+    const result = await offerAction(
+      post("/api/offer", {
+        shop,
+        sessionId: "session",
+        trigger: "cart_item_added",
+        triggerPayload: { confirmed: true, mutationId: "off" },
+        cartProductIds: ["gid://shopify/Product/1"],
+        cartItemCount: 1,
+      }),
+    );
+    expect((result as any).data).toMatchObject({
+      widgetType: null,
+      reasoning: "theme_placement_off",
+    });
+    expect(mocks.candidates).not.toHaveBeenCalled();
+    expect(mocks.decision).not.toHaveBeenCalled();
+    expect(mocks.createOffer).not.toHaveBeenCalled();
+    expect(mocks.measurement).toHaveBeenCalled();
+  });
   it("withholds a holdout offer before candidates, AI or offer writes while retaining its signed session", async () => {
     mocks.measurement.mockResolvedValue({
       arm: "holdout",

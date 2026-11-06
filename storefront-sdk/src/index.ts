@@ -6,6 +6,9 @@ import { SessionManager } from "./sessionManager";
 import { TriggerRouter } from "./triggerRouter";
 import { WidgetManager } from "./widgets/widgetManager";
 import { MeasurementCartLink } from "./measurementCartLink";
+import { themePreviewToken, readThemeIdentity } from "./theme/identity";
+import { defaultThemeConfig } from "../../shared/themeCompatibility";
+import { loadThemeEngine } from "./theme/loader";
 import "./styles/widgets.css";
 
 type AovBoostConfig = {
@@ -67,6 +70,17 @@ async function start(): Promise<void> {
     const config = window.AOVBoost || {};
     const shop = config.shop;
     if (!shop) return;
+    const previewToken = themePreviewToken();
+    if (previewToken) {
+      await (
+        await loadThemeEngine()
+      ).runThemePreview({
+        shop,
+        apiBase: normalizeProxyApiBase(config.apiBase),
+        token: previewToken,
+      });
+      return;
+    }
     if (!hasTrackingConsent(config)) {
       await waitForTrackingConsent(config);
     }
@@ -74,7 +88,13 @@ async function start(): Promise<void> {
     const apiBase = normalizeProxyApiBase(config.apiBase);
     const sessionManager = new SessionManager(shop, apiBase);
     await sessionManager.init();
-    const widgetManager = new WidgetManager(sessionManager.getSettings());
+    const settings = sessionManager.getSettings();
+    const widgetManager = new WidgetManager({
+      ...settings,
+      themeCompatibility:
+        settings.themeCompatibility ||
+        defaultThemeConfig(readThemeIdentity().themeId),
+    });
     const eventBus = new EventBus({ shop, sessionManager, apiBase });
     const offerPoller = new OfferPoller({
       shop,
@@ -114,7 +134,7 @@ async function start(): Promise<void> {
         triggerRouter.destroy();
         offerPoller.destroy();
         sessionManager.destroy();
-        widgetManager.destroyActive();
+        widgetManager.destroy();
       },
     };
 

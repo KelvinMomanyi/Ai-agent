@@ -35,6 +35,9 @@ import { authenticate } from "../shopify.server";
 import { getPlanStatus } from "../models/usage.server";
 import { getHoldoutReport } from "../models/holdoutAnalytics.server";
 import { HoldoutMeasurementCard } from "../components/dashboard/HoldoutMeasurementCard";
+import { getThemeSummary } from "../models/themeCompatibility.server";
+import { ThemeTestButton } from "../components/ThemeTestButton";
+import { getAppSettings } from "../models/settings.server";
 export { pauseCartRecommendationsAction as action } from "../models/measurementAdmin.server";
 
 type SyncProgress = {
@@ -65,6 +68,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     activeBundleCount,
     syncProgress,
     currencyResponse,
+    themeCompatibility,
   ] = await Promise.all([
     getDashboardMetrics(session.shop),
     getCatalogReadiness(session.shop),
@@ -73,6 +77,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     admin.graphql(
       `#graphql\nquery AOVBoostShopCurrency { shop { currencyCode } }`,
     ),
+    getThemeSummary(session.shop),
   ]);
   const currencyResult: any = await currencyResponse.json();
   const currencyCode = /^[A-Z]{3}$/.test(
@@ -84,10 +89,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json({
     planStatus: await getPlanStatus(session.shop, admin),
     measurement: await getHoldoutReport(session.shop),
-    pairingSetup: await prisma.appSettings.findUnique({
-      where: { shop: session.shop },
-      select: { pairingMode: true, pairingOnboardingSeenAt: true },
-    }),
+    pairingSetup: await getAppSettings(session.shop).then((settings) => ({
+      pairingMode: settings.pairingMode,
+      pairingOnboardingSeenAt: settings.pairingOnboardingSeenAt,
+    })),
+    themeCompatibility,
     metrics,
     productCount: catalogReadiness.storedProductCount,
     catalogReadiness,
@@ -98,6 +104,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       session.shop,
       catalogReadiness,
       syncProgress,
+      new Date(),
+      themeCompatibility.profile,
     ),
     themeEditorUrl: themeEmbedEditorUrl(
       session.shop,
@@ -121,6 +129,7 @@ export default function AovBoostDashboard() {
     measurement,
     planStatus,
     pairingSetup,
+    themeCompatibility,
   } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
   const syncFetcher = useFetcher<SyncResponse>();
@@ -139,15 +148,11 @@ export default function AovBoostDashboard() {
   const syncFailed =
     syncFetcher.data?.ok === false || currentProgress?.status === "failed";
 
-  const verified = setupSteps.some(
-    (step) => step.id === "verify" && step.state === "complete",
-  );
   useEffect(() => {
-    if (verified) return;
     const refresh = () => revalidator.revalidate();
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
-  }, [verified, revalidator]);
+  }, [revalidator]);
 
   useEffect(() => {
     if (syncFetcher.state !== "idle" || !syncShouldContinue) return;
@@ -210,6 +215,29 @@ export default function AovBoostDashboard() {
       ]}
     >
       <Layout>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">
+                Theme compatibility
+              </Text>
+              <Text as="p">
+                {themeCompatibility?.profile
+                  ? `${themeCompatibility.profile.themeName}: ${({ learning: "Learning placement", verified: "Verified displays", degraded: "Using a safer placement", disabled: "Paused after display failures" } as Record<string, string>)[themeCompatibility.profile.status] || "Learning placement"}. Starting placement: ${(themeCompatibility.preference === "off" || themeCompatibility.profile.status === "disabled" ? "paused" : themeCompatibility.preference === "auto" ? themeCompatibility.profile.strategy : themeCompatibility.preference).replace("native_drawer", "cart_drawer").replace(/_/g, " ")}.`
+                  : "Waiting for your storefront to identify its theme."}
+              </Text>
+              <Text as="p">
+                {themeCompatibility?.verifiedRate != null
+                  ? `${Math.round(themeCompatibility.verifiedRate * 100)}% of ${themeCompatibility.sample} recent offer attempts verified in the last seven days.`
+                  : "No verified display sample yet."}
+              </Text>
+              <InlineStack gap="300">
+                <Button url="/app/theme">Placement and appearance</Button>
+                <ThemeTestButton />
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
         {pairingSetup?.pairingMode === "autopilot" &&
         !pairingSetup.pairingOnboardingSeenAt ? (
           <Layout.Section>

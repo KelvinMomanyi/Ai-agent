@@ -78,7 +78,7 @@ export class UpsellDrawer extends BaseWidget {
                       product.variants.some(
                         (variant) => variant.availableForSale,
                       )
-                        ? `<button type="button" class="primary" data-add data-product-index="${index}">Add to cart</button>`
+                        ? `<button type="button" class="primary" data-add data-product-index="${index}" ${this.payload.previewMode ? "disabled" : ""}>Add to cart</button>`
                         : product.handle
                           ? `<a class="primary" href="/products/${text(product.handle)}">View product</a>`
                           : ""
@@ -220,7 +220,7 @@ export class UpsellDrawer extends BaseWidget {
     )
       return;
     const drawer = this.container.closest<HTMLElement>(
-      "[data-aovboost-cart-drawer], .drawer__inner[role='dialog']",
+      "[data-aovboost-cart-drawer], [role='dialog'], [aria-modal='true'], [data-cart-drawer]",
     );
     if (!drawer) return;
     const native = Array.from(
@@ -244,7 +244,7 @@ export class UpsellDrawer extends BaseWidget {
   destroy(): void {
     const hadFocus = document.activeElement === this.container;
     const drawer = this.container.closest<HTMLElement>(
-      "[data-aovboost-cart-drawer], .drawer__inner[role='dialog']",
+      "[data-aovboost-cart-drawer], [role='dialog'], [aria-modal='true'], [data-cart-drawer]",
     );
     const returnTo =
       this.returnTo &&
@@ -271,5 +271,8 @@ export class UpsellDrawer extends BaseWidget {
       { duration: 180, easing: "ease-in", fill: "forwards" },
     );
     window.setTimeout(() => this.destroy(), 190);
+  }
+  dismissFromKeyboard() {
+    this.dismiss();
   }
 }

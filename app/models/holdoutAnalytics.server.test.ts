@@ -4,6 +4,7 @@ const reportMocks = vi.hoisted(() => ({
   count: vi.fn(),
   settings: vi.fn(),
   entitlement: vi.fn(),
+  cache: vi.fn(),
 }));
 vi.mock("../db.server", () => ({
   default: {
@@ -18,11 +19,14 @@ vi.mock("./entitlements.server", async (original) => ({
 }));
 vi.mock("./reportCache.server", () => ({
   cachedReport: async (
-    _shop: string,
-    _key: string,
-    _date: Date,
+    shop: string,
+    key: string,
+    date: Date,
     load: () => Promise<unknown>,
-  ) => load(),
+  ) => {
+    reportMocks.cache(shop, key, date);
+    return load();
+  },
 }));
 vi.mock("../redis.server", () => ({
   getJsonCache: vi.fn(),
@@ -46,6 +50,64 @@ const arm = (name: string, convertedSessions: number, sessions = 200) => ({
   linkedCarts: 100,
 });
 describe("honest measurement gates", () => {
+  it("adds descriptive splits to the cached report without changing whole-system holdout math", async () => {
+    const arms = [arm("exposed", 60), arm("holdout", 20)];
+    reportMocks.settings.mockResolvedValue({
+      holdoutEnabled: true,
+      holdoutPercent: 10,
+      holdoutVersion: 2,
+      analyticsEnabled: true,
+      upsellEnabled: true,
+      updatedAt: new Date("2026-11-01"),
+    });
+    reportMocks.entitlement.mockResolvedValue({
+      tier: "pro",
+      state: "verified",
+    });
+    reportMocks.count.mockResolvedValue(0);
+    reportMocks.query.mockImplementation(async (sql) =>
+      sql.text.includes('"HoldoutEnrollment"')
+        ? arms
+        : sql.text.includes("card_origins")
+          ? [
+              {
+                axis: "origin",
+                bucket: "autopilot",
+                displayed: 30,
+                clicked: 10,
+                added: 5,
+                purchased: 2,
+                amounts: [{ currency: "USD", revenue: 8 }],
+              },
+            ]
+          : [],
+    );
+    const from = new Date("2026-10-01"),
+      to = new Date("2026-11-02");
+    const report = await getHoldoutReport("one.myshopify.com", from, to);
+    expect(report).toMatchObject(summarizeHoldout(arms));
+    expect(
+      report.breakdowns.byOrigin.find((row) => row.bucket === "autopilot"),
+    ).toMatchObject({
+      displayed: 30,
+      ready: true,
+      clicked: 10,
+      added: 5,
+      purchased: 2,
+    });
+    expect(reportMocks.cache).toHaveBeenCalledWith(
+      "one.myshopify.com",
+      expect.stringContaining("holdout-v2:"),
+      from,
+    );
+    const [sql] = reportMocks.query.mock.calls.find(([query]) =>
+      query.text.includes("card_origins"),
+    )!;
+    expect(sql.values).toContain("one.myshopify.com");
+    expect(sql.values).toContain(from);
+    expect(sql.values).toContain(to);
+    expect(report.lift).toBe(summarizeHoldout(arms).lift);
+  });
   it("withholds the paid report server-side for free shops while retaining the attributed funnel and value summary", async () => {
     reportMocks.settings.mockResolvedValue({
       holdoutEnabled: true,
@@ -67,7 +129,7 @@ describe("honest measurement gates", () => {
       lift: null,
       pendingSessions: 0,
     });
-    expect(reportMocks.query).toHaveBeenCalledTimes(2);
+    expect(reportMocks.query).toHaveBeenCalledTimes(3);
     expect(reportMocks.count).not.toHaveBeenCalled();
     for (const [sql] of reportMocks.query.mock.calls) {
       expect(sql.values).toContain("one.myshopify.com");

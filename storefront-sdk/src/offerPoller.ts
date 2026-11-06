@@ -29,6 +29,7 @@ export type OfferRuntimeEntry = {
   trigger: string;
   outcome:
     | "mounted"
+    | "pending"
     | "unchanged"
     | "suppressed"
     | "local_fallback"

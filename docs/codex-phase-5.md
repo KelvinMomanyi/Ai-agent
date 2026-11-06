@@ -1,5 +1,9 @@
 # Phase 5: honest holdout measurement
 
+Later follow-up: [revised Phase 5](codex-phase-5-revised.md) adds descriptive
+pair-origin and placement breakdowns. The record below describes the original
+holdout implementation at its completion.
+
 Plan recorded before implementation, 5 November 2026. Phase 4 passed 447 tests in
 63 files. Earlier worktree changes and user files are preserved.
 

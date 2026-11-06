@@ -5,6 +5,10 @@ import {
 } from "react-router";
 import { getPublicAppSettings } from "../models/settings.server";
 import { enrollHoldout } from "../models/holdout.server";
+import {
+  getThemeConfig,
+  scheduleThemeSession,
+} from "../models/themeCompatibility.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
 import {
   authenticateStorefrontRequest,
@@ -28,12 +32,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       shop?: string;
       sessionId?: string;
       sessionToken?: string;
+      theme?: unknown;
     };
     const { shop, sessionId } = authenticateStorefrontRequest(request, body);
+    let theme;
+    if (body.theme) {
+      try {
+        theme = await getThemeConfig(shop, body.theme);
+        scheduleThemeSession(shop, sessionId, body.theme);
+      } catch {
+        /* Keep ordinary config available during advisory-report failure. */
+      }
+    }
     return json(
       {
         settings: await getPublicAppSettings(shop),
         measurement: await enrollHoldout(shop, sessionId),
+        ...(theme ? { theme } : {}),
       },
       { headers: withCors({ "Cache-Control": "no-store" }) },
     );

@@ -9,6 +9,7 @@ import {
   Text,
 } from "@shopify/polaris";
 import type { getHoldoutReport } from "../../models/holdoutAnalytics.server";
+import { RecommendationBreakdownCard } from "./RecommendationBreakdownCard";
 type Report = Awaited<ReturnType<typeof getHoldoutReport>>;
 const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
 export function HoldoutMeasurementCard({
@@ -181,6 +182,7 @@ export function HoldoutMeasurementCard({
           </Text>
         </BlockStack>
       </Card>
+      <RecommendationBreakdownCard report={report.breakdowns} />
       <Card>
         <BlockStack gap="200">
           <Text as="h2" variant="headingMd">

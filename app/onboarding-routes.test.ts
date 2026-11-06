@@ -21,6 +21,15 @@ const mocks = vi.hoisted(() => ({
   isAuthError: vi.fn(),
 }));
 vi.mock("./shopify.server", () => ({ authenticate: { admin: mocks.admin } }));
+vi.mock("./models/themeCompatibility.server", () => ({
+  getThemeSummary: async () => ({
+    profile: null,
+    lastPreview: null,
+    verifiedRate: null,
+    sample: 0,
+    identitySessions: 0,
+  }),
+}));
 vi.mock("./jobs/pairingAutopilot.server", () => ({
   schedulePairingDrain: vi.fn(),
   markPairingPolicyDirty: vi.fn(),
@@ -60,6 +69,10 @@ vi.mock("./models/installedShop.server", () => ({
 }));
 vi.mock("./models/settings.server", () => ({
   getPublicAppSettings: mocks.publicSettings,
+  getAppSettings: async () => ({
+    pairingMode: "review_first",
+    pairingOnboardingSeenAt: null,
+  }),
 }));
 vi.mock("./models/holdout.server", () => ({ enrollHoldout: async () => null }));
 vi.mock("./models/holdoutAnalytics.server", () => ({
@@ -241,6 +254,8 @@ describe("onboarding route boundaries", () => {
       shop,
       expect.anything(),
       result.data.syncProgress,
+      expect.any(Date),
+      null,
     );
     expect(
       new URL(result.data.themeEditorUrl!).searchParams.get("activateAppId"),

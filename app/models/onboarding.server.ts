@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { getThemeSummary } from "./themeCompatibility.server";
 import type { CatalogReadiness } from "./productCatalogMapping";
 import {
   computeSetupChecklist,
@@ -30,6 +31,7 @@ export async function getSetupChecklist(
   readiness: CatalogReadiness,
   syncProgress: { status?: string; emptyCatalog?: boolean } | null,
   now = new Date(),
+  theme?: { status: string; lastVerifiedAt: Date | null } | null,
 ) {
   const since = new Date(
     now.getTime() - STOREFRONT_VERIFICATION_DAYS * 86_400_000,
@@ -62,7 +64,11 @@ export async function getSetupChecklist(
         },
       }),
     ]);
+  const profile =
+    theme === undefined ? (await getThemeSummary(shop)).profile : theme;
   return computeSetupChecklist({
+    themeStatus: profile?.status,
+    themeVerifiedAt: profile?.lastVerifiedAt || null,
     actionableProductCount: readiness.actionableProductCount,
     storedProductCount: readiness.storedProductCount,
     approvedPairingCount,

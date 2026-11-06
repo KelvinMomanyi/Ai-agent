@@ -11,6 +11,8 @@ import { ToastNudge } from "./ToastNudge";
 import { UpsellDrawer } from "./UpsellDrawer";
 import type { BaseWidget, WidgetPayload } from "./BaseWidget";
 import type { StorefrontSettings } from "../sessionManager";
+import { loadThemeEngine } from "../theme/loader";
+import { readThemeIdentity } from "../theme/identity";
 import {
   getStorefrontPage,
   hasBlockingSurface,
@@ -31,7 +33,7 @@ export type OfferDecision = {
 };
 
 export type PlacementOutcome = {
-  status: "mounted" | "unchanged" | "suppressed";
+  status: "mounted" | "unchanged" | "suppressed" | "pending";
   reason: string;
 };
 
@@ -54,8 +56,72 @@ export class WidgetManager {
   private pagePath = window.location.pathname;
   private cartObserver?: MutationObserver;
   private cartReattachTimer?: number;
+  private adaptive?: ReturnType<
+    typeof import("../theme/engine").createThemeEngine
+  >;
+  private adaptiveLoading?: Promise<NonNullable<WidgetManager["adaptive"]>>;
+  private adaptiveRevision = 0;
+  private adaptiveKey = "";
+  private nativeRedirectMutation = "";
+  private onCartThemeEvent = (event: Event) => {
+    const detail = (event as CustomEvent).detail;
+    if (
+      detail?.type !== "add_to_cart" ||
+      detail.confirmed !== true ||
+      detail.recommendationOrigin === true ||
+      !this.settings.themeCompatibility ||
+      !isWidgetEnabled("upsell_drawer", this.settings)
+    )
+      return;
+    this.nativeRedirectMutation =
+      detail.source === "verified_native_form_redirect"
+        ? String(detail.mutationId || "")
+        : "";
+    const revision = ++this.adaptiveRevision;
+    this.adaptive?.destroy();
+    this.adaptiveKey = "";
+    this.getAdaptive()
+      .then((engine) => {
+        if (revision === this.adaptiveRevision)
+          engine.prepare(String(detail.mutationId || ""));
+      })
+      .catch(() => {});
+  };
 
-  constructor(private settings: StorefrontSettings = {}) {}
+  constructor(private settings: StorefrontSettings = {}) {
+    document.addEventListener("aovboost:event", this.onCartThemeEvent);
+  }
+  private getAdaptive() {
+    return (this.adaptiveLoading ??= loadThemeEngine()
+      .then((module) => {
+        this.adaptive = module.createThemeEngine({
+          config: this.settings.themeCompatibility!,
+          identity: readThemeIdentity(),
+          report: async (report) => {
+            const auth = await window.AOVBoostSDK?.getSignedAuthPayload();
+            if (!auth) return;
+            const base = window.AOVBoost?.apiBase || "/apps/aovboost";
+            await fetch(`${base.replace(/\/$/, "")}/theme-report`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${auth.sessionToken}`,
+              },
+              body: JSON.stringify({ ...auth, report }),
+            });
+          },
+        });
+        return this.adaptive;
+      })
+      .catch((error) => {
+        this.adaptiveLoading = undefined;
+        throw error;
+      }));
+  }
+  destroy() {
+    this.destroyActive();
+    document.removeEventListener("aovboost:event", this.onCartThemeEvent);
+  }
 
   mountDecision(decision: OfferDecision): PlacementOutcome {
     if (this.pagePath !== window.location.pathname) this.resetPageContext();
@@ -76,6 +142,47 @@ export class WidgetManager {
       payload,
       offerId,
     )}`;
+    if (
+      decision.widgetType === "upsell_drawer" &&
+      this.settings.themeCompatibility
+    ) {
+      if (payload.triggerType !== "cart_item_added" || !payload.mutationId)
+        return result("suppressed", "confirmed_cart_add_required");
+      if (this.adaptiveKey === nextKey)
+        return result("unchanged", "adaptive_offer_present");
+      this.adaptive?.destroy();
+      this.adaptiveKey = nextKey;
+      const revision = ++this.adaptiveRevision;
+      const path = location.pathname;
+      this.getAdaptive()
+        .then(async (engine) => {
+          if (revision !== this.adaptiveRevision || path !== location.pathname)
+            return;
+          const outcome = await engine.mount({
+            ...payload,
+            cartUiHint:
+              this.nativeRedirectMutation === payload.mutationId
+                ? "page_redirect"
+                : undefined,
+            maxProductRecommendations:
+              payload.maxProductRecommendations ??
+              this.settings.maxProductRecommendations,
+          });
+          if (revision === this.adaptiveRevision)
+            this.lastPlacement = {
+              status: outcome.verified ? "mounted" : "suppressed",
+              reason: outcome.reason,
+            };
+        })
+        .catch(() => {
+          if (revision === this.adaptiveRevision)
+            this.lastPlacement = {
+              status: "suppressed",
+              reason: "theme_engine_unavailable",
+            };
+        });
+      return result("pending", "adaptive_placement_pending");
+    }
 
     const previous = this.inlineWidgets.get(decision.widgetType);
     if (
@@ -153,6 +260,9 @@ export class WidgetManager {
   }
 
   clearCartRecommendation(): void {
+    this.adaptiveRevision++;
+    this.adaptive?.destroy();
+    this.adaptiveKey = "";
     this.cartObserver?.disconnect();
     window.clearTimeout(this.cartReattachTimer);
     this.cartReattachTimer = undefined;
@@ -216,6 +326,7 @@ export class WidgetManager {
   }
 
   resetPageContext(): void {
+    this.nativeRedirectMutation = "";
     this.clearCartRecommendation();
     this.pagePath = window.location.pathname;
     this.overlayWidget?.widget.destroy();
@@ -267,6 +378,11 @@ export class WidgetManager {
       .filter((widget): widget is BaseWidget => Boolean(widget?.isMounted()))
       .map((widget) => widget.getWidgetType())
       .sort();
+    if (
+      this.adaptive?.isMounted() &&
+      !mountedWidgetTypes.includes("upsell_drawer")
+    )
+      mountedWidgetTypes.push("upsell_drawer");
 
     return {
       mountedWidgetTypes,

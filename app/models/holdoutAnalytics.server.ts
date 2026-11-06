@@ -4,6 +4,11 @@ import { cachedReport } from "./reportCache.server";
 import { getAppSettings } from "./settings.server";
 import { calculateTwoProportionZTest } from "./analytics.server";
 import { getEntitlements, limitsFor } from "./entitlements.server";
+import {
+  recommendationBreakdownQuery,
+  summarizeBreakdowns,
+  type BreakdownAggregate,
+} from "./recommendationBreakdown.server";
 
 export const FOLLOWUP_DAYS = 7;
 export const MIN_ARM_SESSIONS = 200;
@@ -155,47 +160,51 @@ export async function getHoldoutReport(
     .holdoutReporting;
   return cachedReport(
     shop,
-    `holdout-v1:${reportingAvailable}:${settings.holdoutVersion}:${settings.holdoutEnabled}:${settings.updatedAt}:${Math.floor(to.getTime() / 60_000)}`,
+    `holdout-v2:${reportingAvailable}:${settings.holdoutVersion}:${settings.holdoutEnabled}:${settings.updatedAt}:${Math.floor(to.getTime() / 60_000)}`,
     from,
     async () => {
       const monthStart = new Date(
         Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), 1),
       );
-      const [arms, funnelRows, monthRows, pending] = await Promise.all([
-        reportingAvailable
-          ? prisma.$queryRaw<ArmAggregate[]>(
-              holdoutArmsQuery(shop, settings.holdoutVersion, from, to),
-            )
-          : Promise.resolve([]),
-        prisma.$queryRaw<
-          Array<{
-            displayed: number;
-            clicked: number;
-            added: number;
-            purchased: number;
-          }>
-        >(measuredFunnelQuery(shop, from, to)),
-        prisma.$queryRaw<
-          Array<{ currency: string | null; orders: number; revenue: number }>
-        >(monthlyValueQuery(shop, monthStart, to)),
-        reportingAvailable
-          ? prisma.holdoutEnrollment.count({
-              where: {
-                shop,
-                version: settings.holdoutVersion,
-                startedAt: {
-                  gte: new Date(
-                    Math.max(
-                      from.getTime(),
-                      to.getTime() - FOLLOWUP_DAYS * 86400_000,
+      const [arms, funnelRows, monthRows, pending, breakdownRows] =
+        await Promise.all([
+          reportingAvailable
+            ? prisma.$queryRaw<ArmAggregate[]>(
+                holdoutArmsQuery(shop, settings.holdoutVersion, from, to),
+              )
+            : Promise.resolve([]),
+          prisma.$queryRaw<
+            Array<{
+              displayed: number;
+              clicked: number;
+              added: number;
+              purchased: number;
+            }>
+          >(measuredFunnelQuery(shop, from, to)),
+          prisma.$queryRaw<
+            Array<{ currency: string | null; orders: number; revenue: number }>
+          >(monthlyValueQuery(shop, monthStart, to)),
+          reportingAvailable
+            ? prisma.holdoutEnrollment.count({
+                where: {
+                  shop,
+                  version: settings.holdoutVersion,
+                  startedAt: {
+                    gte: new Date(
+                      Math.max(
+                        from.getTime(),
+                        to.getTime() - FOLLOWUP_DAYS * 86400_000,
+                      ),
                     ),
-                  ),
-                  lt: to,
+                    lt: to,
+                  },
                 },
-              },
-            })
-          : Promise.resolve(0),
-      ]);
+              })
+            : Promise.resolve(0),
+          prisma.$queryRaw<BreakdownAggregate[]>(
+            recommendationBreakdownQuery(shop, from, to),
+          ),
+        ]);
       return {
         ...summarizeHoldout(arms),
         reportingAvailable,
@@ -217,6 +226,7 @@ export async function getHoldoutReport(
         },
         month: { start: monthStart.toISOString(), amounts: monthRows },
         recommendationsEnabled: settings.upsellEnabled,
+        breakdowns: summarizeBreakdowns(breakdownRows),
       };
     },
   );

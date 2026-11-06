@@ -14,6 +14,8 @@ import {
 const mocks = vi.hoisted(() => {
   const tables = [
     "productPairingState",
+    "themeReport",
+    "themeProfile",
     "monthlyUsage",
     "entitlementSnapshot",
     "holdoutOrder",
@@ -138,6 +140,14 @@ beforeAll(async () => {
   );
   await mocks.db.exec(revision);
   await mocks.db.exec(revision);
+  const themeSql = readFileSync(
+    new URL(
+      "../../prisma/migrations/20261106120000_theme_compatibility/migration.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  await mocks.db.exec(themeSql);
 }, 60_000);
 afterAll(async () => mocks.db?.close());
 beforeEach(async () => {
@@ -156,6 +166,32 @@ beforeEach(async () => {
   await insert("one-pair", one, "1", "2");
   await insert("two-pair", two, "1", "2");
   await mocks.db!.exec('TRUNCATE "ShopperEvent";');
+  await mocks.db!.exec('TRUNCATE "ThemeProfile" CASCADE;');
+  for (const shop of [one, two]) {
+    await mocks.db!.query(
+      'INSERT INTO "AppSettings" (shop) VALUES ($1) ON CONFLICT (shop) DO NOTHING',
+      [shop],
+    );
+    await mocks.db!.query(
+      'INSERT INTO "ThemeProfile" (shop,"themeId","themeName","updatedAt") VALUES ($1,\'123\',\'Dawn\',CURRENT_TIMESTAMP)',
+      [shop],
+    );
+    await mocks.db!.query(
+      "INSERT INTO \"ThemeReport\" (id,shop,\"themeId\",\"sessionHash\",\"attemptId\",strategy,\"cartUi\",verified,reason) VALUES ($1,$2,'123','session','attempt','floating_card','unknown',true,'display_verified')",
+      [`theme-${shop}`, shop],
+    );
+  }
+  for (const [delegate, table] of [
+    ["themeReport", "ThemeReport"],
+    ["themeProfile", "ThemeProfile"],
+  ])
+    mocks.deletes[delegate].mockImplementation(async ({ where }) => ({
+      count: (
+        await mocks.db!.query(`DELETE FROM "${table}" WHERE shop=$1`, [
+          where.shop,
+        ])
+      ).affectedRows,
+    }));
   for (const shop of [one, two])
     await mocks.db!.query(
       'INSERT INTO "ProductPairingState" (shop,"productId") VALUES ($1,$2)',
@@ -260,6 +296,16 @@ describe("relationship migration and tenant lifecycle", () => {
         }),
       } as ActionFunctionArgs);
       expect(response.status).toBe(200);
+      for (const model of ["themeReport", "themeProfile"])
+        expect(mocks.deletes[model]).toHaveBeenCalledWith({
+          where: { shop: one },
+        });
+      expect(
+        (await mocks.db!.query('SELECT shop FROM "ThemeProfile"')).rows,
+      ).toEqual([{ shop: two }]);
+      expect(
+        (await mocks.db!.query('SELECT shop FROM "ThemeReport"')).rows,
+      ).toEqual([{ shop: two }]);
       expect(mocks.deleteRelationships).toHaveBeenCalledWith({
         where: { shop: one },
       });
@@ -310,7 +356,8 @@ describe("autopilot additive migration and SQL", () => {
     expect(
       (
         await mocks.db!.query(
-          'SELECT shop,"pairingMode" FROM "AppSettings" ORDER BY shop',
+          'SELECT shop,"pairingMode" FROM "AppSettings" WHERE shop<>$1 ORDER BY shop',
+          [two],
         )
       ).rows,
     ).toEqual([

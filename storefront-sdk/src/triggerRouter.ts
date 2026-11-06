@@ -3,6 +3,7 @@ import type { OfferPoller } from "./offerPoller";
 import type { SessionManager } from "./sessionManager";
 import { setStorefrontCurrency } from "./widgets/BaseWidget";
 import { readShopifyCart } from "./cartState";
+import { NativeCartContinuation } from "./nativeCartContinuation";
 
 type TriggerDefinition = {
   category: string;
@@ -191,12 +192,20 @@ export class TriggerRouter {
   private cartReadVersion = 0;
   private seenMutations = new Set<string>();
   private options: TriggerRouterOptions;
+  private nativeCart: NativeCartContinuation;
 
   constructor(options: TriggerRouterOptions) {
     this.options = options;
+    this.nativeCart = new NativeCartContinuation(() => {
+      const auth = this.options.sessionManager.getAuthPayload?.();
+      return auth?.sessionToken && auth.shop && auth.sessionId
+        ? { shop: auth.shop, sessionId: auth.sessionId }
+        : null;
+    });
   }
 
   init(): void {
+    this.nativeCart.init();
     document.addEventListener("aovboost:event", this.handleStorefrontEvent, {
       signal: this.abortController.signal,
     });
@@ -228,6 +237,7 @@ export class TriggerRouter {
   }
 
   destroy(): void {
+    this.nativeCart.destroy();
     this.abortController.abort();
     this.timers.forEach((timer) => window.clearTimeout(timer));
     this.timers.clear();
@@ -287,6 +297,11 @@ export class TriggerRouter {
     }
 
     if (detail.type === "add_to_cart") {
+      if (
+        detail.confirmed === true &&
+        detail.source !== "verified_native_form_redirect"
+      )
+        this.nativeCart.cancel();
       if (detail.confirmed === true && detail.mutationId)
         this.syncCartAndFire("cart_item_added", detail);
     }
@@ -295,6 +310,7 @@ export class TriggerRouter {
       detail.type === "remove_from_cart" ||
       detail.type === "quantity_changed"
     ) {
+      if (detail.confirmed === true) this.nativeCart.cancel();
       if (detail.confirmed === true && detail.mutationId)
         this.syncCartAndFire("cart_item_removed", detail);
     }
@@ -544,6 +560,15 @@ export class TriggerRouter {
         )
           return;
         setStorefrontCurrency(cart.currency);
+        this.nativeCart.remember(cart);
+        const continuedAdd = this.nativeCart.confirm(cart);
+        if (continuedAdd) {
+          this.options.eventBus.track("add_to_cart", {
+            ...continuedAdd,
+            ...cart,
+          });
+          return;
+        }
 
         const payload = {
           ...cart,
@@ -604,6 +629,7 @@ export class TriggerRouter {
         )
           return;
         setStorefrontCurrency(cart.currency);
+        this.nativeCart.remember(cart);
         const payload = { ...basePayload, ...cart };
         this.options.eventBus.track("cart_update", payload);
         if (

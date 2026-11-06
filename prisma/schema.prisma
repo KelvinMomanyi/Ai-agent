@@ -365,10 +365,56 @@ model AppSettings {
   pairingStrictness          String @default("balanced")
   pairingSensitiveKeywords   String[] @default([])
   pairingOnboardingSeenAt     DateTime?
+  placementPreference        String @default("auto")
+  recommendationAccentColor  String?
+  recommendationRadius       Int?
+  recommendationFont         String @default("inherit")
+  themeProfiles              ThemeProfile[]
   holdoutEnabled             Boolean @default(false)
   holdoutPercent             Int @default(10)
   holdoutVersion             Int @default(1)
   updatedAt                  DateTime @updatedAt
+}
+
+model ThemeProfile {
+  shop String
+  themeId String
+  themeName String
+  schemaName String?
+  cartUi String?
+  strategy String @default("native_drawer")
+  selectors Json?
+  status String @default("learning")
+  attempts Int @default(0)
+  verifiedDisplays Int @default(0)
+  failures Int @default(0)
+  lastVerifiedAt DateTime?
+  lastPreviewResult Json?
+  updatedAt DateTime @updatedAt
+  reports ThemeReport[]
+  settings AppSettings @relation(fields:[shop],references:[shop],onDelete:Cascade)
+  @@id([shop, themeId])
+  @@index([shop, updatedAt])
+}
+
+model ThemeReport {
+  id String @id @default(cuid())
+  shop String
+  themeId String
+  sessionHash String
+  attemptId String
+  offerId String?
+  kind String @default("display")
+  strategy String
+  cartUi String
+  verified Boolean
+  reason String
+  selector String?
+  createdAt DateTime @default(now())
+  profile ThemeProfile @relation(fields: [shop, themeId], references: [shop, themeId], onDelete: Cascade)
+  @@unique([shop, themeId, sessionHash, attemptId])
+  @@index([shop, themeId, kind, createdAt])
+  @@index([shop, createdAt])
 }
 
 model HoldoutEnrollment {

@@ -173,6 +173,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         { ...noCartOffer("holdout_assigned"), measurement },
         { headers: withCors() },
       );
+    if (cartUpsellTrigger && settings.placementPreference === "off")
+      return json(
+        { ...noCartOffer("theme_placement_off"), measurement },
+        { headers: withCors() },
+      );
     const decisionSession = {
       ...snapshot,
       journeyStage:

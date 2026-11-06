@@ -248,6 +248,8 @@ async function invalidateCatalogCacheSafely(shop: string) {
 
 async function deleteShopData(shop: string, deleteSessions: boolean) {
   await prisma.$transaction([
+    prisma.themeReport.deleteMany({where:{shop}}),
+    prisma.themeProfile.deleteMany({where:{shop}}),
     prisma.monthlyUsage.deleteMany({ where: { shop } }),
     prisma.entitlementSnapshot.deleteMany({ where: { shop } }),
     prisma.productPairingState.deleteMany({ where: { shop } }),

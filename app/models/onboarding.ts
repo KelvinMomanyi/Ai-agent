@@ -36,6 +36,8 @@ export function computeSetupChecklist(input: {
   now?: Date;
   pairingsEnabled?: boolean;
   approvedPairingCount?: number;
+  themeStatus?: string;
+  themeVerifiedAt?: Date | null;
 }): SetupStep[] {
   const now = input.now || new Date();
   const active = Boolean(
@@ -57,12 +59,20 @@ export function computeSetupChecklist(input: {
       Number(input.storedProductCount || 0) > 0);
   const canPreview = ready && input.actionableProductCount > 1;
   const recent = input.lastStorefrontActivityAt;
-  const verified = Boolean(
+  const connected = Boolean(
     recent &&
     recent <= now &&
     recent.getTime() >=
       now.getTime() - STOREFRONT_VERIFICATION_DAYS * 86_400_000,
   );
+  const verified =
+    input.themeStatus === "verified" &&
+    Boolean(
+      input.themeVerifiedAt &&
+      input.themeVerifiedAt <= now &&
+      input.themeVerifiedAt.getTime() >=
+        now.getTime() - STOREFRONT_VERIFICATION_DAYS * 86400000,
+    );
   const steps: SetupStep[] = [
     {
       id: "sync",
@@ -122,8 +132,8 @@ export function computeSetupChecklist(input: {
     {
       id: "embed",
       label: "Enable theme embed",
-      state: verified ? "complete" : "pending",
-      detail: verified
+      state: connected ? "complete" : "pending",
+      detail: connected
         ? "AOVBoost has connected from your storefront recently."
         : "Open the theme editor with AOVBoost selected, turn it on and save your theme.",
     },
@@ -132,8 +142,8 @@ export function computeSetupChecklist(input: {
       label: "Verify it appeared",
       state: verified ? "complete" : "pending",
       detail: verified
-        ? "Authenticated storefront activity was received within 14 days. This verifies connectivity, not an offer impression."
-        : "Open your storefront, allow tracking if requested, then check the connection here.",
+        ? "Your current detected theme has passed display checks across multiple storefront sessions."
+        : "Test placement on your store. Verification completes after multiple storefront sessions confirm actual displays.",
     },
   );
   return steps;

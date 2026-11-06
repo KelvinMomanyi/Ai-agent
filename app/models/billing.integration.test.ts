@@ -14,7 +14,9 @@ const mocks = vi.hoisted(() => ({
   topic: "SHOP_REDACT",
   legacy: Object.fromEntries(
     [
-        "productPairingState",
+      "productPairingState",
+      "themeReport",
+      "themeProfile",
       "holdoutOrder",
       "holdoutEnrollment",
       "offer",
