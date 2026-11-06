@@ -1,9 +1,18 @@
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { redirect, Form, useLoaderData } from "react-router";
 
 import { login } from "../../shopify.server";
 
 import styles from "./styles.module.css";
+
+export const meta: MetaFunction = () => [
+  { title: "AOVBoost | Shopify Product Recommendations" },
+  {
+    name: "description",
+    content:
+      "Manage AOVBoost product recommendations, cross-sell offers and attributed revenue reporting for your Shopify store.",
+  },
+];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);

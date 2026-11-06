@@ -6,101 +6,24 @@ import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
 import { NavMenu } from "@shopify/app-bridge-react";
 import polarisTranslations from "@shopify/polaris/locales/en.json";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
-import prisma, { withRetry } from "../db.server";
 import { authenticate } from "../shopify.server";
-import { getJsonCache, setJsonCache } from "../redis.server";
-
+import { resumeCatalogSyncOnAdminEntry } from "../jobs/aovboost.server";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
-
-  const graphqlQuery = `
-  query {
-    products(first: 50) {
-      edges {
-        node {
-          id
-          title
-          handle
-          featuredMedia {
-            preview {
-              image {
-                url
-                altText
-              }
-            }
-          }
-        }
-        cursor
-      }
-      pageInfo {
-        hasNextPage
-      }
-    }
+  const { session, admin } = await authenticate.admin(request);
+  try {
+    await resumeCatalogSyncOnAdminEntry(session.shop, admin);
+  } catch {
+    // The durable job reports failure on Home; a sync failure must not lock
+    // merchants out of settings or the rest of the embedded admin.
+    console.error("AOVBoost admin-entry catalog sync failed", {
+      shop: session.shop,
+    });
   }
-  `;
-
-  const response = await admin.graphql(`#graphql\n${graphqlQuery}`);
-  const result: any = await response.json();
-
-  if (Array.isArray(result.errors) && result.errors.length > 0) {
-    throw new Response("Shopify product catalog is unavailable", { status: 502 });
-  }
-
-  const productCatalog = (result.data?.products?.edges || []).map(({ node }: any) => ({
-    id: node.id,
-    title: node.title,
-    image: {
-      src: node.featuredMedia?.preview?.image?.url || 'https://via.placeholder.com/40',
-      alt: node.featuredMedia?.preview?.image?.altText || node.title,
-    },
-  }));
-
-
-  // await prisma.shop.upsert({
-  //   where: { shopDomain: session.shop },
-  //   update: {
-  //     accessToken: session.accessToken || "",
-  //     productCatalog,
-  //   },
-  //   create: {
-  //     shopDomain: session.shop,
-  //     accessToken: session.accessToken || "",
-  //     scope: session.scope,
-  //     productCatalog,
-  //   }
-  // });
-  // Only upsert on first auth, not every page load
-  const key = `shop:init:${session.shop}`;
-  const alreadyInit = await getJsonCache(key);
-  if (!alreadyInit) {
-    await withRetry(() =>
-      prisma.shop.upsert({
-        where: { shopDomain: session.shop },
-        update: {
-          accessToken: session.accessToken || "",
-          productCatalog,
-        },
-        create: {
-          shopDomain: session.shop,
-          accessToken: session.accessToken || "",
-          scope: session.scope,
-          productCatalog,
-        }
-      })
-    );
-    await setJsonCache(key, true, 86400); // Cache 24 hours
-  }
-
-
-
-
   return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
-
-
 
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
@@ -112,7 +35,9 @@ export default function App() {
           Home
         </Link>
         <Link to="/app/analytics">Revenue Dashboard</Link>
-        <Link to="/app/settings">Revenue Engine</Link>
+        <Link to="/app/pairings">Product pairings</Link>
+        <Link to="/app/settings">Recommendations</Link>
+        <Link to="/app/plan">Plan &amp; usage</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>
@@ -131,4 +56,3 @@ export function ErrorBoundary() {
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
 };
-

@@ -1,5 +1,6 @@
 import {
   data as json,
+  Form,
   type LoaderFunctionArgs,
   useLoaderData,
 } from "react-router";
@@ -13,10 +14,17 @@ import {
   Layout,
   Page,
   Text,
+  Button,
 } from "@shopify/polaris";
 import { getRevenueAnalytics } from "../models/analytics.server";
 import { getSalesAnalytics } from "../models/salesAnalytics.server";
 import { authenticate } from "../shopify.server";
+import {
+  getHoldoutReport,
+  measurementDateRange,
+} from "../models/holdoutAnalytics.server";
+import { HoldoutMeasurementCard } from "../components/dashboard/HoldoutMeasurementCard";
+export { pauseCartRecommendationsAction as action } from "../models/measurementAdmin.server";
 import UpsellChart from "./components/UpsellChart";
 import UpsellTimeSeriesChart from "./components/UpsellTimeSeriesChart";
 
@@ -25,6 +33,7 @@ const WINDOW_DAYS = 30;
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const from = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const range = measurementDateRange(new URL(request.url));
   const [report, sales, shopResponse] = await Promise.all([
     getRevenueAnalytics(session.shop, from),
     getSalesAnalytics(session.shop, from),
@@ -39,11 +48,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ? shopJson.data.shop.currencyCode
     : "USD";
 
-  return json({ report, sales, currencyCode, windowDays: WINDOW_DAYS });
+  return json({
+    report,
+    sales,
+    currencyCode,
+    windowDays: WINDOW_DAYS,
+    measurement: await getHoldoutReport(session.shop, range.from, range.to),
+  });
 };
 
 export default function RevenueDashboard() {
-  const { report, sales, currencyCode, windowDays } =
+  const { report, sales, currencyCode, windowDays, measurement } =
     useLoaderData<typeof loader>();
   const { dashboard, funnel } = report;
   const formatCurrency = (amount: number) =>
@@ -87,20 +102,32 @@ export default function RevenueDashboard() {
       caption: `${dashboard.attributedOrderCount.toLocaleString()} attributed orders.`,
     },
     {
-      label: "Observed AOV lift",
-      value: dashboard.aovLiftAvailable
-        ? formatPercent(dashboard.aovLift)
-        : "Not available",
-      caption: dashboard.aovLiftAvailable
-        ? "Compared with orders without an attributed offer."
-        : "Requires both attributed and unattributed orders.",
+      label: "Measured conversion lift",
+      value:
+        measurement.enabled && measurement.lift !== null
+          ? formatPercent(measurement.lift)
+          : "Not enough data yet",
+      caption:
+        "Only mature randomized sessions with sufficient data and linkage.",
     },
   ];
   const funnelData = [
-    { name: "Generated", count: funnel.generated, color: "#6B7280" },
-    { name: "Impressions", count: funnel.impressions, color: "#2563EB" },
-    { name: "Clicks", count: funnel.clicks, color: "#059669" },
-    { name: "Conversions", count: funnel.conversions, color: "#D97706" },
+    {
+      name: "Displayed",
+      count: measurement.funnel.displayed,
+      color: "#2563EB",
+    },
+    { name: "Clicked", count: measurement.funnel.clicked, color: "#059669" },
+    {
+      name: "Confirmed cart add",
+      count: measurement.funnel.added,
+      color: "#6B7280",
+    },
+    {
+      name: "Purchased",
+      count: measurement.funnel.purchased,
+      color: "#D97706",
+    },
   ];
   const offerRows = report.offerRows.map((offer) => [
     offer.name,
@@ -141,11 +168,45 @@ export default function RevenueDashboard() {
     >
       <Layout>
         <Layout.Section>
+          <Form method="get">
+            <InlineStack gap="300" blockAlign="end">
+              <label>
+                Measurement cohort from{" "}
+                <input
+                  type="date"
+                  name="from"
+                  defaultValue={measurement.from.slice(0, 10)}
+                  required
+                />
+              </label>
+              <label>
+                Through{" "}
+                <input
+                  type="date"
+                  name="to"
+                  defaultValue={new Date(new Date(measurement.to).getTime() - 1)
+                    .toISOString()
+                    .slice(0, 10)}
+                  required
+                />
+              </label>
+              <Button submit>Apply measurement dates</Button>
+            </InlineStack>
+          </Form>
+        </Layout.Section>
+        <Layout.Section>
+          <HoldoutMeasurementCard
+            report={measurement}
+            fallbackCurrency={currencyCode}
+          />
+        </Layout.Section>
+        <Layout.Section>
           <Banner title="About this report" tone="info">
             <Text as="p">
-              This report uses a rolling {windowDays}-day window. AOV lift is an
-              observational comparison between orders with and without an
-              attributed AOVBoost offer; it is not a randomized causal estimate.
+              The attributed report uses a rolling {windowDays}-day window.
+              Attributed revenue is not incremental revenue. Measured conversion
+              uses the separately selected assignment cohort and a seven-day
+              follow-up.
             </Text>
           </Banner>
         </Layout.Section>

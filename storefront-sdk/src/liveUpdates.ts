@@ -182,6 +182,7 @@ export class LiveUpdates {
           Accept: "application/json",
           "Content-Type": "application/json",
           "X-AOVBoost-Shop": auth.shop,
+          Authorization: `Bearer ${auth.sessionToken}`,
         },
         body: JSON.stringify(auth),
         cache: "no-store",

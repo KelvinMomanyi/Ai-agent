@@ -3,11 +3,14 @@ import {
   type LoaderFunctionArgs,
   useFetcher,
   useLoaderData,
+  useRevalidator,
 } from "react-router";
 import { useEffect, useRef } from "react";
 import {
   Badge,
+  Banner,
   BlockStack,
+  Button,
   Card,
   InlineStack,
   Layout,
@@ -17,18 +20,30 @@ import {
 import { AovMetricCard } from "../components/dashboard/AovMetricCard";
 import { RevenueChart } from "../components/dashboard/RevenueChart";
 import { WidgetPerformanceTable } from "../components/dashboard/WidgetPerformanceTable";
+import { SetupChecklist } from "../components/dashboard/SetupChecklist";
+import {
+  ensureInitialCatalogSync,
+  getCatalogSyncProgress,
+} from "../jobs/aovboost.server";
 import prisma from "../db.server";
 import { getDashboardMetrics } from "../models/analytics.server";
 import { getCatalogReadiness } from "../models/catalogCache.server";
 import type { CatalogReadiness } from "../models/productCatalogMapping";
-import { cacheKeys, getJsonCache } from "../redis.server";
+import { getSetupChecklist } from "../models/onboarding.server";
+import { themeEmbedEditorUrl } from "../models/onboarding";
 import { authenticate } from "../shopify.server";
+import { getPlanStatus } from "../models/usage.server";
+import { getHoldoutReport } from "../models/holdoutAnalytics.server";
+import { HoldoutMeasurementCard } from "../components/dashboard/HoldoutMeasurementCard";
+export { pauseCartRecommendationsAction as action } from "../models/measurementAdmin.server";
 
 type SyncProgress = {
   total?: number;
   done?: number;
   status?: string;
   error?: string;
+  emptyCatalog?: boolean;
+  updatedAt?: string;
 } | null;
 
 type SyncResponse = {
@@ -41,6 +56,9 @@ type SyncResponse = {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
+  // Parent and child loaders can run concurrently on the first entry. This
+  // create-if-absent operation ensures Home can see a durable job immediately.
+  await ensureInitialCatalogSync(session.shop);
   const [
     metrics,
     catalogReadiness,
@@ -51,7 +69,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     getDashboardMetrics(session.shop),
     getCatalogReadiness(session.shop),
     prisma.bundle.count({ where: { shop: session.shop, isActive: true } }),
-    getJsonCache<SyncProgress>(cacheKeys.syncProgress(session.shop)),
+    getCatalogSyncProgress(session.shop),
     admin.graphql(
       `#graphql\nquery AOVBoostShopCurrency { shop { currencyCode } }`,
     ),
@@ -64,30 +82,49 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     : "USD";
 
   return json({
+    planStatus: await getPlanStatus(session.shop, admin),
+    measurement: await getHoldoutReport(session.shop),
+    pairingSetup: await prisma.appSettings.findUnique({
+      where: { shop: session.shop },
+      select: { pairingMode: true, pairingOnboardingSeenAt: true },
+    }),
     metrics,
     productCount: catalogReadiness.storedProductCount,
     catalogReadiness,
     activeBundleCount,
     syncProgress,
     currencyCode,
-    providers: {
-      gemini: Boolean(process.env.GOOGLE_API_KEY),
-      groq: Boolean(process.env.GROQ_API_KEY),
-    },
+    setupSteps: await getSetupChecklist(
+      session.shop,
+      catalogReadiness,
+      syncProgress,
+    ),
+    themeEditorUrl: themeEmbedEditorUrl(
+      session.shop,
+      process.env.SHOPIFY_API_KEY || "",
+    ),
+    storefrontUrl: `https://${session.shop}/`,
   });
 };
 
 export default function AovBoostDashboard() {
   const {
     metrics,
-    providers,
     productCount,
     catalogReadiness,
     activeBundleCount,
     syncProgress,
     currencyCode,
+    setupSteps,
+    themeEditorUrl,
+    storefrontUrl,
+    measurement,
+    planStatus,
+    pairingSetup,
   } = useLoaderData<typeof loader>();
+  const revalidator = useRevalidator();
   const syncFetcher = useFetcher<SyncResponse>();
+  const pairingIntro = useFetcher();
   const automaticRepairStarted = useRef(false);
   const currentProgress = syncFetcher.data?.progress ?? syncProgress;
   const currentProductCount = syncFetcher.data?.productCount ?? productCount;
@@ -101,6 +138,16 @@ export default function AovBoostDashboard() {
   const syncIsSubmitting = syncFetcher.state !== "idle" || syncShouldContinue;
   const syncFailed =
     syncFetcher.data?.ok === false || currentProgress?.status === "failed";
+
+  const verified = setupSteps.some(
+    (step) => step.id === "verify" && step.state === "complete",
+  );
+  useEffect(() => {
+    if (verified) return;
+    const refresh = () => revalidator.revalidate();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [verified, revalidator]);
 
   useEffect(() => {
     if (syncFetcher.state !== "idle" || !syncShouldContinue) return;
@@ -163,6 +210,63 @@ export default function AovBoostDashboard() {
       ]}
     >
       <Layout>
+        {pairingSetup?.pairingMode === "autopilot" &&
+        !pairingSetup.pairingOnboardingSeenAt ? (
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingMd">
+                  Product pairing autopilot is on
+                </Text>
+                <Text as="p">
+                  After your catalog sync, validated, non-sensitive pairs can go
+                  live automatically. Sensitive or uncertain pairs stay for
+                  review. Your approvals, rejections and exclusions always take
+                  priority.
+                </Text>
+                <InlineStack gap="200">
+                  <Button url="/app/pairings">
+                    Review pairings or turn autopilot off
+                  </Button>
+                  <Button
+                    loading={pairingIntro.state !== "idle"}
+                    onClick={() =>
+                      pairingIntro.submit(
+                        { intent: "acknowledgeAutopilot" },
+                        { method: "post", action: "/app/pairings" },
+                      )
+                    }
+                  >
+                    Got it
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        ) : null}
+        {planStatus.notice ? (
+          <Layout.Section>
+            <Banner tone="warning" title="Plan & usage">
+              <p>{planStatus.notice}</p>
+              <Button url="/app/plan">View plan & usage</Button>
+            </Banner>
+          </Layout.Section>
+        ) : null}
+        <Layout.Section>
+          <HoldoutMeasurementCard
+            report={measurement}
+            fallbackCurrency={currencyCode}
+          />
+        </Layout.Section>
+        <Layout.Section>
+          <SetupChecklist
+            steps={setupSteps}
+            themeEditorUrl={themeEditorUrl}
+            storefrontUrl={storefrontUrl}
+            onRefresh={() => revalidator.revalidate()}
+            refreshing={revalidator.state !== "idle"}
+          />
+        </Layout.Section>
         <Layout.Section>
           <div
             style={{
@@ -172,7 +276,7 @@ export default function AovBoostDashboard() {
             }}
           >
             <AovMetricCard
-              label="Avg AOV"
+              label="Attributed-order AOV"
               value={
                 metrics.attributedOrderCount > 0
                   ? formatCurrency(metrics.avgAov, currencyCode)
@@ -180,13 +284,13 @@ export default function AovBoostDashboard() {
               }
             />
             <AovMetricCard
-              label="AOV Lift"
+              label="Measured conversion lift"
               value={
-                metrics.aovLiftAvailable
-                  ? formatPercent(metrics.aovLift)
-                  : "Not available"
+                measurement.enabled && measurement.lift !== null
+                  ? formatPercent(measurement.lift)
+                  : "Not enough data yet"
               }
-              caption="Observational, not a randomized causal estimate."
+              caption="Randomized holdout with a complete follow-up window."
             />
             <AovMetricCard
               label="Widget CTR"
@@ -296,29 +400,6 @@ export default function AovBoostDashboard() {
             </BlockStack>
           </Card>
         </Layout.Section>
-
-        <Layout.Section variant="oneThird">
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">
-                AI Provider Status
-              </Text>
-              <InlineStack gap="200">
-                <Badge tone={providers.gemini ? "success" : "critical"}>
-                  {`Gemini ${providers.gemini ? "active" : "missing"}`}
-                </Badge>
-                <Badge tone={providers.groq ? "success" : "critical"}>
-                  {`Groq ${providers.groq ? "active" : "missing"}`}
-                </Badge>
-              </InlineStack>
-              {!providers.gemini && !providers.groq ? (
-                <Text as="p" tone="subdued">
-                  Heuristic fallback is active until an AI key is configured.
-                </Text>
-              ) : null}
-            </BlockStack>
-          </Card>
-        </Layout.Section>
       </Layout>
     </Page>
   );
@@ -335,6 +416,9 @@ function getCatalogStatusText(
       "Product sync failed. Check the app logs and Shopify product scopes."
     );
   }
+  if (progress?.emptyCatalog && readiness.storedProductCount === 0) {
+    return "Your last sync found no active products. Add products in Shopify, then use Resync products. Empty catalogs are not synced again automatically.";
+  }
   if (progress?.status && progress.status !== "complete") {
     const done = Number(progress.done || 0);
     const total = Number(progress.total || 0);
@@ -342,13 +426,16 @@ function getCatalogStatusText(
       total > 0
         ? `${done.toLocaleString()} of ${total.toLocaleString()}`
         : done.toLocaleString();
-    return `Catalog sync is ${formatStatus(progress.status).toLowerCase()} (${count}).`;
+    return `Catalog sync is ${formatStatus(progress.status).toLowerCase()} (${count}). Keep Home open to continue. Closing the app pauses sync; reopening resumes from saved progress.`;
   }
   if (readiness.resyncRequired) {
     return `${readiness.missingVariantDataCount.toLocaleString()} stored products are missing current variant data. Use Repair catalog sync so recommendations and add-to-cart actions can render safely.`;
   }
   if (readiness.actionableProductCount > 0) {
     return "The catalog has verified, sellable variants for chat and storefront recommendations.";
+  }
+  if (readiness.storedProductCount > 0) {
+    return "Products are synced, but no available variants can be recommended yet. Check product status and availability in Shopify, then resync.";
   }
   return "No products are synced yet. Sync before storefront chat can recommend exact items.";
 }

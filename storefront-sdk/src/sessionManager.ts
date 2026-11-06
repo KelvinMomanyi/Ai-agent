@@ -1,4 +1,5 @@
 export type JourneyStage = "discovering" | "comparing" | "deciding" | "buying";
+import type { HoldoutMeasurement } from "../../shared/holdout";
 
 export type SessionSnapshot = {
   anonymousId: string;
@@ -29,6 +30,7 @@ const STORAGE_KEY = "aovboost_anonymous_id";
 const SIGNED_SESSION_STORAGE_KEY = "aovboost_storefront_session";
 
 type StoredStorefrontSession = {
+  measurement?: HoldoutMeasurement | null;
   shop: string;
   sessionId: string;
   sessionToken: string;
@@ -38,6 +40,8 @@ type StoredStorefrontSession = {
 };
 
 export type StorefrontSettings = {
+  holdout?: boolean;
+  focusedMode?: boolean;
   chatEnabled?: boolean;
   bundlesEnabled?: boolean;
   upsellEnabled?: boolean;
@@ -61,6 +65,7 @@ export class SessionManager {
   anonymousId = "";
   private sessionToken = "";
   private settings: StorefrontSettings = {};
+  private measurement: HoldoutMeasurement | null = null;
   private journeyStage: JourneyStage = "discovering";
   private viewedProductIds = new Set<string>();
   private productViewCounts = new Map<string, number>();
@@ -289,7 +294,32 @@ export class SessionManager {
   }
 
   getSettings(): StorefrontSettings {
-    return { ...this.settings };
+    return {
+      ...this.settings,
+      ...(this.measurement
+        ? { holdout: this.measurement.arm === "holdout" }
+        : {}),
+    };
+  }
+  getMeasurement() {
+    return this.measurement;
+  }
+  applyMeasurement(value: unknown) {
+    const raw = asRecord(value);
+    const next =
+      raw &&
+      ["exposed", "holdout"].includes(String(raw.arm)) &&
+      Number.isSafeInteger(raw.version) &&
+      typeof raw.link === "string" &&
+      raw.link.length <= 512
+        ? (raw as unknown as HoldoutMeasurement)
+        : null;
+    const changed = this.measurement?.link !== next?.link;
+    this.measurement = next;
+    const stored = this.getStoredStorefrontSession(true);
+    if (stored) this.storeStorefrontSession({ ...stored, measurement: next });
+    if (changed)
+      document.dispatchEvent(new CustomEvent("aovboost:measurement-updated"));
   }
 
   async getSignedAuthPayload(): Promise<{
@@ -359,6 +389,7 @@ export class SessionManager {
     this.anonymousId = session.sessionId;
     this.sessionToken = session.sessionToken;
     if (session.settings) this.settings = session.settings;
+    this.applyMeasurement(session.measurement);
     this.storeStorefrontSession(session);
     this.syncGlobalSdkAuth();
     return true;
@@ -459,12 +490,15 @@ export class SessionManager {
   private async ensureStorefrontSession(
     options: { forceRefresh?: boolean } = {},
   ): Promise<void> {
-    const stored = options.forceRefresh
-      ? null
-      : this.getStoredStorefrontSession();
-    if (stored) {
+    const stored = this.getStoredStorefrontSession(true);
+    if (
+      !options.forceRefresh &&
+      stored &&
+      stored.expiresAt > Math.floor(Date.now() / 1000) + 60
+    ) {
       this.anonymousId = stored.sessionId;
       this.sessionToken = stored.sessionToken;
+      this.measurement = stored.measurement || null;
       if (
         stored.settings &&
         Date.now() - (stored.settingsLoadedAt || 0) < 60_000
@@ -475,7 +509,14 @@ export class SessionManager {
 
     const response = await fetch(this.endpoint("/session"), {
       method: "GET",
-      headers: { Accept: "application/json" },
+      headers: {
+        Accept: "application/json",
+        ...(this.sessionToken || stored?.sessionToken
+          ? {
+              Authorization: `Bearer ${this.sessionToken || stored?.sessionToken}`,
+            }
+          : {}),
+      },
     });
     if (!response.ok)
       throw new Error(`Session bootstrap failed: ${response.status}`);
@@ -490,12 +531,17 @@ export class SessionManager {
     try {
       const response = await fetch(this.endpoint("/config"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.sessionToken}`,
+        },
         body: JSON.stringify(this.getAuthPayload()),
       });
       if (!response.ok) return;
       const body = asRecord(await response.json());
       const settings = asRecord(body?.settings);
+      if (body && "measurement" in body)
+        this.applyMeasurement(body.measurement);
       if (settings) {
         this.settings = settings as StorefrontSettings;
         const stored = this.getStoredStorefrontSession();
@@ -511,7 +557,9 @@ export class SessionManager {
     }
   }
 
-  private getStoredStorefrontSession(): StoredStorefrontSession | null {
+  private getStoredStorefrontSession(
+    allowExpired = false,
+  ): StoredStorefrontSession | null {
     try {
       const parsed = JSON.parse(
         window.localStorage.getItem(SIGNED_SESSION_STORAGE_KEY) || "null",
@@ -521,7 +569,8 @@ export class SessionManager {
         parsed.shop !== this.shop ||
         !parsed.sessionId ||
         !parsed.sessionToken ||
-        Number(parsed.expiresAt || 0) <= Math.floor(Date.now() / 1000) + 60
+        (!allowExpired &&
+          Number(parsed.expiresAt || 0) <= Math.floor(Date.now() / 1000) + 60)
       ) {
         return null;
       }
@@ -581,6 +630,7 @@ function asStorefrontSession(value: unknown): StoredStorefrontSession | null {
     sessionToken: String(record.sessionToken || ""),
     expiresAt: Number(record.expiresAt || 0),
     settings: asRecord(record.settings) as StorefrontSettings | undefined,
+    measurement: record.measurement as HoldoutMeasurement | null | undefined,
   };
 }
 

@@ -7,14 +7,22 @@ import {
   resolveProductVariant,
   text,
 } from "./BaseWidget";
+import { recommendationLimit } from "../../../shared/cartRecommendations";
+import { isElementVisible } from "./visibility";
 
 export class UpsellDrawer extends BaseWidget {
+  private keyboard = new AbortController();
+  private returnTo: HTMLElement | null = null;
+  private shiftTab = false;
   getWidgetType(): string {
     return "upsell_drawer";
   }
 
   render(): void {
-    const products = getProducts(this.payload).slice(0, 3);
+    const products = getProducts(this.payload).slice(
+      0,
+      recommendationLimit(this.payload.maxProductRecommendations),
+    );
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
     const inline = this.payload.presentation === "inline";
     if (products.length === 0) {
@@ -44,7 +52,7 @@ export class UpsellDrawer extends BaseWidget {
         ${inline ? `.drawer { position: static; inset: auto; z-index: auto; width: 100%; height: auto; margin: 18px 0; transform: none; animation: none; overflow: visible; }` : ""}
       </style>
       ${inline ? "" : '<div class="backdrop" data-dismiss></div>'}
-      <aside class="drawer" aria-label="Recommended cart additions">
+      <aside class="drawer" role="region" aria-label="Recommended cart additions">
         <div class="head">
           <div>
             <h3 class="title">${text(copy.headline || "Great choice. Complete the set")}</h3>
@@ -86,6 +94,65 @@ export class UpsellDrawer extends BaseWidget {
       </aside>
     `);
 
+    this.returnTo =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    this.root.addEventListener(
+      "keydown",
+      (event) => {
+        const key = event as KeyboardEvent;
+        if (key.key === "Escape") {
+          key.preventDefault();
+          key.stopPropagation();
+          // The native drawer handles keyup; consume the matching release even
+          // after focus returns out of this removed card.
+          const release = (event: KeyboardEvent) => {
+            if (event.key === "Escape") event.stopPropagation();
+            document.removeEventListener("keyup", release, true);
+            window.clearTimeout(timer);
+          };
+          const timer = window.setTimeout(
+            () => document.removeEventListener("keyup", release, true),
+            1000,
+          );
+          document.addEventListener("keyup", release, true);
+          this.dismiss();
+        }
+        if (key.key === "Tab" && this.payload.cartDrawer) this.bridgeTab(key);
+      },
+      { signal: this.keyboard.signal },
+    );
+    this.root.addEventListener(
+      "keyup",
+      (event) => {
+        if ((event as KeyboardEvent).key === "Escape") event.stopPropagation();
+      },
+      { signal: this.keyboard.signal },
+    );
+    if (this.payload.cartDrawer) {
+      // Native theme focus traps enumerate light-DOM controls. Expose one stop
+      // and bridge into/out of the shadow controls without trapping the whole cart.
+      this.container.tabIndex = 0;
+      this.container.setAttribute("aria-label", "Recommended cart additions");
+      document.addEventListener(
+        "keydown",
+        (event) => {
+          if (event.key === "Tab") this.shiftTab = event.shiftKey;
+        },
+        { capture: true, signal: this.keyboard.signal },
+      );
+      this.container.addEventListener(
+        "focus",
+        (event) => {
+          if (event.composedPath()[0] !== this.container) return;
+          const controls = this.controls();
+          (this.shiftTab ? controls.at(-1) : controls[0])?.focus();
+        },
+        { signal: this.keyboard.signal },
+      );
+    }
+
     this.root.querySelectorAll("[data-dismiss]").forEach((element) => {
       element.addEventListener("click", () => this.dismiss());
     });
@@ -121,6 +188,10 @@ export class UpsellDrawer extends BaseWidget {
             this.payload.offerId,
           );
           if (!added) throw new Error("Cart add failed");
+          this.track("recommendation_added", {
+            productId: product.id,
+            variantId: variant.id,
+          });
           element.textContent = "Added ✓";
           if (status) status.textContent = "Added to your cart";
         } catch {
@@ -130,6 +201,63 @@ export class UpsellDrawer extends BaseWidget {
         }
       });
     });
+  }
+
+  private controls() {
+    return Array.from(
+      this.root.querySelectorAll<HTMLElement>(
+        "button:not(:disabled), select:not(:disabled), a[href]",
+      ),
+    ).filter((element) => !element.hasAttribute("hidden"));
+  }
+
+  private bridgeTab(event: KeyboardEvent) {
+    const controls = this.controls();
+    const active = this.root.activeElement;
+    if (
+      (!event.shiftKey && active !== controls.at(-1)) ||
+      (event.shiftKey && active !== controls[0])
+    )
+      return;
+    const drawer = this.container.closest<HTMLElement>(
+      "[data-aovboost-cart-drawer], .drawer__inner[role='dialog']",
+    );
+    if (!drawer) return;
+    const native = Array.from(
+      drawer.querySelectorAll<HTMLElement>(
+        "button:not(:disabled), select:not(:disabled), input:not([type='hidden']):not(:disabled), a[href], [tabindex='0']",
+      ),
+    ).filter((element) => isElementVisible(element));
+    const index = native.indexOf(this.container);
+    if (index < 0) return;
+    const next =
+      native[
+        (index + (event.shiftKey ? native.length - 1 : 1)) % native.length
+      ];
+    if (next && next !== this.container) {
+      event.preventDefault();
+      event.stopPropagation();
+      next.focus();
+    }
+  }
+
+  destroy(): void {
+    const hadFocus = document.activeElement === this.container;
+    const drawer = this.container.closest<HTMLElement>(
+      "[data-aovboost-cart-drawer], .drawer__inner[role='dialog']",
+    );
+    const returnTo =
+      this.returnTo &&
+      this.returnTo !== this.container &&
+      this.returnTo.isConnected &&
+      (!drawer || drawer.contains(this.returnTo))
+        ? this.returnTo
+        : drawer?.querySelector<HTMLElement>(
+            ".drawer__close, [data-cart-close], button",
+          );
+    this.keyboard.abort();
+    super.destroy();
+    if (hadFocus && returnTo && isElementVisible(returnTo)) returnTo.focus();
   }
 
   private dismiss() {

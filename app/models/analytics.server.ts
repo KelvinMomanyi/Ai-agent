@@ -604,7 +604,7 @@ export async function getExperimentAnalytics(shop: string) {
   });
 }
 
-function calculateTwoProportionZTest(
+export function calculateTwoProportionZTest(
   treatment: { conversions: number; impressions: number },
   control: { conversions: number; impressions: number },
 ): boolean {

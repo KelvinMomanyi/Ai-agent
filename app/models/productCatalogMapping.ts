@@ -99,6 +99,16 @@ export function mapAdminCatalogProductNode(
     ),
   );
   const hasOnlyDefaultVariant = node.hasOnlyDefaultVariant === true;
+  metafields["aovboost.collectionTitles"] = (
+    node.collections?.edges ||
+    node.collections?.nodes ||
+    []
+  )
+    .slice(0, 50)
+    .map((entry: any) => ({
+      id: String((entry.node || entry).id || ""),
+      title: String((entry.node || entry).title || "").slice(0, 120),
+    }));
 
   metafields["aovboost.availableForSale"] =
     booleanMetafield(isAvailableForSale);

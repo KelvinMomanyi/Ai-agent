@@ -1,5 +1,6 @@
 import type { SessionManager } from "./sessionManager";
 import { hasTrackingConsent } from "./consent";
+import { newMutationId } from "./cartState";
 
 type EventPayload = Record<string, unknown>;
 
@@ -36,6 +37,7 @@ export class EventBus {
   private inFlight = 0;
   private retryAt = 0;
   private lastSnapshotSignature = "";
+  private listeners = new AbortController();
 
   constructor(private options: EventBusOptions) {}
 
@@ -48,13 +50,24 @@ export class EventBus {
     this.installSearchTracking();
     this.installCommerceInteractionTracking();
 
-    document.addEventListener("add-to-cart", ((event: CustomEvent) => {
-      this.track("add_to_cart", normalizePayload(event.detail));
-    }) as EventListener);
-    document.addEventListener("aovboost:track", ((event: CustomEvent) => {
-      const detail = normalizePayload(event.detail);
-      this.track(String(detail.type || "widget_event"), detail);
-    }) as EventListener);
+    document.addEventListener(
+      "add-to-cart",
+      ((event: CustomEvent) => {
+        this.track("cart_hint", {
+          ...normalizePayload(event.detail),
+          confirmed: false,
+        });
+      }) as EventListener,
+      { signal: this.listeners.signal },
+    );
+    document.addEventListener(
+      "aovboost:track",
+      ((event: CustomEvent) => {
+        const detail = normalizePayload(event.detail);
+        this.track(String(detail.type || "widget_event"), detail);
+      }) as EventListener,
+      { signal: this.listeners.signal },
+    );
     window.addEventListener("pagehide", this.handlePageHide);
     document.addEventListener("visibilitychange", this.handleVisibility);
     this.heartbeatTimer = window.setInterval(() => {
@@ -78,12 +91,17 @@ export class EventBus {
     const dedupeKey = getDedupeKey(type, payload);
     if (dedupeKey) {
       const previous = this.recentEventKeys.get(dedupeKey) || 0;
-      if (now - previous < 750) return;
+      if (previous && (payload.mutationId || now - previous < 750)) return;
       this.recentEventKeys.set(dedupeKey, now);
       if (this.recentEventKeys.size > 100) {
         for (const [key, timestamp] of this.recentEventKeys) {
-          if (now - timestamp > 5_000) this.recentEventKeys.delete(key);
+          if (!key.startsWith("mutation:") && now - timestamp > 5_000)
+            this.recentEventKeys.delete(key);
         }
+        if (this.recentEventKeys.size > 200)
+          this.recentEventKeys.delete(
+            this.recentEventKeys.keys().next().value!,
+          );
       }
     }
     const event: AovboostEvent = {
@@ -126,6 +144,12 @@ export class EventBus {
   destroy(): void {
     this.flush(true);
     this.destroyed = true;
+    this.listeners.abort();
+    if (this.originalFetch) window.fetch = this.originalFetch;
+    if (this.originalXhrOpen)
+      XMLHttpRequest.prototype.open = this.originalXhrOpen;
+    if (this.originalXhrSend)
+      XMLHttpRequest.prototype.send = this.originalXhrSend;
     window.clearInterval(this.heartbeatTimer);
     window.clearTimeout(this.flushTimer);
     window.clearTimeout(this.searchTimer);
@@ -248,6 +272,7 @@ export class EventBus {
         headers: {
           "Content-Type": "application/json",
           "X-AOVBoost-Shop": this.options.shop,
+          Authorization: `Bearer ${auth.sessionToken}`,
         },
         body: JSON.stringify({ ...auth, events }),
         keepalive: true,
@@ -344,20 +369,62 @@ export class EventBus {
     window.fetch = async (...args) => {
       const requestUrl = getRequestUrl(args[0]);
       const init = args[1] as RequestInit | undefined;
+      const mutationId = newMutationId();
+      const method = String(
+        init?.method || (args[0] instanceof Request ? args[0].method : "GET"),
+      ).toUpperCase();
+      const bodyCopy =
+        method === "POST" && isCartAddUrl(requestUrl)
+          ? init?.body !== undefined
+            ? Promise.resolve(init.body)
+            : args[0] instanceof Request
+              ? args[0]
+                  .clone()
+                  .text()
+                  .catch(() => "")
+              : Promise.resolve(undefined)
+          : Promise.resolve(undefined);
       const response = await this.originalFetch!(...args);
 
       try {
-        if (isCartAddUrl(requestUrl) && response.ok) {
-          const requestPayload = getCartPayload(init?.body);
-          void readCartAddResponse(response).then((responsePayload) => {
-            this.track("add_to_cart", {
-              ...requestPayload,
-              ...responsePayload,
-              source: "verified_fetch_response",
-              requestUrl,
-            });
-          });
-        } else if (isCartChangeUrl(requestUrl) && response.ok) {
+        if (
+          new Headers(
+            init?.headers ||
+              (args[0] instanceof Request ? args[0].headers : undefined),
+          ).get("X-AOVBoost-Measurement") === "1"
+        )
+          return response;
+        if (method === "POST" && isCartAddUrl(requestUrl) && response.ok) {
+          const headers = new Headers(
+            init?.headers ||
+              (args[0] instanceof Request ? args[0].headers : undefined),
+          );
+          void Promise.all([bodyCopy, readCartAddResponse(response)])
+            .then(([requestBody, responsePayload]) => {
+              const requestPayload = getCartPayload(requestBody);
+              if (
+                !responsePayload.variantId ||
+                Number(requestPayload.quantity) <= 0
+              )
+                return;
+              this.track("add_to_cart", {
+                ...requestPayload,
+                ...responsePayload,
+                source: "verified_fetch_response",
+                requestUrl,
+                confirmed: true,
+                mutationId,
+                recommendationOrigin:
+                  headers.get("X-AOVBoost-Recommendation") === "1" ||
+                  requestPayload.recommendationOrigin === true,
+              });
+            })
+            .catch(() => {});
+        } else if (
+          method === "POST" &&
+          isCartChangeUrl(requestUrl) &&
+          response.ok
+        ) {
           const payload = getCartPayload(init?.body);
           this.track(
             Number(payload.quantity) === 0
@@ -366,6 +433,8 @@ export class EventBus {
             {
               ...payload,
               requestUrl,
+              confirmed: true,
+              mutationId,
             },
           );
         } else if (isSearchUrl(requestUrl)) {
@@ -410,6 +479,9 @@ export class EventBus {
     ) {
       (this as XMLHttpRequest & { __aovboostUrl?: string }).__aovboostUrl =
         String(url || "");
+      (
+        this as XMLHttpRequest & { __aovboostMethod?: string }
+      ).__aovboostMethod = method.toUpperCase();
       if (typeof async === "boolean") {
         return (originalOpen as any).call(
           this,
@@ -430,7 +502,11 @@ export class EventBus {
         (this as XMLHttpRequest & { __aovboostUrl?: string }).__aovboostUrl ||
         "";
       const requestPayload = getCartPayload(body as BodyInit | null);
-      if (isCartAddUrl(requestUrl)) {
+      const mutationId = newMutationId();
+      const isPost =
+        (this as XMLHttpRequest & { __aovboostMethod?: string })
+          .__aovboostMethod === "POST";
+      if (isPost && isCartAddUrl(requestUrl)) {
         this.addEventListener(
           "load",
           () => {
@@ -438,16 +514,25 @@ export class EventBus {
             const responsePayload = parseCartAddResponse(
               this.responseType === "json" ? this.response : this.responseText,
             );
+            if (
+              !responsePayload.variantId ||
+              Number(requestPayload.quantity) <= 0
+            )
+              return;
             trackVerifiedAdd({
               ...requestPayload,
               ...responsePayload,
               source: "verified_xhr_response",
               requestUrl,
+              confirmed: true,
+              mutationId,
+              recommendationOrigin:
+                requestPayload.recommendationOrigin === true,
             });
           },
           { once: true },
         );
-      } else if (isCartChangeUrl(requestUrl)) {
+      } else if (isPost && isCartChangeUrl(requestUrl)) {
         this.addEventListener(
           "load",
           () => {
@@ -460,6 +545,8 @@ export class EventBus {
                 ...requestPayload,
                 source: "verified_xhr_response",
                 requestUrl,
+                confirmed: true,
+                mutationId,
               },
             );
           },
@@ -652,11 +739,22 @@ function getRequestUrl(request: RequestInfo | URL) {
 }
 
 function isCartAddUrl(url: string) {
-  return /\/cart\/add(?:\.js)?/.test(url);
+  return isCartUrl(url, "add");
 }
 
 function isCartChangeUrl(url: string) {
-  return /\/cart\/(?:change|update)(?:\.js)?/.test(url);
+  return isCartUrl(url, "change|update|clear");
+}
+function isCartUrl(value: string, actions: string) {
+  try {
+    const url = new URL(value, window.location.origin);
+    return (
+      url.origin === window.location.origin &&
+      new RegExp(`/cart/(?:${actions})(?:\\.js)?$`).test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isSearchUrl(url: string) {
@@ -671,12 +769,16 @@ function getSearchQuery(url: string) {
   }
 }
 
-function getCartPayload(body: BodyInit | null | undefined) {
+function getCartPayload(body: BodyInit | null | undefined): EventPayload {
   if (!body) return {};
   if (typeof FormData !== "undefined" && body instanceof FormData) {
     return {
       variantId: String(body.get("id") || body.get("items[0][id]") || ""),
       quantity: Number(body.get("quantity") || 1),
+      recommendationOrigin: Boolean(
+        body.get("properties[_aovboost_offer_id]") ||
+        body.get("items[0][properties][_aovboost_offer_id]"),
+      ),
     };
   }
   if (
@@ -686,6 +788,10 @@ function getCartPayload(body: BodyInit | null | undefined) {
     return {
       variantId: String(body.get("id") || body.get("items[0][id]") || ""),
       quantity: Number(body.get("quantity") || 1),
+      recommendationOrigin: Boolean(
+        body.get("properties[_aovboost_offer_id]") ||
+        body.get("items[0][properties][_aovboost_offer_id]"),
+      ),
     };
   }
 
@@ -697,6 +803,12 @@ function getCartPayload(body: BodyInit | null | undefined) {
         productId: parsed.productId || parsed.product_id,
         variantId: parsed.id || parsed.items?.[0]?.id,
         quantity: parsed.quantity ?? parsed.items?.[0]?.quantity ?? 1,
+        recommendationOrigin: Boolean(
+          parsed.properties?._aovboost_offer_id ||
+          parsed.items?.some(
+            (item: any) => item.properties?._aovboost_offer_id,
+          ),
+        ),
       };
     }
 
@@ -704,6 +816,10 @@ function getCartPayload(body: BodyInit | null | undefined) {
     return {
       variantId: String(params.get("id") || params.get("items[0][id]") || ""),
       quantity: Number(params.get("quantity") || 1),
+      recommendationOrigin: Boolean(
+        params.get("properties[_aovboost_offer_id]") ||
+        params.get("items[0][properties][_aovboost_offer_id]"),
+      ),
     };
   } catch {
     return {};
@@ -711,6 +827,11 @@ function getCartPayload(body: BodyInit | null | undefined) {
 }
 
 function getDedupeKey(type: string, payload: EventPayload) {
+  if (
+    payload.mutationId &&
+    ["add_to_cart", "remove_from_cart", "quantity_changed"].includes(type)
+  )
+    return `mutation:${type}:${payload.mutationId}`;
   if (
     ![
       "add_to_cart",
@@ -735,7 +856,7 @@ function getCurrentProductId() {
   return product ? toProductGid(product.gid || product.id) : "";
 }
 
-async function readCartAddResponse(response: Response) {
+async function readCartAddResponse(response: Response): Promise<EventPayload> {
   try {
     return parseCartAddResponse(await response.clone().json());
   } catch {
@@ -743,7 +864,7 @@ async function readCartAddResponse(response: Response) {
   }
 }
 
-function parseCartAddResponse(value: unknown) {
+function parseCartAddResponse(value: unknown): EventPayload {
   let parsed = value;
   if (typeof parsed === "string") {
     try {

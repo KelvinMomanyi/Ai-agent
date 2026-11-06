@@ -1,4 +1,6 @@
-import "@shopify/shopify-api/adapters/node";
+// React Router uses Fetch Request objects. Keep the shared Shopify runtime on
+// that adapter: the Node IncomingMessage adapter would discard their headers.
+import "@shopify/shopify-api/adapters/web-api";
 import { ApiVersion, Session, shopifyApi } from "@shopify/shopify-api";
 import type { SessionStorage } from "@shopify/shopify-app-session-storage";
 

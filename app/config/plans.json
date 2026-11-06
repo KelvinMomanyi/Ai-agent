@@ -1,0 +1,32 @@
+{
+  "billingSource": "unconfirmed",
+  "appHandle": "ai-agent-21",
+  "upgradeMode": "unconfigured",
+  "proRecurringPrice": null,
+  "tiers": {
+    "free": {
+      "label": "Free",
+      "subscriptionNames": ["Free", "AOVBoost Free"],
+      "monthlyDisplays": 500,
+      "monthlyAiCalls": 100,
+      "features": {
+        "holdoutReporting": false,
+        "advancedPlacements": false,
+        "inventoryAware": false,
+        "reorderInsights": false
+      }
+    },
+    "pro": {
+      "label": "Pro",
+      "subscriptionNames": ["Pro", "AOVBoost Pro"],
+      "monthlyDisplays": null,
+      "monthlyAiCalls": 6000,
+      "features": {
+        "holdoutReporting": true,
+        "advancedPlacements": true,
+        "inventoryAware": false,
+        "reorderInsights": false
+      }
+    }
+  }
+}

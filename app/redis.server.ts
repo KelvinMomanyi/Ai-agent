@@ -17,6 +17,30 @@ let redisRetryAt = 0;
 let redisWarningAt = 0;
 const MAX_MEMORY_ENTRIES = 1000;
 
+/** Billing counters must never silently fall back to per-instance memory. */
+export const billingRedis = {
+  async get(key: string): Promise<unknown> {
+    if (!upstash) throw new Error("Shared billing store unavailable");
+    return upstash.get(key);
+  },
+  async set(key: string, value: string, seconds: number) {
+    if (!upstash) throw new Error("Shared billing store unavailable");
+    await upstash.set(key, value, { ex: seconds });
+  },
+  async del(key: string) {
+    if (!upstash) throw new Error("Shared billing store unavailable");
+    await upstash.del(key);
+  },
+  async eval(
+    script: string,
+    keys: string[],
+    args: Array<string | number>,
+  ): Promise<unknown> {
+    if (!upstash) throw new Error("Shared billing store unavailable");
+    return upstash.eval(script, keys, args);
+  },
+};
+
 /**
  * Upstash's HTTP client works in serverless runtimes. The memory fallback keeps
  * local development usable, but is intentionally treated as a best-effort cache.

@@ -9,7 +9,10 @@ import type { AppSettings, Experiment } from "@prisma/client";
 import prisma from "../db.server";
 import { getOfferDecision } from "../ai/decisionEngine.server";
 import type { CurrentPageType, OfferDecision } from "../ai/types";
-import { enforceCatalogBackedDecision } from "../models/catalogGuard.server";
+import {
+  cachedProductsMatchCandidates,
+  enforcePairingDecisionPolicy,
+} from "../models/pairingRecommendations.server";
 import {
   buildOfferCandidates,
   createOfferRecord,
@@ -43,6 +46,13 @@ import {
 import { reserveProactiveMessage } from "../sales/proactiveEngine.server";
 import { normalizeSalesState } from "../sales/salesStateMachine";
 import { toMerchantSalesSettings } from "../sales/settings";
+import { enrollHoldout } from "../models/holdout.server";
+import { getEntitlements, limitsFor } from "../models/entitlements.server";
+import { getUsage, reserveOfferDisplay } from "../models/usage.server";
+import {
+  buildCartRecommendation,
+  noCartOffer,
+} from "../models/cartRecommendations.server";
 
 // Forward client disconnects to cancellable UI work on Vercel.
 export const config = { runtime: "nodejs", supportsCancellation: true };
@@ -58,6 +68,8 @@ type OfferBody = {
   cartItems?: Array<Record<string, unknown>>;
   cartItemCount?: number;
   cartValue?: number;
+  currency?: string;
+  market?: string;
   dismissedWidgets?: string[];
   trigger?: string;
   triggerCategory?: string;
@@ -76,6 +88,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const body = (await request.json()) as OfferBody;
     const auth = authenticateStorefrontRequest(request, body);
     const { shop, sessionId, customerId } = auth;
+    if (
+      [body.cartProductIds, body.cartVariantIds, body.cartItems].some(
+        (value) =>
+          value !== undefined && (!Array.isArray(value) || value.length > 100),
+      )
+    )
+      return json(noCartOffer("cart_context_too_large"), {
+        status: 400,
+        headers: withCors(),
+      });
 
     if (!shop || !(await isInstalledShop(shop))) {
       return json(
@@ -122,7 +144,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ].join(":"),
     );
     const settings = await getCachedAppSettings(shop);
-    const cached = await getJsonCache<OfferDecision>(cacheKey);
+    const cached = cartUpsellTrigger
+      ? null
+      : await getJsonCache<OfferDecision>(cacheKey);
 
     const session = await getShopperSession(shop, sessionId).then(async (s) => {
       if (s) return s;
@@ -143,6 +167,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     const snapshot = toShopperSessionSnapshot(session);
+    const measurement = await enrollHoldout(shop, sessionId, settings);
+    if (measurement?.arm === "holdout")
+      return json(
+        { ...noCartOffer("holdout_assigned"), measurement },
+        { headers: withCors() },
+      );
     const decisionSession = {
       ...snapshot,
       journeyStage:
@@ -162,6 +192,89 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             : (snapshot.context as Record<string, unknown>).cartValue,
       },
     };
+    const entitlement = await getEntitlements(shop);
+    const plan = limitsFor(entitlement);
+    if (plan.monthlyDisplays !== null) {
+      if (settings.analyticsEnabled === false)
+        return json(
+          { ...noCartOffer("plan_usage_requires_analytics"), measurement },
+          { headers: withCors() },
+        );
+      const usage = await getUsage(shop);
+      if (
+        !usage.available ||
+        usage.displayed + usage.pending >= plan.monthlyDisplays
+      )
+        return json(
+          { ...noCartOffer("plan_display_allowance"), measurement },
+          { headers: withCors() },
+        );
+    }
+    if (!cartUpsellTrigger && !plan.features.advancedPlacements)
+      return json(
+        { ...noCartOffer("plan_advanced_placements"), measurement },
+        { headers: withCors() },
+      );
+    if (cartUpsellTrigger) {
+      const decision = await buildCartRecommendation({
+        shop,
+        session: decisionSession,
+        settings,
+        signal: request.signal,
+        sourceProductId: triggerProductId || requestCartProductIds[0],
+        sourceVariantId: String(
+          body.triggerPayload?.variantId || requestCartVariantIds[0] || "",
+        ),
+        cartProductIds: requestCartProductIds,
+        cartVariantIds: requestCartVariantIds,
+        cartItems: (body.cartItems || []).slice(0, 100),
+        cartItemCount: requestCartItemCount,
+        mutationId: String(body.triggerPayload?.mutationId || "").slice(0, 100),
+        confirmed:
+          body.triggerPayload?.confirmed === true &&
+          body.triggerPayload?.recommendationOrigin !== true,
+        currency: String(body.currency || "").slice(0, 3),
+        market: String(body.market || "").slice(0, 80),
+        dismissedWidgets: body.dismissedWidgets || [],
+      });
+      if (!decision.widgetType) return json(decision, { headers: withCors() });
+      const offer = await createOfferRecord({
+        shop,
+        sessionId: session.id,
+        decision,
+        triggerContext: {
+          trigger: "cart_item_added",
+          mutationId: body.triggerPayload?.mutationId,
+          currentProductId: triggerProductId,
+          cartProductIds: requestCartProductIds,
+          cartVariantIds: requestCartVariantIds,
+          cartItems: body.cartItems || [],
+          cartValue: body.cartValue,
+        },
+      });
+      if (!offer || !(await reserveOfferDisplay(shop, offer.id, entitlement)))
+        return json(
+          { ...noCartOffer("plan_display_allowance"), measurement },
+          { headers: withCors() },
+        );
+      return json(
+        {
+          ...decision,
+          measurement,
+          payload: { ...decision.payload, offerId: offer?.id },
+        },
+        { headers: withCors() },
+      );
+    }
+    if (
+      body.trigger === "cart_restored" ||
+      settings.focusedMode ||
+      (body.currentPageType === "cart" &&
+        ["initial", "navigation", "poll"].includes(body.trigger || "initial"))
+    )
+      return json(noCartOffer("cart_waits_for_confirmed_add"), {
+        headers: withCors(),
+      });
     const proactiveTrigger = isProactiveChatTrigger(body);
     const sessionContext = asRecord(snapshot.context);
     const proactiveDecision = proactiveTrigger
@@ -197,34 +310,74 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
-    // Never reuse proactive decisions: permission and prompt accounting are per request.
-    if (
-      cached &&
-      !proactiveTrigger &&
-      cached.widgetType !== "chat" &&
-      cached.widgetType &&
-      !(body.dismissedWidgets || []).includes(cached.widgetType) &&
-      !["CHECKOUT", "PURCHASED"].includes(snapshot.salesState) &&
-      (cached.widgetType !== "upsell" || settings.upsellEnabled) &&
-      (cached.widgetType !== "bundle" || settings.bundlesEnabled)
-    ) {
-      const safeCached = await enforceCatalogBackedDecision({
-        shop,
-        decision: cached,
-        excludedProductIds: settings.blockedProductIds,
-      });
-      return json(safeCached, { headers: withCors() });
-    }
-
+    const sourceProductId =
+      triggerProductId ||
+      body.currentProductId ||
+      requestCartProductIds[0] ||
+      snapshot.viewedProductIds.at(-1);
     const candidates = proactiveDecision
       ? []
       : await buildOfferCandidates({
           shop,
           session: decisionSession,
           currentProductId: body.currentProductId,
-          sourceProductId: triggerProductId,
+          sourceProductId,
           excludeProductIds: settings.blockedProductIds,
+          settings,
         });
+    // Never reuse proactive decisions; product decisions must still match today's
+    // approved selection and exclusions, not only the cached catalog IDs.
+    if (
+      cached &&
+      !proactiveTrigger &&
+      cached.widgetType !== "chat" &&
+      cached.widgetType !== "upsell_drawer" &&
+      cached.widgetType &&
+      !cached.payload.abVariant &&
+      cachedProductsMatchCandidates(cached, candidates) &&
+      !(body.dismissedWidgets || []).includes(cached.widgetType) &&
+      !["CHECKOUT", "PURCHASED"].includes(snapshot.salesState) &&
+      (cached.widgetType !== "upsell" || settings.upsellEnabled) &&
+      (!["rec_strip", "social_proof"].includes(cached.widgetType) ||
+        settings.upsellEnabled) &&
+      (cached.widgetType !== "bundle" || settings.bundlesEnabled)
+    ) {
+      const safeCached = await enforcePairingDecisionPolicy({
+        shop,
+        decision: cached,
+        sourceProductId,
+        cartProductIds: requestCartProductIds,
+        settings,
+      });
+      if (safeCached.widgetType) {
+        const offer = await createOfferRecord({
+          shop,
+          sessionId: session.id,
+          decision: safeCached,
+          triggerContext: {
+            trigger: body.trigger,
+            sourceProductId,
+            currentProductId: body.currentProductId,
+            cartProductIds: requestCartProductIds,
+            cartVariantIds: requestCartVariantIds,
+          },
+        });
+        if (!offer || !(await reserveOfferDisplay(shop, offer.id, entitlement)))
+          return json(
+            { ...noCartOffer("plan_display_allowance"), measurement },
+            { headers: withCors() },
+          );
+        return json(
+          {
+            ...safeCached,
+            payload: { ...safeCached.payload, offerId: offer.id },
+            measurement,
+          },
+          { headers: withCors() },
+        );
+      }
+    }
+
     const rawDecision: OfferDecision = proactiveDecision
       ? {
           widgetType: "chat",
@@ -270,6 +423,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           },
         });
+    if (rawDecision.widgetType === "upsell_drawer")
+      return json(noCartOffer("cart_waits_for_confirmed_add"), {
+        headers: withCors(),
+      });
     if (
       rawDecision.widgetType === "chat" &&
       !proactiveDecision &&
@@ -303,10 +460,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           { headers: withCors() },
         );
     }
-    const catalogGuardedDecision = await enforceCatalogBackedDecision({
+    const catalogGuardedDecision = await enforcePairingDecisionPolicy({
       shop,
       decision: rawDecision,
-      excludedProductIds: settings.blockedProductIds,
+      sourceProductId,
+      cartProductIds: requestCartProductIds,
+      settings,
     });
     const experimentAssignment = catalogGuardedDecision.widgetType
       ? await getCachedExperimentAssignment(
@@ -336,6 +495,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         trigger: body.trigger,
         triggerCategory: body.triggerCategory,
         triggerPayload: body.triggerPayload || {},
+        sourceProductId,
         currentProductId: body.currentProductId,
         currentPageType: body.currentPageType,
         cartProductIds: requestCartProductIds,
@@ -358,8 +518,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     };
 
+    if (
+      decision.widgetType &&
+      (!offer || !(await reserveOfferDisplay(shop, offer.id, entitlement)))
+    )
+      return json(
+        { ...noCartOffer("plan_display_allowance"), measurement },
+        { headers: withCors() },
+      );
+
     await setJsonCache(cacheKey, response, 30);
-    return json(response, { headers: withCors() });
+    return json({ ...response, measurement }, { headers: withCors() });
   } catch (error) {
     if (isStorefrontAuthError(error)) {
       const storefrontSession = await getStorefrontSessionRecovery(request);
@@ -525,7 +694,7 @@ async function getCachedAppSettings(shop: string): Promise<AppSettings> {
   const settings = await prisma.appSettings.upsert({
     where: { shop },
     update: {},
-    create: { shop },
+    create: { shop, pairingMode: "autopilot" },
   });
   await setJsonCache(key, settings, 3600); // Cache 1 hour
   return settings;

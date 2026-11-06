@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { createPostPurchaseOffer } from "../models/postPurchaseOffer.server";
 import { authenticate } from "../shopify.server";
+import { getAppSettings } from "../models/settings.server";
 
 export const loader = ({ request }: LoaderFunctionArgs) =>
   request.method === "OPTIONS"
@@ -9,9 +10,15 @@ export const loader = ({ request }: LoaderFunctionArgs) =>
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { sessionToken, cors } = await authenticate.public.checkout(request);
+  const settings = await getAppSettings(normalizeShop(sessionToken.dest));
+  if (settings.holdoutEnabled && settings.holdoutPercent > 0)
+    return cors(Response.json({ offers: [] }));
   const body = await request.json();
   const referenceId = String(body.referenceId || "").trim();
-  if (!referenceId) return cors(Response.json({ error: "Missing reference ID" }, { status: 400 }));
+  if (!referenceId)
+    return cors(
+      Response.json({ error: "Missing reference ID" }, { status: 400 }),
+    );
 
   const offer = await createPostPurchaseOffer({
     shop: normalizeShop(sessionToken.dest),
@@ -24,7 +31,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 function normalizeShop(value: unknown) {
-  return String(value || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
+  return String(value || "")
+    .replace(/^https?:\/\//, "")
+    .replace(/\/$/, "");
 }
 
 function extensionCorsHeaders() {

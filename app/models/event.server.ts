@@ -7,6 +7,10 @@ import {
 import { markOfferClick, markOfferImpression } from "./offer.server";
 import { applyRecommendationEvents } from "./recommendationOutcome.server";
 import { getPublicAppSettings } from "./settings.server";
+import { recordHoldoutCartEvents } from "./holdout.server";
+import { recordDisplayedOffers } from "./usage.server";
+import { markPairingEventsPending } from "./pairingLearning.server";
+import { schedulePairingDrain } from "../jobs/pairingAutopilot.server";
 
 export async function ingestStorefrontEvents(input: {
   shop: string;
@@ -25,6 +29,18 @@ export async function ingestStorefrontEvents(input: {
   );
   input = { ...input, events };
   const session = await upsertShopperSessionFromEvents(input);
+  await recordDisplayedOffers(
+    input.shop,
+    session.id,
+    input.events
+      .filter(
+        (event) =>
+          event.type === "widget_impression" || event.type === "impression",
+      )
+      .map((event) => String(event.offerId || event.offer_id || "")),
+  );
+  if (settings.holdoutEnabled)
+    await recordHoldoutCartEvents(input.shop, input.sessionId, input.events);
 
   const storedEvents = input.events.filter(
     (event) => event.type !== "session_sync",
@@ -45,6 +61,24 @@ export async function ingestStorefrontEvents(input: {
   }
 
   await updateOfferTracking(input.shop, input.events);
+  try {
+    await markPairingEventsPending(input.shop, session.id, input.events);
+    if (
+      input.events.some((event) =>
+        [
+          "widget_impression",
+          "impression",
+          "recommendation_added",
+          "upsell_added",
+        ].includes(event.type),
+      )
+    )
+      schedulePairingDrain(input.shop);
+  } catch {
+    console.error("AOVBoost pairing telemetry is pending retry", {
+      shop: input.shop,
+    });
+  }
   await applyRecommendationEvents({
     shop: input.shop,
     sessionId: session.id,

@@ -11,7 +11,10 @@ import {
   getApplicationOnlyAdminContext,
   hasApplicationOnlyCredentials,
 } from "./services/application-only-token.server";
-import { UpstashSessionStorage } from "./upstash-session-storage.server";
+import {
+  SessionPersistenceError,
+  UpstashSessionStorage,
+} from "./upstash-session-storage.server";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -36,71 +39,25 @@ const shopify = shopifyApp({
 });
 
 async function persistShopToPrisma(session: {
-  id: string;
   shop: string;
-  state: string;
-  isOnline: boolean;
   scope?: string;
-  expires?: Date;
-  accessToken?: string;
-  refreshToken?: string;
-  refreshTokenExpires?: Date;
-  onlineAccessInfo?: {
-    associated_user?: {
-      id?: number;
-      first_name?: string;
-      last_name?: string;
-      email?: string;
-      account_owner?: boolean;
-      locale?: string;
-      collaborator?: boolean;
-      email_verified?: boolean;
-    };
-  };
 }) {
   try {
-    const user = session.onlineAccessInfo?.associated_user;
-    await prisma.session.upsert({
-      where: { id: session.id },
-      update: {
-        shop: session.shop,
-        accessToken: session.accessToken || "",
-        scope: session.scope || null,
-        expires: session.expires || null,
-        refreshToken: session.refreshToken || null,
-        refreshTokenExpires: session.refreshTokenExpires || null,
-      },
-      create: {
-        id: session.id,
-        shop: session.shop,
-        state: session.state,
-        isOnline: session.isOnline,
-        scope: session.scope || null,
-        expires: session.expires || null,
-        accessToken: session.accessToken || "",
-        refreshToken: session.refreshToken || null,
-        refreshTokenExpires: session.refreshTokenExpires || null,
-        userId: user?.id ? BigInt(user.id) : null,
-        firstName: user?.first_name || null,
-        lastName: user?.last_name || null,
-        email: user?.email || null,
-        accountOwner: user?.account_owner ?? false,
-        locale: user?.locale || null,
-        collaborator: user?.collaborator ?? null,
-        emailVerified: user?.email_verified ?? null,
-      },
-    });
+    // Session storage has already saved credentials before afterAuth runs.
     await prisma.shop.upsert({
       where: { shopDomain: session.shop },
-      update: { accessToken: session.accessToken || "" },
+      update: { scope: session.scope || null },
       create: {
         shopDomain: session.shop,
-        accessToken: session.accessToken || "",
+        // Required legacy column; no runtime consumer reads this credential.
+        accessToken: "",
         scope: session.scope || null,
       },
     });
-  } catch (error) {
-    console.error("Failed to persist shop to Prisma:", error);
+  } catch {
+    console.error("Failed to persist shop metadata to Prisma", {
+      shop: session.shop,
+    });
   }
 }
 
@@ -111,19 +68,29 @@ const authenticateAdmin = shopify.authenticate.admin;
 export const authenticate = {
   ...shopify.authenticate,
   admin: async (request: Request) => {
-    const context = await authenticateAdmin(request);
-    const session = await ensureExpiringOfflineToken(
-      context.session,
-      shopify.sessionStorage,
-    );
-    if (session === context.session) return context;
+    try {
+      const context = await authenticateAdmin(request);
+      const session = await ensureExpiringOfflineToken(
+        context.session,
+        shopify.sessionStorage,
+      );
+      if (session === context.session) return context;
 
-    const refreshed = await shopify.unauthenticated.admin(session.shop);
-    return {
-      ...context,
-      session: refreshed.session,
-      admin: refreshed.admin,
-    };
+      const refreshed = await shopify.unauthenticated.admin(session.shop);
+      return {
+        ...context,
+        session: refreshed.session,
+        admin: refreshed.admin,
+      };
+    } catch (error) {
+      if (error instanceof SessionPersistenceError) {
+        throw new Response("Shopify credentials could not be saved. Please retry.", {
+          status: 503,
+          headers: { "Retry-After": "1" },
+        });
+      }
+      throw error;
+    }
   },
 } as typeof shopify.authenticate;
 export const unauthenticated: typeof shopify.unauthenticated = {

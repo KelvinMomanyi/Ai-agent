@@ -437,7 +437,7 @@ export async function syncProductsPageFromAdmin(
             onlineStoreUrl
             hasOnlyDefaultVariant
             featuredMedia { preview { image { url } } }
-            collections(first: 50) { edges { node { id } } }
+            collections(first: 50) { edges { node { id title } } }
             variants(first: 100) {
               edges {
                 node {

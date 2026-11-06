@@ -5,6 +5,7 @@ import { OfferPoller } from "./offerPoller";
 import { SessionManager } from "./sessionManager";
 import { TriggerRouter } from "./triggerRouter";
 import { WidgetManager } from "./widgets/widgetManager";
+import { MeasurementCartLink } from "./measurementCartLink";
 import "./styles/widgets.css";
 
 type AovBoostConfig = {
@@ -88,6 +89,8 @@ async function start(): Promise<void> {
       sessionManager,
     });
     const liveUpdates = new LiveUpdates({ apiBase, sessionManager });
+    const measurementLink = new MeasurementCartLink(sessionManager, eventBus);
+    measurementLink.init();
 
     window.AOVBoostSDK = {
       shop,
@@ -105,6 +108,7 @@ async function start(): Promise<void> {
         offerPoller.requestOffer(trigger, payload),
       diagnose: () => offerPoller.getStatus(),
       destroy: () => {
+        measurementLink.destroy();
         eventBus.destroy();
         liveUpdates.destroy();
         triggerRouter.destroy();

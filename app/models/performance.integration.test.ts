@@ -395,7 +395,13 @@ describe("database-side performance work", () => {
     });
     expect(await getRevenueAnalytics(shop, from)).toEqual(
       summarizeRevenueAnalytics({
-        offers: offers as Offer[],
+        offers: offers.map((offer) => ({
+          ...offer,
+          pairingProvenance: [],
+          pairingShownAt: null,
+          pairingAcceptedIds: [],
+          pairingRollupPending: false,
+        })) as Offer[],
         sessions,
         shopperEvents: events,
         conversionEvents: orders,

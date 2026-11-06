@@ -17,17 +17,19 @@ import {
   resolveWidgetPlacement,
   type WidgetPlacement,
 } from "./placement";
+import {
+  DISMISSED_WIDGETS_KEY as DISMISSED_KEY,
+  isRecentCartDismissal,
+} from "../../../shared/cartRecommendations";
 
 export type OfferDecision = {
   widgetType: string | null;
   payload?: WidgetPayload;
   reasoning?: string;
   confidence?: number;
-  aiProvider?: "gemini" | "groq" | "heuristic";
+  aiProvider?: "gemini" | "groq" | "mistral" | "deepseek" | "heuristic";
 };
 
-const DISMISSED_KEY = "aovboost_dismissed_widgets";
-const DISMISS_TTL_MS = 30 * 60 * 1000;
 export type PlacementOutcome = {
   status: "mounted" | "unchanged" | "suppressed";
   reason: string;
@@ -39,6 +41,10 @@ type MountedWidget = {
 };
 
 export class WidgetManager {
+  setHoldout(holdout: boolean) {
+    this.settings = { ...this.settings, holdout };
+    if (holdout) this.destroyActive();
+  }
   private chatWidget: MountedWidget | null = null;
   private bannerWidget: MountedWidget | null = null;
   private overlayWidget: MountedWidget | null = null;
@@ -46,6 +52,8 @@ export class WidgetManager {
   private lastPlacement: PlacementOutcome | null = null;
   private lastOverlayAt = 0;
   private pagePath = window.location.pathname;
+  private cartObserver?: MutationObserver;
+  private cartReattachTimer?: number;
 
   constructor(private settings: StorefrontSettings = {}) {}
 
@@ -70,11 +78,15 @@ export class WidgetManager {
     )}`;
 
     const previous = this.inlineWidgets.get(decision.widgetType);
-    if (previous?.widget.isMounted()) {
+    if (
+      previous?.widget.isMounted() &&
+      (decision.widgetType !== "upsell_drawer" || previous.key === nextKey)
+    ) {
       // Do not swap a visible offer, reset variant choices or shift the layout.
       return result("unchanged", "stable_offer_already_present");
     }
     previous?.widget.destroy();
+    if (decision.widgetType === "upsell_drawer") this.clearCartRecommendation();
     this.inlineWidgets.delete(decision.widgetType);
     if (decision.widgetType === "chat") {
       if (this.chatWidget?.widget.isMounted())
@@ -87,8 +99,8 @@ export class WidgetManager {
     )
       return result("unchanged", "campaign_already_present");
     if (
-      ["bundle", "rec_strip", "upsell_drawer"].includes(decision.widgetType) &&
-      ["bundle", "rec_strip", "upsell_drawer"].some((type) =>
+      ["bundle", "rec_strip"].includes(decision.widgetType) &&
+      ["bundle", "rec_strip"].some((type) =>
         this.inlineWidgets.get(type)?.widget.isMounted(),
       )
     ) {
@@ -118,6 +130,10 @@ export class WidgetManager {
     const widget = createWidget(decision.widgetType, {
       ...payload,
       presentation: placement.inline ? "inline" : "floating",
+      cartDrawer: placement.cartDrawer === true,
+      maxProductRecommendations:
+        payload.maxProductRecommendations ??
+        this.settings.maxProductRecommendations,
     });
     if (!widget) return result("suppressed", "unknown_widget");
     if (placement.zone === "assistant") {
@@ -131,7 +147,44 @@ export class WidgetManager {
       key: nextKey,
       widget,
     });
+    if (decision.widgetType === "upsell_drawer")
+      this.watchCartPlacement(decision, widget);
     return result("mounted", placement.reason);
+  }
+
+  clearCartRecommendation(): void {
+    this.cartObserver?.disconnect();
+    window.clearTimeout(this.cartReattachTimer);
+    this.cartReattachTimer = undefined;
+    this.inlineWidgets.get("upsell_drawer")?.widget.destroy();
+    this.inlineWidgets.delete("upsell_drawer");
+  }
+
+  private watchCartPlacement(decision: OfferDecision, widget: BaseWidget) {
+    this.cartObserver?.disconnect();
+    this.cartObserver = new MutationObserver(() => {
+      if (widget.isDestroyed()) {
+        this.cartObserver?.disconnect();
+        return;
+      }
+      if (widget.isMounted() || this.cartReattachTimer) return;
+      this.cartReattachTimer = window.setTimeout(() => {
+        this.cartReattachTimer = undefined;
+        if (widget.isDestroyed() || this.pagePath !== window.location.pathname)
+          return;
+        const placement = resolveWidgetPlacement(
+          "upsell_drawer",
+          decision.payload || {},
+        );
+        if (placement.target) widget.reattach(placement.target);
+      }, 50);
+    });
+    this.cartObserver.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["class", "open", "hidden", "aria-hidden", "style"],
+    });
   }
 
   private saveMounted(
@@ -151,6 +204,7 @@ export class WidgetManager {
   }
 
   destroyActive(): void {
+    this.clearCartRecommendation();
     this.chatWidget?.widget.destroy();
     this.chatWidget = null;
     this.bannerWidget?.widget.destroy();
@@ -162,6 +216,7 @@ export class WidgetManager {
   }
 
   resetPageContext(): void {
+    this.clearCartRecommendation();
     this.pagePath = window.location.pathname;
     this.overlayWidget?.widget.destroy();
     this.overlayWidget = null;
@@ -183,9 +238,7 @@ export class WidgetManager {
       const now = Date.now();
       const active = parsed
         .filter((entry) => entry && typeof entry === "object")
-        .filter(
-          (entry: any) => now - Number(entry.dismissedAt || 0) < DISMISS_TTL_MS,
-        );
+        .filter((entry: any) => isRecentCartDismissal(entry.dismissedAt, now));
       if (active.length !== parsed.length) {
         localStorage.setItem(DISMISSED_KEY, JSON.stringify(active));
       }
@@ -228,6 +281,8 @@ export function isWidgetEnabled(
   widgetType: string,
   settings: StorefrontSettings,
 ) {
+  if (settings.holdout) return false;
+  if (settings.focusedMode && widgetType !== "upsell_drawer") return false;
   if (widgetType === "chat") return settings.chatEnabled !== false;
   if (widgetType === "bundle") return settings.bundlesEnabled !== false;
   if (
@@ -251,6 +306,8 @@ function getWidgetIdentity(
   payload: WidgetPayload,
   offerId: string,
 ) {
+  if (widgetType === "upsell_drawer" && payload.mutationId)
+    return `${payload.mutationId}:${JSON.stringify(payload.products || [])}`;
   if (widgetType === "bundle") {
     const bundle = payload.bundle as Record<string, unknown> | undefined;
     return String(

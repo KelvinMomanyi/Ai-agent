@@ -124,6 +124,10 @@ export class RecStrip extends BaseWidget {
             this.payload.offerId,
           );
           if (!added) throw new Error("Cart add failed");
+          this.track("recommendation_added", {
+            productId: product.id,
+            variantId: variant.id,
+          });
           element.textContent = "Added ✓";
           if (status) status.textContent = "Added to your cart";
           document.dispatchEvent(

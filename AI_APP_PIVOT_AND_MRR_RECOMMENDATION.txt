@@ -1,0 +1,164 @@
+AI APP PIVOT AND MRR RECOMMENDATION
+Prepared: 5 November 2026
+
+RECOMMENDATION
+
+I would test a pivot into an AI inventory and purchasing planner for a specific
+type of Shopify merchant. It offers a plausible path to higher subscription
+prices because it helps merchants make recurring decisions involving stock,
+cash, and supplier orders. High MRR would still depend on winning and retaining
+those merchants.
+
+Assuming you are building with a small team, I would start with beauty and
+haircare brands that buy finished products from suppliers.
+
+The promise would be:
+
+"Know what to reorder, when to order it, and how much you can afford -- before
+your bestsellers run out."
+
+The Shopify category would become Inventory optimization.
+https://apps.shopify.com/categories/orders-and-shipping-inventory-inventory-optimization/all
+
+Your current positioning competes with inexpensive recommendation tools,
+including Shopify's free Search & Discovery app:
+https://apps.shopify.com/search-and-discovery
+
+Inventory planning has established competitors too. Prediko already offers AI
+forecasting and purchase orders, with advertised pricing starting at $49. You
+would need a clear advantage for your chosen merchants.
+https://apps.shopify.com/prediko
+
+
+CHANGES I WOULD MAKE
+
+1. TARGET CUSTOMER
+
+Established beauty and haircare brands with meaningful inventory spending,
+recurring stockouts, and purchasing managed in spreadsheets.
+
+2. MAIN DASHBOARD
+
+Show products to reorder this week, expected stockout dates, purchasing costs,
+and items tying up cash.
+
+3. CORE WORKFLOW
+
+Turn recommendations into a reviewed purchasing plan and draft supplier orders.
+
+4. AI CAPABILITIES
+
+Explain recommendations, interpret supplier documents, identify anomalies, and
+answer purchasing questions.
+
+5. PROOF OF VALUE
+
+Track purchasing time, forecast accuracy, stock availability, and excess
+inventory.
+
+6. ONBOARDING
+
+Import data, enter supplier constraints, and produce the first useful purchasing
+plan.
+
+
+STRONG INITIAL FEATURE: PURCHASING UNDER A BUDGET
+
+The merchant could ask:
+
+"I have $12,000 available this month. Which products should I replenish first?"
+
+The app would consider:
+
+- Sales demand.
+- Current inventory.
+- Incoming stock.
+- Supplier lead times.
+- Minimum order quantities.
+- Pack sizes.
+- Product margins.
+
+That produces a concrete decision merchants can review every week.
+
+Use forecasting models and validated calculations for quantities. Let the
+language model explain the results and help merchants work through them. Show
+uncertainty when the data is insufficient.
+
+
+WHAT YOU CAN REUSE AND WHAT YOU NEED TO BUILD
+
+You can reuse your infrastructure, but this would require substantial new
+product work.
+
+KEEP:
+
+- Shopify authentication.
+- Tenant isolation.
+- PostgreSQL.
+- Redis.
+- Catalog synchronization infrastructure.
+- Background jobs.
+- AI provider handling.
+
+BUILD:
+
+- Complete sales-history and inventory synchronization.
+- Supplier records, lead times, costs, and purchasing constraints.
+- Forecasting, backtesting, and replenishment calculations.
+- Purchase-order drafts, approvals, exports, and receiving records.
+- Subscription billing and reliable operational monitoring.
+
+Your current catalog cache supports storefront recommendations. It would need a
+more complete inventory model.
+
+Older order history also needs additional access. Shopify normally exposes only
+the last 60 days, with read_all_orders extending that window under its approval
+requirements.
+https://shopify.dev/docs/api/usage/access-scopes
+
+I would retire the storefront widgets from the main product experience and make
+the purchasing workflow the focus.
+
+
+PRICING TO TEST
+
+Test willingness to pay before setting permanent plans. A reasonable experiment
+would be:
+
+$199 per month:
+One store and basic replenishment planning.
+
+$499 per month:
+Purchasing constraints, supplier workflows, and richer forecasting.
+
+$999 per month:
+Multiple locations and more complex planning.
+
+These are proposed prices to validate.
+
+At an average of $499 per month, 200 retained customers produce $99,800 in
+monthly recurring revenue, before expenses. Getting those customers requires
+convincing evidence, dependable data, and good support.
+
+
+VALIDATE BEFORE REBUILDING
+
+Before rebuilding, I would sell a small paid pilot.
+
+1. Interview 10 to 15 qualified merchants.
+
+2. Examine how they currently purchase inventory.
+
+3. Manually produce a sample reorder plan from their data.
+
+4. Aim for three to five paying pilots.
+
+The decisive evidence would be merchants using the plan through repeated
+purchasing cycles, renewing, and explaining why they chose it over their
+spreadsheet or an existing app.
+
+Acquire those first customers through direct outreach and inventory consultants
+or fractional operations managers.
+
+My first move would be to validate that purchasing problem and price with
+merchants. That evidence should determine how much of AOVBoost you rebuild.

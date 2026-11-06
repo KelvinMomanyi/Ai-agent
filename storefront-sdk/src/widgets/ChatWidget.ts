@@ -770,6 +770,7 @@ export class ChatWidget extends BaseWidget {
       headers: {
         "Content-Type": "application/json",
         "X-AOVBoost-Shop": auth.shop || config.shop || "",
+        Authorization: `Bearer ${auth.sessionToken}`,
       },
       body: JSON.stringify({
         ...auth,

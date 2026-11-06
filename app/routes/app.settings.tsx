@@ -21,8 +21,12 @@ import {
   Checkbox,
   InlineStack,
   Badge,
+  Button,
 } from "@shopify/polaris";
+import { ResourcePickerField } from "../components/ResourcePickerField";
+import { normalizeVerticalPreset } from "../models/productPairings";
 import { authenticate } from "../shopify.server";
+import { markPairingPolicyDirty } from "../jobs/pairingAutopilot.server";
 import prisma from "../db.server";
 import { redis } from "../redis.server";
 
@@ -41,8 +45,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   return json({
+    providers: {
+      Gemini: Boolean(process.env.GOOGLE_API_KEY),
+      Mistral: Boolean(process.env.MISTRAL_API_KEY),
+      Groq: Boolean(process.env.GROQ_API_KEY),
+      DeepSeek: Boolean(process.env.DEEPSEEK_API_KEY),
+    },
     config: config
       ? {
+          holdoutEnabled: config.holdoutEnabled,
+          holdoutPercent: String(config.holdoutPercent),
+          focusedMode: config.focusedMode,
+          verticalPreset: normalizeVerticalPreset(config.verticalPreset),
           chatEnabled: config.chatEnabled,
           chatGreeting: config.chatGreeting,
           bundlesEnabled: config.bundlesEnabled,
@@ -71,14 +85,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           analyticsEnabled: config.analyticsEnabled,
         }
       : {
-          chatEnabled: true,
+          holdoutEnabled: false,
+          holdoutPercent: "10",
+          focusedMode: true,
+          verticalPreset: "generic" as const,
+          chatEnabled: false,
           chatGreeting: "Hi! Can I help you find the perfect product?",
-          bundlesEnabled: true,
+          bundlesEnabled: false,
           upsellEnabled: true,
-          discountNudgeEnabled: true,
+          discountNudgeEnabled: false,
           discountThreshold: "50",
-          exitIntentEnabled: true,
-          postPurchaseEnabled: true,
+          exitIntentEnabled: false,
+          postPurchaseEnabled: false,
           aiTone: "friendly",
           brandVoice: "",
           storeKnowledge: "",
@@ -86,16 +104,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           excludedCollectionIds: "",
           preferredProductIds: "",
           upsellPriorityProductIds: "",
-          proactiveMessagesEnabled: true,
+          proactiveMessagesEnabled: false,
           proactiveDelaySeconds: "15",
           maxProactivePrompts: "2",
-          maxProductRecommendations: "3",
+          maxProductRecommendations: "2",
           minimumProactiveConfidence: "0.65",
           minimumUpsellIntentScore: "55",
-          hesitationDetectionEnabled: true,
+          hesitationDetectionEnabled: false,
           discountPermission: false,
           allowedDiscountCodes: "",
-          bundleSupportEnabled: true,
+          bundleSupportEnabled: false,
           analyticsEnabled: true,
         },
   });
@@ -104,6 +122,66 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const formData = await request.formData();
+  const rawHoldout = formData.get("holdoutEnabled");
+  const holdoutEnabled = parseBoolean(rawHoldout);
+  const holdoutPercent = Number(formData.get("holdoutPercent") ?? 10);
+  if (
+    rawHoldout !== null &&
+    (!Number.isInteger(holdoutPercent) ||
+      holdoutPercent < 0 ||
+      holdoutPercent > 30)
+  )
+    return json(
+      {
+        success: false,
+        error: "Holdout must be an integer from 0 to 30 percent.",
+      },
+      { status: 400 },
+    );
+  if (holdoutEnabled && !parseBoolean(formData.get("analyticsEnabled")))
+    return json(
+      { success: false, error: "Enable analytics to run holdout measurement." },
+      { status: 400 },
+    );
+  const previousHoldout =
+    rawHoldout !== null
+      ? await prisma.appSettings.findUnique({
+          where: { shop: session.shop },
+          select: {
+            holdoutEnabled: true,
+            holdoutPercent: true,
+            holdoutVersion: true,
+          },
+        })
+      : null;
+  const holdoutChanged =
+    previousHoldout &&
+    (previousHoldout.holdoutEnabled !== holdoutEnabled ||
+      previousHoldout.holdoutPercent !== holdoutPercent);
+  const rawFocusedMode = formData.get("focusedMode");
+  const focusedOverrides =
+    rawFocusedMode !== null && parseBoolean(rawFocusedMode)
+      ? {
+          chatEnabled: false,
+          bundlesEnabled: false,
+          discountNudgeEnabled: false,
+          exitIntentEnabled: false,
+          postPurchaseEnabled: false,
+          proactiveMessagesEnabled: false,
+          hesitationDetectionEnabled: false,
+          bundleSupportEnabled: false,
+        }
+      : {};
+  const rawPreset = formData.get("verticalPreset");
+  if (
+    rawPreset !== null &&
+    !["generic", "beauty_haircare"].includes(String(rawPreset))
+  ) {
+    return json(
+      { success: false, error: "Choose a valid catalog preset." },
+      { status: 400 },
+    );
+  }
 
   const chatEnabled = parseBoolean(formData.get("chatEnabled"));
   const chatGreeting = String(formData.get("chatGreeting") || "").trim();
@@ -182,6 +260,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const config = await prisma.appSettings.upsert({
       where: { shop: session.shop },
       update: {
+        ...(rawHoldout !== null
+          ? {
+              holdoutEnabled,
+              holdoutPercent,
+              ...(holdoutChanged ? { holdoutVersion: { increment: 1 } } : {}),
+            }
+          : {}),
+        ...(rawPreset !== null
+          ? { verticalPreset: normalizeVerticalPreset(rawPreset) }
+          : {}),
         chatEnabled,
         chatGreeting,
         bundlesEnabled,
@@ -208,9 +296,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         allowedDiscountCodes,
         bundleSupportEnabled,
         analyticsEnabled,
+        ...(rawFocusedMode !== null
+          ? { focusedMode: parseBoolean(rawFocusedMode) }
+          : {}),
+        ...focusedOverrides,
       },
       create: {
+        pairingMode: "autopilot",
+        holdoutEnabled: rawHoldout === null ? false : holdoutEnabled,
+        holdoutPercent: rawHoldout === null ? 10 : holdoutPercent,
         shop: session.shop,
+        verticalPreset: normalizeVerticalPreset(rawPreset),
         chatEnabled,
         chatGreeting,
         bundlesEnabled,
@@ -237,12 +333,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         allowedDiscountCodes,
         bundleSupportEnabled,
         analyticsEnabled,
+        focusedMode:
+          rawFocusedMode === null ? true : parseBoolean(rawFocusedMode),
+        ...focusedOverrides,
       },
     });
 
     // Invalidate cached settings
     await redis.del(`settings:${session.shop}`);
     await redis.del(`public-settings:${session.shop}`);
+    await markPairingPolicyDirty(session.shop);
 
     return json({
       success: true,
@@ -266,12 +366,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Settings() {
-  const { config } = useLoaderData<typeof loader>();
+  const { config, providers } = useLoaderData<typeof loader>();
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const submit = useSubmit();
 
   const [formState, setFormState] = useState({
+    holdoutEnabled: config.holdoutEnabled,
+    holdoutPercent: config.holdoutPercent,
+    focusedMode: config.focusedMode,
+    verticalPreset: config.verticalPreset,
     chatEnabled: config.chatEnabled,
     chatGreeting: config.chatGreeting,
     bundlesEnabled: config.bundlesEnabled,
@@ -307,6 +412,8 @@ export default function Settings() {
     submit(
       {
         ...formState,
+        holdoutEnabled: String(formState.holdoutEnabled),
+        focusedMode: String(formState.focusedMode),
         chatEnabled: String(formState.chatEnabled),
         bundlesEnabled: String(formState.bundlesEnabled),
         upsellEnabled: String(formState.upsellEnabled),
@@ -327,8 +434,8 @@ export default function Settings() {
 
   return (
     <Page
-      title="AOVBoost Configuration"
-      subtitle="Optimize behavior engine toggles, brand guidelines, and economic guardrails."
+      title="Recommendations"
+      subtitle="Choose cart recommendations and optional storefront features."
       backAction={{ content: "Dashboard", url: "/app" }}
       primaryAction={{
         content: "Save configurations",
@@ -364,6 +471,51 @@ export default function Settings() {
               </BlockStack>
 
               <FormLayout>
+                <Checkbox
+                  label="Measure conversion with a holdout group (reporting requires Pro)"
+                  checked={formState.holdoutEnabled}
+                  onChange={(checked) =>
+                    setFormState({ ...formState, holdoutEnabled: checked })
+                  }
+                  helpText="Off by default. Holdout shoppers receive no recommendations but use the same consented session, cart and order tracking. Analytics must be on. Post-purchase offers are paused for both groups while the test runs."
+                />
+                <TextField
+                  label="Holdout percent"
+                  type="number"
+                  min={0}
+                  max={30}
+                  step={1}
+                  value={formState.holdoutPercent}
+                  onChange={(value) =>
+                    setFormState({ ...formState, holdoutPercent: value })
+                  }
+                  autoComplete="off"
+                  helpText="0–30%. Changing this setting starts a new measurement cohort. A complete seven-day follow-up and sufficient samples are required before lift appears."
+                />
+                <Checkbox
+                  label="Focused cart recommendations"
+                  helpText="Show additive cart recommendations after a confirmed add. Saving this mode turns off browsing widgets, chat, prompts, exit intent, countdowns and live alerts."
+                  checked={formState.focusedMode}
+                  onChange={(checked) =>
+                    setFormState({
+                      ...formState,
+                      focusedMode: checked,
+                      ...(checked
+                        ? {
+                            upsellEnabled: true,
+                            chatEnabled: false,
+                            bundlesEnabled: false,
+                            discountNudgeEnabled: false,
+                            exitIntentEnabled: false,
+                            postPurchaseEnabled: false,
+                            proactiveMessagesEnabled: false,
+                            hesitationDetectionEnabled: false,
+                            bundleSupportEnabled: false,
+                          }
+                        : {}),
+                    })
+                  }
+                />
                 <div
                   style={{
                     display: "grid",
@@ -374,6 +526,7 @@ export default function Settings() {
                   <Checkbox
                     label="AI Assistant (Chat)"
                     checked={formState.chatEnabled}
+                    disabled={formState.focusedMode}
                     onChange={(checked) =>
                       setFormState({ ...formState, chatEnabled: checked })
                     }
@@ -381,12 +534,13 @@ export default function Settings() {
                   <Checkbox
                     label="Dynamic Bundles"
                     checked={formState.bundlesEnabled}
+                    disabled={formState.focusedMode}
                     onChange={(checked) =>
                       setFormState({ ...formState, bundlesEnabled: checked })
                     }
                   />
                   <Checkbox
-                    label="Smart Cart Drawer (Upsell)"
+                    label="Cart recommendations"
                     checked={formState.upsellEnabled}
                     onChange={(checked) =>
                       setFormState({ ...formState, upsellEnabled: checked })
@@ -395,6 +549,7 @@ export default function Settings() {
                   <Checkbox
                     label="Cart-value Progress Nudges"
                     checked={formState.discountNudgeEnabled}
+                    disabled={formState.focusedMode}
                     onChange={(checked) =>
                       setFormState({
                         ...formState,
@@ -405,6 +560,7 @@ export default function Settings() {
                   <Checkbox
                     label="Exit Intent Popups"
                     checked={formState.exitIntentEnabled}
+                    disabled={formState.focusedMode}
                     onChange={(checked) =>
                       setFormState({ ...formState, exitIntentEnabled: checked })
                     }
@@ -412,6 +568,7 @@ export default function Settings() {
                   <Checkbox
                     label="Post Purchase Upsell"
                     checked={formState.postPurchaseEnabled}
+                    disabled={formState.focusedMode}
                     onChange={(checked) =>
                       setFormState({
                         ...formState,
@@ -428,313 +585,383 @@ export default function Settings() {
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
-              <BlockStack gap="200">
+              <Text as="h2" variant="headingMd">
+                Recommendation products
+              </Text>
+              <Select
+                label="Catalog preset"
+                options={[
+                  { label: "Generic", value: "generic" },
+                  { label: "Beauty & haircare", value: "beauty_haircare" },
+                ]}
+                value={formState.verticalPreset}
+                onChange={(value) =>
+                  setFormState((current) => ({
+                    ...current,
+                    verticalPreset: normalizeVerticalPreset(value),
+                  }))
+                }
+                helpText="Used when suggesting pairings. Regenerate suggestions after changing it; approved pairings stay in place."
+              />
+              <ResourcePickerField
+                label="Blocked products"
+                type="product"
+                value={formState.blockedProductIds}
+                onChange={(blockedProductIds) =>
+                  setFormState((current) => ({ ...current, blockedProductIds }))
+                }
+                helpText="Exclude these products from recommendations."
+              />
+              <ResourcePickerField
+                label="Preferred products"
+                type="product"
+                value={formState.preferredProductIds}
+                onChange={(preferredProductIds) =>
+                  setFormState((current) => ({
+                    ...current,
+                    preferredProductIds,
+                  }))
+                }
+                helpText="Favor these products after customer fit and your exclusions."
+              />
+              <ResourcePickerField
+                label="Upsell priority products"
+                type="product"
+                value={formState.upsellPriorityProductIds}
+                onChange={(upsellPriorityProductIds) =>
+                  setFormState((current) => ({
+                    ...current,
+                    upsellPriorityProductIds,
+                  }))
+                }
+              />
+              <ResourcePickerField
+                label="Excluded collections"
+                type="collection"
+                value={formState.excludedCollectionIds}
+                onChange={(excludedCollectionIds) =>
+                  setFormState((current) => ({
+                    ...current,
+                    excludedCollectionIds,
+                  }))
+                }
+              />
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <InlineStack align="space-between" blockAlign="center">
                 <Text as="h2" variant="headingMd">
-                  Sales behavior and proactive assistance
+                  Advanced
                 </Text>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  Control when the assistant may approach shoppers and the
-                  guardrails used for recommendations and upsells.
-                </Text>
-              </BlockStack>
-
-              <FormLayout>
-                <InlineStack gap="400" wrap>
-                  <Checkbox
-                    label="Proactive messages"
-                    checked={formState.proactiveMessagesEnabled}
-                    onChange={(checked) =>
-                      setFormState({
-                        ...formState,
-                        proactiveMessagesEnabled: checked,
-                      })
-                    }
-                  />
-                  <Checkbox
-                    label="Hesitation detection"
-                    checked={formState.hesitationDetectionEnabled}
-                    onChange={(checked) =>
-                      setFormState({
-                        ...formState,
-                        hesitationDetectionEnabled: checked,
-                      })
-                    }
-                  />
-                  <Checkbox
-                    label="Sales analytics"
-                    checked={formState.analyticsEnabled}
-                    onChange={(checked) =>
-                      setFormState({ ...formState, analyticsEnabled: checked })
-                    }
-                  />
-                </InlineStack>
-
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: "16px",
-                  }}
+                <Button
+                  onClick={() => setShowAdvanced((current) => !current)}
+                  ariaExpanded={showAdvanced}
+                  ariaControls="advanced-settings"
                 >
-                  <TextField
-                    label="Proactive delay"
-                    type="number"
-                    suffix="seconds"
-                    value={formState.proactiveDelaySeconds}
-                    onChange={(value) =>
-                      setFormState({
-                        ...formState,
-                        proactiveDelaySeconds: value,
-                      })
-                    }
-                    autoComplete="off"
-                  />
-                  <TextField
-                    label="Prompt limit per session"
-                    type="number"
-                    value={formState.maxProactivePrompts}
-                    onChange={(value) =>
-                      setFormState({ ...formState, maxProactivePrompts: value })
-                    }
-                    autoComplete="off"
-                  />
-                  <TextField
-                    label="Products per recommendation"
-                    type="number"
-                    value={formState.maxProductRecommendations}
-                    onChange={(value) =>
-                      setFormState({
-                        ...formState,
-                        maxProductRecommendations: value,
-                      })
-                    }
-                    autoComplete="off"
-                  />
-                  <TextField
-                    label="Minimum proactive confidence"
-                    type="number"
-                    value={formState.minimumProactiveConfidence}
-                    onChange={(value) =>
-                      setFormState({
-                        ...formState,
-                        minimumProactiveConfidence: value,
-                      })
-                    }
-                    autoComplete="off"
-                    helpText="Use a value from 0 to 1."
-                  />
-                  <TextField
-                    label="Minimum intent before upsell"
-                    type="number"
-                    value={formState.minimumUpsellIntentScore}
-                    onChange={(value) =>
-                      setFormState({
-                        ...formState,
-                        minimumUpsellIntentScore: value,
-                      })
-                    }
-                    autoComplete="off"
-                    helpText="Use a score from 0 to 100."
-                  />
-                </div>
-
-                <TextField
-                  label="Preferred product GIDs"
-                  value={formState.preferredProductIds}
-                  onChange={(value) =>
-                    setFormState({ ...formState, preferredProductIds: value })
-                  }
-                  multiline={2}
-                  autoComplete="off"
-                  helpText="Comma-separated products to favor only after customer fit."
-                />
-                <TextField
-                  label="Upsell priority product GIDs"
-                  value={formState.upsellPriorityProductIds}
-                  onChange={(value) =>
-                    setFormState({
-                      ...formState,
-                      upsellPriorityProductIds: value,
-                    })
-                  }
-                  multiline={2}
-                  autoComplete="off"
-                />
-                <TextField
-                  label="Excluded collection GIDs"
-                  value={formState.excludedCollectionIds}
-                  onChange={(value) =>
-                    setFormState({
-                      ...formState,
-                      excludedCollectionIds: value,
-                    })
-                  }
-                  multiline={2}
-                  autoComplete="off"
-                />
-              </FormLayout>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="400">
-              <BlockStack gap="200">
-                <Text as="h2" variant="headingMd">
-                  AI Sales Assistant & Personality
-                </Text>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  Customize the welcome and voice of the storefront sales
-                  assistant. It automatically introduces verified catalog
-                  products, recommends strong matches, and answers shopper
-                  questions.
-                </Text>
-              </BlockStack>
-
-              <FormLayout>
-                <TextField
-                  label="Greeting Message"
-                  value={formState.chatGreeting}
-                  onChange={(value) =>
-                    setFormState({ ...formState, chatGreeting: value })
-                  }
-                  autoComplete="off"
-                  helpText="The first welcome message. A verified catalog introduction follows when the shopper opens the chat."
-                />
-
-                <Select
-                  label="AI Assistant Persona Tone"
-                  options={aiToneOptions}
-                  value={formState.aiTone}
-                  onChange={(value) =>
-                    setFormState({ ...formState, aiTone: value })
-                  }
-                />
-              </FormLayout>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="400">
-              <BlockStack gap="200">
-                <Text as="h2" variant="headingMd">
-                  Offer Economics & Guardrails
-                </Text>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  Define budget constraints and catalog exemptions for A/B tests
-                  and widgets.
-                </Text>
-              </BlockStack>
-
-              <FormLayout>
-                <TextField
-                  label="Cart-value Goal"
-                  type="number"
-                  value={formState.discountThreshold}
-                  onChange={(value) =>
-                    setFormState({ ...formState, discountThreshold: value })
-                  }
-                  prefix="$"
-                  autoComplete="off"
-                  helpText="Shows progress toward this cart value. It does not create or promise a Shopify discount."
-                />
-
-                <TextField
-                  label="Excluded Product GIDs"
-                  value={formState.blockedProductIds}
-                  onChange={(value) =>
-                    setFormState({ ...formState, blockedProductIds: value })
-                  }
-                  multiline={3}
-                  placeholder="gid://shopify/Product/12345, gid://shopify/Product/67890"
-                  autoComplete="off"
-                  helpText="Comma-separated Shopify Product GIDs to completely exclude from any recommended upsells."
-                />
-
-                <InlineStack gap="400" wrap>
-                  <Checkbox
-                    label="Bundle suggestions"
-                    checked={formState.bundleSupportEnabled}
-                    onChange={(checked) =>
-                      setFormState({
-                        ...formState,
-                        bundleSupportEnabled: checked,
-                      })
-                    }
-                  />
-                  <Checkbox
-                    label="Allow configured discount codes"
-                    checked={formState.discountPermission}
-                    onChange={(checked) =>
-                      setFormState({
-                        ...formState,
-                        discountPermission: checked,
-                      })
-                    }
-                  />
+                  {showAdvanced
+                    ? "Hide advanced settings"
+                    : "Show advanced settings"}
+                </Button>
+              </InlineStack>
+              <Text as="p" tone="subdued">
+                Provider status, assistance timing, voice and offer guardrails.
+              </Text>
+              {showAdvanced ? (
+                <InlineStack gap="200">
+                  {Object.entries(providers).map(([name, configured]) => (
+                    <Badge
+                      key={name}
+                      tone={configured ? "success" : "info"}
+                    >{`${name}: ${configured ? "configured" : "not configured"}`}</Badge>
+                  ))}
                 </InlineStack>
-
-                <TextField
-                  label="Allowed discount codes"
-                  value={formState.allowedDiscountCodes}
-                  onChange={(value) =>
-                    setFormState({ ...formState, allowedDiscountCodes: value })
-                  }
-                  autoComplete="off"
-                  helpText="Comma-separated allowlist. The agent cannot invent or apply other codes."
-                  disabled={!formState.discountPermission}
-                />
-              </FormLayout>
+              ) : null}
             </BlockStack>
           </Card>
         </Layout.Section>
+        {showAdvanced ? (
+          <Layout.Section>
+            <div id="advanced-settings">
+              <BlockStack gap="400">
+                <Card>
+                  <BlockStack gap="400">
+                    <BlockStack gap="200">
+                      <Text as="h2" variant="headingMd">
+                        Sales behavior and proactive assistance
+                      </Text>
+                      <Text as="p" variant="bodyMd" tone="subdued">
+                        Control when the assistant may approach shoppers and the
+                        guardrails used for recommendations and upsells.
+                      </Text>
+                    </BlockStack>
 
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="400">
-              <BlockStack gap="200">
-                <Text as="h2" variant="headingMd">
-                  AI Brand Guidelines
-                </Text>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  Describe your brand personality, core demographics, or styling
-                  criteria to prompt the generation engine.
-                </Text>
+                    <FormLayout>
+                      <InlineStack gap="400" wrap>
+                        <Checkbox
+                          label="Proactive messages"
+                          checked={formState.proactiveMessagesEnabled}
+                          disabled={formState.focusedMode}
+                          onChange={(checked) =>
+                            setFormState({
+                              ...formState,
+                              proactiveMessagesEnabled: checked,
+                            })
+                          }
+                        />
+                        <Checkbox
+                          label="Hesitation detection"
+                          checked={formState.hesitationDetectionEnabled}
+                          disabled={formState.focusedMode}
+                          onChange={(checked) =>
+                            setFormState({
+                              ...formState,
+                              hesitationDetectionEnabled: checked,
+                            })
+                          }
+                        />
+                        <Checkbox
+                          label="Sales analytics"
+                          checked={formState.analyticsEnabled}
+                          onChange={(checked) =>
+                            setFormState({
+                              ...formState,
+                              analyticsEnabled: checked,
+                            })
+                          }
+                        />
+                      </InlineStack>
+
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            "repeat(auto-fit, minmax(180px, 1fr))",
+                          gap: "16px",
+                        }}
+                      >
+                        <TextField
+                          label="Proactive delay"
+                          type="number"
+                          suffix="seconds"
+                          value={formState.proactiveDelaySeconds}
+                          onChange={(value) =>
+                            setFormState({
+                              ...formState,
+                              proactiveDelaySeconds: value,
+                            })
+                          }
+                          autoComplete="off"
+                        />
+                        <TextField
+                          label="Prompt limit per session"
+                          type="number"
+                          value={formState.maxProactivePrompts}
+                          onChange={(value) =>
+                            setFormState({
+                              ...formState,
+                              maxProactivePrompts: value,
+                            })
+                          }
+                          autoComplete="off"
+                        />
+                        <TextField
+                          label="Products per recommendation"
+                          type="number"
+                          value={formState.maxProductRecommendations}
+                          onChange={(value) =>
+                            setFormState({
+                              ...formState,
+                              maxProductRecommendations: value,
+                            })
+                          }
+                          autoComplete="off"
+                        />
+                        <TextField
+                          label="Minimum proactive confidence"
+                          type="number"
+                          value={formState.minimumProactiveConfidence}
+                          onChange={(value) =>
+                            setFormState({
+                              ...formState,
+                              minimumProactiveConfidence: value,
+                            })
+                          }
+                          autoComplete="off"
+                          helpText="Use a value from 0 to 1."
+                        />
+                        <TextField
+                          label="Minimum intent before upsell"
+                          type="number"
+                          value={formState.minimumUpsellIntentScore}
+                          onChange={(value) =>
+                            setFormState({
+                              ...formState,
+                              minimumUpsellIntentScore: value,
+                            })
+                          }
+                          autoComplete="off"
+                          helpText="Use a score from 0 to 100."
+                        />
+                      </div>
+                    </FormLayout>
+                  </BlockStack>
+                </Card>
+
+                <Card>
+                  <BlockStack gap="400">
+                    <BlockStack gap="200">
+                      <Text as="h2" variant="headingMd">
+                        AI Sales Assistant & Personality
+                      </Text>
+                      <Text as="p" variant="bodyMd" tone="subdued">
+                        Customize the welcome and voice of the storefront sales
+                        assistant. It automatically introduces verified catalog
+                        products, recommends strong matches, and answers shopper
+                        questions.
+                      </Text>
+                    </BlockStack>
+
+                    <FormLayout>
+                      <TextField
+                        label="Greeting Message"
+                        value={formState.chatGreeting}
+                        onChange={(value) =>
+                          setFormState({ ...formState, chatGreeting: value })
+                        }
+                        autoComplete="off"
+                        helpText="The first welcome message. A verified catalog introduction follows when the shopper opens the chat."
+                      />
+
+                      <Select
+                        label="AI Assistant Persona Tone"
+                        options={aiToneOptions}
+                        value={formState.aiTone}
+                        onChange={(value) =>
+                          setFormState({ ...formState, aiTone: value })
+                        }
+                      />
+                    </FormLayout>
+                  </BlockStack>
+                </Card>
+
+                <Card>
+                  <BlockStack gap="400">
+                    <BlockStack gap="200">
+                      <Text as="h2" variant="headingMd">
+                        Offer Economics & Guardrails
+                      </Text>
+                      <Text as="p" variant="bodyMd" tone="subdued">
+                        Define budget constraints and catalog exemptions for A/B
+                        tests and widgets.
+                      </Text>
+                    </BlockStack>
+
+                    <FormLayout>
+                      <TextField
+                        label="Cart-value Goal"
+                        type="number"
+                        value={formState.discountThreshold}
+                        onChange={(value) =>
+                          setFormState({
+                            ...formState,
+                            discountThreshold: value,
+                          })
+                        }
+                        prefix="$"
+                        autoComplete="off"
+                        helpText="Shows progress toward this cart value. It does not create or promise a Shopify discount."
+                      />
+
+                      <InlineStack gap="400" wrap>
+                        <Checkbox
+                          label="Bundle suggestions"
+                          checked={formState.bundleSupportEnabled}
+                          disabled={formState.focusedMode}
+                          onChange={(checked) =>
+                            setFormState({
+                              ...formState,
+                              bundleSupportEnabled: checked,
+                            })
+                          }
+                        />
+                        <Checkbox
+                          label="Allow configured discount codes"
+                          checked={formState.discountPermission}
+                          onChange={(checked) =>
+                            setFormState({
+                              ...formState,
+                              discountPermission: checked,
+                            })
+                          }
+                        />
+                      </InlineStack>
+
+                      <TextField
+                        label="Allowed discount codes"
+                        value={formState.allowedDiscountCodes}
+                        onChange={(value) =>
+                          setFormState({
+                            ...formState,
+                            allowedDiscountCodes: value,
+                          })
+                        }
+                        autoComplete="off"
+                        helpText="Comma-separated allowlist. The agent cannot invent or apply other codes."
+                        disabled={!formState.discountPermission}
+                      />
+                    </FormLayout>
+                  </BlockStack>
+                </Card>
+
+                <Card>
+                  <BlockStack gap="400">
+                    <BlockStack gap="200">
+                      <Text as="h2" variant="headingMd">
+                        AI Brand Guidelines
+                      </Text>
+                      <Text as="p" variant="bodyMd" tone="subdued">
+                        Describe your brand personality, core demographics, or
+                        styling criteria to prompt the generation engine.
+                      </Text>
+                    </BlockStack>
+
+                    <FormLayout>
+                      <TextField
+                        label="Brand Voice Brief"
+                        value={formState.brandVoice}
+                        onChange={(value) =>
+                          setFormState({ ...formState, brandVoice: value })
+                        }
+                        multiline={4}
+                        placeholder="E.g., Energetic, helpful, focus on athletic performance, emphasize high product materials and premium customer experience."
+                        autoComplete="off"
+                        helpText="Guidelines used directly in dynamic copy generation prompt engineering."
+                      />
+
+                      <TextField
+                        label="Store facts, FAQs, and support guidance"
+                        value={formState.storeKnowledge}
+                        onChange={(value) =>
+                          setFormState({ ...formState, storeKnowledge: value })
+                        }
+                        multiline={8}
+                        maxLength={12000}
+                        showCharacterCount
+                        placeholder="Add only verified store facts: sizing guidance, delivery estimates, pickup details, warranty rules, support hours, materials, care instructions, and common FAQs."
+                        autoComplete="off"
+                        helpText="The assistant treats this as store-specific reference material. Shopify product data and published store policies remain authoritative for catalog, price, stock, shipping, and returns."
+                      />
+                    </FormLayout>
+                  </BlockStack>
+                </Card>
               </BlockStack>
-
-              <FormLayout>
-                <TextField
-                  label="Brand Voice Brief"
-                  value={formState.brandVoice}
-                  onChange={(value) =>
-                    setFormState({ ...formState, brandVoice: value })
-                  }
-                  multiline={4}
-                  placeholder="E.g., Energetic, helpful, focus on athletic performance, emphasize high product materials and premium customer experience."
-                  autoComplete="off"
-                  helpText="Guidelines used directly in dynamic copy generation prompt engineering."
-                />
-
-                <TextField
-                  label="Store facts, FAQs, and support guidance"
-                  value={formState.storeKnowledge}
-                  onChange={(value) =>
-                    setFormState({ ...formState, storeKnowledge: value })
-                  }
-                  multiline={8}
-                  maxLength={12000}
-                  showCharacterCount
-                  placeholder="Add only verified store facts: sizing guidance, delivery estimates, pickup details, warranty rules, support hours, materials, care instructions, and common FAQs."
-                  autoComplete="off"
-                  helpText="The assistant treats this as store-specific reference material. Shopify product data and published store policies remain authoritative for catalog, price, stock, shipping, and returns."
-                />
-              </FormLayout>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
+            </div>
+          </Layout.Section>
+        ) : null}
       </Layout>
     </Page>
   );

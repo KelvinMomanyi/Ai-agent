@@ -1,6 +1,8 @@
 const OFFER_PROPERTY = "_aovboost_offer_id";
+import { orderMeasurementLink } from "../utils/measurementLink.server";
 
 export type OrderAttribution = {
+  measurement?: { sessionId: string; version: number };
   sessionIds: string[];
   productIds: string[];
   offerIds: string[];
@@ -15,12 +17,17 @@ export type OrderAttribution = {
   }>;
 };
 
-export function extractOrderAttribution(payload: unknown): OrderAttribution {
+export function extractOrderAttribution(
+  payload: unknown,
+  shop?: string,
+): OrderAttribution {
   const order = asRecord(payload);
   const sourceLines = Array.isArray(order.line_items) ? order.line_items : [];
   const revenueByOffer = new Map<string, number>();
   const productIds = new Set<string>();
   const sessionIds = new Set<string>();
+  const measurement = shop ? orderMeasurementLink(shop, order) : null;
+  if (measurement) sessionIds.add(measurement.sessionId);
 
   const lineItems = sourceLines.map((value) => {
     const line = asRecord(value);
@@ -64,6 +71,7 @@ export function extractOrderAttribution(payload: unknown): OrderAttribution {
   }));
 
   return {
+    ...(measurement ? { measurement } : {}),
     sessionIds: Array.from(sessionIds),
     productIds: Array.from(productIds),
     offerIds: attributedOffers.map(({ offerId }) => offerId),

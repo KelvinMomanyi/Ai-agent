@@ -9,6 +9,7 @@ type StorefrontTokenPayload = {
   sid: string;
   iat: number;
   exp: number;
+  holdout?: { arm: "exposed" | "holdout"; version: number; percent: number };
 };
 
 export type StorefrontAuth = {
@@ -57,8 +58,14 @@ export function verifyAppProxyRequest(request: Request) {
   return { shop, customerId };
 }
 
-export function issueStorefrontSession(shop: string) {
-  const sessionId = crypto.randomUUID();
+export function issueStorefrontSession(
+  shop: string,
+  options: {
+    sessionId?: string;
+    holdout?: StorefrontTokenPayload["holdout"];
+  } = {},
+) {
+  const sessionId = options.sessionId || crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
   const expiresAt = now + TOKEN_TTL_SECONDS;
   const payload: StorefrontTokenPayload = {
@@ -67,10 +74,14 @@ export function issueStorefrontSession(shop: string) {
     sid: sessionId,
     iat: now,
     exp: expiresAt,
+    ...(options.holdout ? { holdout: options.holdout } : {}),
   };
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
   const signature = base64UrlEncode(
-    crypto.createHmac("sha256", getTokenSecret()).update(encodedPayload).digest(),
+    crypto
+      .createHmac("sha256", getTokenSecret())
+      .update(encodedPayload)
+      .digest(),
   );
 
   return {
@@ -114,7 +125,9 @@ export function authenticateStorefrontRequest(
   };
 }
 
-export function isStorefrontAuthError(error: unknown): error is StorefrontAuthError {
+export function isStorefrontAuthError(
+  error: unknown,
+): error is StorefrontAuthError {
   return error instanceof StorefrontAuthError;
 }
 
@@ -135,7 +148,22 @@ export function logStorefrontAuthError(
   });
 }
 
-function verifyStorefrontSessionToken(token: string, shop: string) {
+export function renewalSessionId(request: Request, shop: string) {
+  // Used only after proxy/installation validation to renew a signed identity.
+  // API authentication below continues rejecting expired tokens.
+  try {
+    return verifyStorefrontSessionToken(getBearerToken(request), shop, true)
+      .sid;
+  } catch {
+    return undefined;
+  }
+}
+
+function verifyStorefrontSessionToken(
+  token: string,
+  shop: string,
+  renewal = false,
+) {
   const [version, encodedPayload, signature] = token.split(".");
   if (!token) {
     throw new StorefrontAuthError("Missing storefront session token");
@@ -145,7 +173,10 @@ function verifyStorefrontSessionToken(token: string, shop: string) {
   }
 
   const expected = base64UrlEncode(
-    crypto.createHmac("sha256", getTokenSecret()).update(encodedPayload).digest(),
+    crypto
+      .createHmac("sha256", getTokenSecret())
+      .update(encodedPayload)
+      .digest(),
   );
   if (!safeCompare(signature, expected)) {
     throw new StorefrontAuthError("Invalid storefront session token signature");
@@ -153,7 +184,9 @@ function verifyStorefrontSessionToken(token: string, shop: string) {
 
   let payload: StorefrontTokenPayload;
   try {
-    payload = JSON.parse(base64UrlDecode(encodedPayload)) as StorefrontTokenPayload;
+    payload = JSON.parse(
+      base64UrlDecode(encodedPayload),
+    ) as StorefrontTokenPayload;
   } catch {
     throw new StorefrontAuthError("Unreadable storefront session token");
   }
@@ -164,7 +197,7 @@ function verifyStorefrontSessionToken(token: string, shop: string) {
   if (payload.shop !== shop) {
     throw new StorefrontAuthError("Storefront session token shop mismatch");
   }
-  if (payload.exp <= Math.floor(Date.now() / 1000)) {
+  if (!renewal && payload.exp <= Math.floor(Date.now() / 1000)) {
     throw new StorefrontAuthError("Expired storefront session token");
   }
 
@@ -190,7 +223,9 @@ function getAppProxySignaturePayload(url: URL) {
 
 function getBearerToken(request: Request) {
   const authorization = request.headers.get("Authorization") || "";
-  return authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+  return authorization.startsWith("Bearer ")
+    ? authorization.slice(7).trim()
+    : "";
 }
 
 function hmacHex(secret: string, value: string) {
@@ -222,9 +257,10 @@ function base64UrlEncode(value: string | Buffer) {
 
 function base64UrlDecode(value: string) {
   const padded = value + "=".repeat((4 - (value.length % 4)) % 4);
-  return Buffer.from(padded.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(
-    "utf8",
-  );
+  return Buffer.from(
+    padded.replace(/-/g, "+").replace(/_/g, "/"),
+    "base64",
+  ).toString("utf8");
 }
 
 function getSharedSecret() {
@@ -238,6 +274,7 @@ function getTokenSecret() {
     process.env.AOVBOOST_STOREFRONT_SESSION_SECRET ||
     process.env.SHOPIFY_API_SECRET ||
     "";
-  if (!secret) throw new StorefrontAuthError("Missing storefront token secret", 500);
+  if (!secret)
+    throw new StorefrontAuthError("Missing storefront token secret", 500);
   return secret;
 }

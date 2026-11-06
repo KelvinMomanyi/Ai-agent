@@ -1,5 +1,10 @@
-import { data as json, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
+import {
+  data as json,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "react-router";
 import { getPublicAppSettings } from "../models/settings.server";
+import { enrollHoldout } from "../models/holdout.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
 import {
   authenticateStorefrontRequest,
@@ -9,7 +14,10 @@ import {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (request.method === "OPTIONS") return optionsResponse();
-  return json({ error: "Method not allowed" }, { status: 405, headers: withCors() });
+  return json(
+    { error: "Method not allowed" },
+    { status: 405, headers: withCors() },
+  );
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -21,9 +29,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       sessionId?: string;
       sessionToken?: string;
     };
-    const { shop } = authenticateStorefrontRequest(request, body);
+    const { shop, sessionId } = authenticateStorefrontRequest(request, body);
     return json(
-      { settings: await getPublicAppSettings(shop) },
+      {
+        settings: await getPublicAppSettings(shop),
+        measurement: await enrollHoldout(shop, sessionId),
+      },
       { headers: withCors({ "Cache-Control": "no-store" }) },
     );
   } catch (error) {
@@ -35,6 +46,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
     console.error("AOVBoost storefront config failed:", error);
-    return json({ error: "Configuration unavailable" }, { status: 500, headers: withCors() });
+    return json(
+      { error: "Configuration unavailable" },
+      { status: 500, headers: withCors() },
+    );
   }
 };

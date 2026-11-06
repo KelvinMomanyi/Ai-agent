@@ -3,8 +3,8 @@ export type WidgetPayload = {
   copy?: Record<string, unknown>;
   [key: string]: unknown;
 };
-
-const DISMISSED_KEY = "aovboost_dismissed_widgets";
+import { DISMISSED_WIDGETS_KEY as DISMISSED_KEY } from "../../../shared/cartRecommendations";
+import { isElementVisible } from "./visibility";
 const DEFAULT_CURRENCY = "USD";
 
 type StorefrontCurrency = {
@@ -42,6 +42,10 @@ export type WidgetProduct = {
 export abstract class BaseWidget {
   protected root: ShadowRoot;
   protected container: HTMLElement;
+  private disposed = false;
+  private impressionRecorded = false;
+  private impressionObserver?: IntersectionObserver;
+  private impressionListeners?: AbortController;
 
   constructor(protected payload: WidgetPayload) {
     this.container = document.createElement("div");
@@ -56,6 +60,9 @@ export abstract class BaseWidget {
   abstract render(): void;
 
   destroy(): void {
+    this.disposed = true;
+    this.impressionObserver?.disconnect();
+    this.impressionListeners?.abort();
     const mount = this.container.parentElement;
     this.container.remove();
     if (
@@ -68,12 +75,70 @@ export abstract class BaseWidget {
   isMounted(): boolean {
     return this.container.isConnected;
   }
+  isDestroyed(): boolean {
+    return this.disposed;
+  }
+
+  reattach(target: HTMLElement): void {
+    if (this.disposed) return;
+    this.applyInlineTheme(target);
+    target.appendChild(this.container);
+    this.observeImpression();
+  }
 
   mount(target = document.body): void {
     if (this.payload.presentation === "inline") this.applyInlineTheme(target);
     target.appendChild(this.container);
     this.render();
-    if (this.container.isConnected) this.trackImpression();
+    if (this.container.isConnected) this.observeImpression();
+  }
+
+  private observeImpression() {
+    if (this.impressionRecorded || this.disposed) return;
+    this.impressionObserver?.disconnect();
+    this.impressionListeners?.abort();
+    const check = () => {
+      if (
+        this.impressionRecorded ||
+        this.disposed ||
+        document.visibilityState === "hidden" ||
+        !isElementVisible(this.container)
+      )
+        return;
+      const rect = this.container.getBoundingClientRect();
+      if (
+        rect.width <= 0 ||
+        rect.height <= 0 ||
+        rect.bottom <= 0 ||
+        rect.right <= 0 ||
+        rect.top >= window.innerHeight ||
+        rect.left >= window.innerWidth
+      )
+        return;
+      this.impressionRecorded = true;
+      this.trackImpression();
+      this.impressionObserver?.disconnect();
+      this.impressionListeners?.abort();
+    };
+    this.impressionListeners = new AbortController();
+    const options = { signal: this.impressionListeners.signal, passive: true };
+    document.addEventListener("visibilitychange", check, options);
+    window.addEventListener("scroll", check, { ...options, capture: true });
+    window.addEventListener("resize", check, options);
+    if (typeof IntersectionObserver !== "undefined") {
+      this.impressionObserver = new IntersectionObserver(
+        (entries) => {
+          if (
+            entries.some(
+              (entry) => entry.isIntersecting && entry.intersectionRatio > 0,
+            )
+          )
+            check();
+        },
+        { threshold: 0.01 },
+      );
+      this.impressionObserver.observe(this.container);
+    } else check();
   }
 
   private applyInlineTheme(target: HTMLElement): void {
@@ -136,7 +201,9 @@ export abstract class BaseWidget {
   }
 
   protected trackDismiss(): void {
-    this.track("widget_dismiss", {});
+    this.track("widget_dismiss", {
+      productIds: getProducts(this.payload).map(({ id }) => id),
+    });
     if (this.getWidgetType() === "chat") {
       try {
         sessionStorage.setItem("aovboost_chat_dismissed_session", "true");

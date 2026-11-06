@@ -22,7 +22,10 @@ vi.mock("@upstash/redis", () => ({
   }),
 }));
 
-import { UpstashSessionStorage } from "./upstash-session-storage.server";
+import {
+  SessionPersistenceError,
+  UpstashSessionStorage,
+} from "./upstash-session-storage.server";
 
 function session() {
   return new Session({
@@ -42,15 +45,65 @@ beforeEach(() => {
   vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://cache.example.com");
   vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "test-cache-credential");
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe("durable Shopify session storage", () => {
   it("does not acknowledge or cache credentials when PostgreSQL fails", async () => {
-    mocks.upsert.mockRejectedValue(new Error("database unavailable"));
-    expect(await new UpstashSessionStorage().storeSession(session())).toBe(
-      false,
+    vi.useFakeTimers();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const value = session();
+    mocks.upsert.mockRejectedValue(
+      new Error(`database unavailable: ${value.accessToken} ${value.refreshToken}`),
     );
+    const result = expect(
+      new UpstashSessionStorage().storeSession(value),
+    ).rejects.toBeInstanceOf(SessionPersistenceError);
+    await vi.runAllTimersAsync();
+    await result;
+    expect(mocks.upsert).toHaveBeenCalledTimes(3);
     expect(mocks.redis.set).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(
+      "AOVBoost CRITICAL: durable session write failed",
+      { shop: value.shop, attempts: 3 },
+    );
+    expect(JSON.stringify(log.mock.calls)).not.toContain(value.accessToken);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(value.refreshToken);
+  });
+
+  it("retries the identical credential pair after backoff before caching it", async () => {
+    vi.useFakeTimers();
+    mocks.upsert
+      .mockRejectedValueOnce(new Error("database unavailable"))
+      .mockResolvedValueOnce({});
+    const result = new UpstashSessionStorage().storeSession(session());
+    await vi.advanceTimersByTimeAsync(99);
+    expect(mocks.upsert).toHaveBeenCalledTimes(1);
+    expect(mocks.redis.set).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await result).toBe(true);
+    expect(mocks.upsert).toHaveBeenCalledTimes(2);
+    expect(mocks.upsert.mock.calls[1]).toEqual(mocks.upsert.mock.calls[0]);
+    expect(mocks.redis.set).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers on the final bounded retry without changing the returned pair", async () => {
+    vi.useFakeTimers();
+    mocks.upsert
+      .mockRejectedValueOnce(new Error("database unavailable"))
+      .mockRejectedValueOnce(new Error("database unavailable"))
+      .mockResolvedValueOnce({});
+    const result = new UpstashSessionStorage().storeSession(session());
+    await vi.advanceTimersByTimeAsync(299);
+    expect(mocks.upsert).toHaveBeenCalledTimes(2);
+    expect(mocks.redis.set).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await result).toBe(true);
+    expect(mocks.upsert).toHaveBeenCalledTimes(3);
+    expect(mocks.upsert.mock.calls[2]).toEqual(mocks.upsert.mock.calls[0]);
   });
 
   it("accepts durable credentials even when Redis fails", async () => {

@@ -1,9 +1,13 @@
 import { isInstalledShop } from "../models/installedShop.server";
 import { data as json, type LoaderFunctionArgs } from "react-router";
 import { getPublicAppSettings } from "../models/settings.server";
+import { recordAuthenticatedStorefrontSession } from "../models/onboarding.server";
+import { enrollHoldout } from "../models/holdout.server";
+import { schedulePairingDrain } from "../jobs/pairingAutopilot.server";
 import {
   isStorefrontAuthError,
   issueStorefrontSession,
+  renewalSessionId,
   logStorefrontAuthError,
   verifyAppProxyRequest,
 } from "../utils/storefrontAuth.server";
@@ -21,12 +25,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       );
     }
 
-    const [storefrontSession, settings] = await Promise.all([
-      Promise.resolve(issueStorefrontSession(shop)),
+    const identity = renewalSessionId(request, shop);
+    const initial = identity
+      ? issueStorefrontSession(shop, { sessionId: identity })
+      : issueStorefrontSession(shop);
+    const [measurement, settings] = await Promise.all([
+      enrollHoldout(shop, initial.sessionId),
       getPublicAppSettings(shop),
     ]);
+    const storefrontSession = measurement
+      ? issueStorefrontSession(shop, {
+          sessionId: initial.sessionId,
+          holdout: {
+            arm: measurement.arm,
+            version: measurement.version,
+            percent: measurement.percent,
+          },
+        })
+      : initial;
+    try {
+      await recordAuthenticatedStorefrontSession(shop);
+    } catch {
+      // Onboarding telemetry must not break a successfully authenticated session.
+      console.warn(
+        "AOVBoost storefront connection receipt could not be saved",
+        { shop },
+      );
+    }
+    schedulePairingDrain(shop);
     return json(
-      { ...storefrontSession, settings },
+      { ...storefrontSession, settings, measurement },
       {
         headers: withCors({ "Cache-Control": "no-store" }),
       },

@@ -3,6 +3,8 @@ import prisma from "../db.server";
 import { getJsonCache, setJsonCache } from "../redis.server";
 
 export type PublicAppSettings = {
+  holdoutEnabled: boolean;
+  focusedMode: boolean;
   chatEnabled: boolean;
   bundlesEnabled: boolean;
   upsellEnabled: boolean;
@@ -26,14 +28,18 @@ export async function getAppSettings(shop: string) {
   return prisma.appSettings.upsert({
     where: { shop },
     update: {},
-    create: { shop },
+    create: { shop, pairingMode: "autopilot" },
   });
 }
 
 export async function getPublicAppSettings(shop: string) {
   const key = `public-settings:${shop}`;
   const cached = await getJsonCache<PublicAppSettings>(key);
-  if (cached) return { ...cached, liveEventsEnabled: isLiveEventsEnabled() };
+  if (cached)
+    return {
+      ...cached,
+      liveEventsEnabled: !cached.focusedMode && isLiveEventsEnabled(),
+    };
   const settings = toPublicAppSettings(await getAppSettings(shop));
   await setJsonCache(key, settings, 60);
   return settings;
@@ -41,6 +47,8 @@ export async function getPublicAppSettings(shop: string) {
 
 export function toPublicAppSettings(settings: AppSettings): PublicAppSettings {
   return {
+    holdoutEnabled: settings.holdoutEnabled && settings.holdoutPercent > 0,
+    focusedMode: settings.focusedMode,
     chatEnabled: settings.chatEnabled,
     bundlesEnabled: settings.bundlesEnabled,
     upsellEnabled: settings.upsellEnabled,
@@ -58,7 +66,7 @@ export function toPublicAppSettings(settings: AppSettings): PublicAppSettings {
     bundleSupportEnabled: settings.bundleSupportEnabled,
     analyticsEnabled: settings.analyticsEnabled,
     // Explicit opt-in: an absent, empty, or differently-cased value is off.
-    liveEventsEnabled: isLiveEventsEnabled(),
+    liveEventsEnabled: !settings.focusedMode && isLiveEventsEnabled(),
   };
 }
 

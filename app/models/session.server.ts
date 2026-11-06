@@ -195,6 +195,9 @@ export function computeSessionState(
   let currentCollectionId = String(existingContext.currentCollectionId || "");
   let pendingCartSelection = existingContext.pendingCartSelection;
   let proactiveDismissed = existingContext.proactiveDismissed === true;
+  let lastCartRecommendationDismissedAt = Number(
+    existingContext.lastCartRecommendationDismissedAt || 0,
+  );
 
   for (const event of events) {
     lastEventType = event.type;
@@ -267,6 +270,11 @@ export function computeSessionState(
     }
     if (event.type === "widget_dismiss" && event.widgetType === "chat")
       proactiveDismissed = true;
+    if (event.type === "widget_dismiss" && event.widgetType === "upsell_drawer")
+      lastCartRecommendationDismissedAt = Math.max(
+        lastCartRecommendationDismissedAt,
+        Math.min(Date.now(), Number(event.ts) || Date.now()),
+      );
 
     if (event.type === "add_to_cart") {
       addToCartCount += 1;
@@ -487,6 +495,7 @@ export function computeSessionState(
     context: {
       ...existingContext,
       proactiveDismissed,
+      lastCartRecommendationDismissedAt,
       ...(pendingCartSelection !== undefined
         ? {
             pendingCartSelection: pendingCartSelection as Prisma.InputJsonValue,

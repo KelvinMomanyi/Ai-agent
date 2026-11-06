@@ -6,6 +6,9 @@ import {
   getStorefrontCurrency,
   setStorefrontCurrency,
 } from "./widgets/BaseWidget";
+import { readShopifyCart } from "./cartState";
+import { cartUrl } from "./shopifyCart";
+import { hydrateCartCardPrices } from "./cartCardPricing";
 
 type OfferPollerOptions = {
   shop: string;
@@ -45,6 +48,10 @@ export class OfferPoller {
   private timer: number | undefined;
   private inFlight = false;
   private pageVersion = 0;
+  private mutationVersion = 0;
+  private mutationId = "";
+  private cartSignature = "";
+  private checkingCart = false;
   private stopped = false;
   private startupTimers = new Set<number>();
   private pendingRequests = new Map<string, PendingOfferRequest>();
@@ -58,11 +65,21 @@ export class OfferPoller {
   }
 
   init(): void {
-    window.addEventListener("pagehide", this.abortRequest, {
+    window.addEventListener("pagehide", this.handlePageHide, {
       signal: this.abortController.signal,
     });
-    this.scheduleStartupRequest("initial", 650);
-    if (getCurrentPageType() === "product") {
+    window.addEventListener("focus", this.checkReturnedCart, {
+      signal: this.abortController.signal,
+    });
+    document.addEventListener("visibilitychange", this.checkReturnedCart, {
+      signal: this.abortController.signal,
+    });
+    if (!this.options.sessionManager.getSettings().focusedMode)
+      this.scheduleStartupRequest("initial", 650);
+    if (
+      !this.options.sessionManager.getSettings().focusedMode &&
+      getCurrentPageType() === "product"
+    ) {
       this.scheduleStartupRequest("social_proof", 950);
     }
     if (this.options.pollMs) {
@@ -108,6 +125,21 @@ export class OfferPoller {
     triggerPayload: Record<string, unknown> = {},
   ): Promise<OfferDecision | null> {
     if (this.stopped || document.visibilityState === "hidden") return null;
+    const cartAdd = trigger === "cart_item_added" || trigger === "add_to_cart";
+    if (
+      trigger === "cart_restored" ||
+      (this.options.sessionManager.getSettings().focusedMode && !cartAdd)
+    )
+      return null;
+    if (cartAdd) {
+      if (
+        triggerPayload.confirmed !== true ||
+        !triggerPayload.mutationId ||
+        triggerPayload.recommendationOrigin === true
+      )
+        return null;
+      this.invalidateCart(String(triggerPayload.mutationId));
+    }
     if (this.inFlight) {
       this.enqueuePendingRequest(trigger, triggerPayload);
       return null;
@@ -115,10 +147,12 @@ export class OfferPoller {
     this.inFlight = true;
     const pagePath = window.location.pathname;
     const pageVersion = this.pageVersion;
+    const mutationVersion = this.mutationVersion;
     const isCurrentPage = () =>
       !this.stopped &&
       pagePath === window.location.pathname &&
-      pageVersion === this.pageVersion;
+      pageVersion === this.pageVersion &&
+      mutationVersion === this.mutationVersion;
     const fallback = (reasoning: string, httpStatus?: number) =>
       isCurrentPage()
         ? this.mountLocalFallback(
@@ -131,37 +165,22 @@ export class OfferPoller {
 
     try {
       const snapshot = this.options.sessionManager.getSnapshot();
-      const cart = await readCart();
-      const hasLiveCart = cart.cartItemCount > 0 || cart.cartValue > 0;
-      const cartProductIds = Array.isArray(triggerPayload.cartProductIds)
-        ? triggerPayload.cartProductIds.map(String)
-        : hasLiveCart
-          ? cart.cartProductIds
-          : snapshot.cartProductIds;
-      const cartVariantIds = Array.isArray(triggerPayload.cartVariantIds)
-        ? triggerPayload.cartVariantIds.map(String)
-        : hasLiveCart
-          ? cart.cartVariantIds
-          : Array.isArray(snapshot.context.cartVariantIds)
-            ? snapshot.context.cartVariantIds.map(String)
-            : [];
-      const cartItems = Array.isArray(triggerPayload.cartItems)
-        ? triggerPayload.cartItems
-        : hasLiveCart
-          ? cart.cartItems
-          : [];
+      const cart = await readShopifyCart();
+      if (cartAdd && (!cart || !cart.cartItemCount)) return null;
+      if (cart) {
+        setStorefrontCurrency(cart.currency);
+        this.cartSignature = JSON.stringify(cart.cartItems);
+      }
+      const cartProductIds = cart?.cartProductIds ?? snapshot.cartProductIds;
+      const cartVariantIds =
+        cart?.cartVariantIds ??
+        (Array.isArray(snapshot.context.cartVariantIds)
+          ? snapshot.context.cartVariantIds.map(String)
+          : []);
+      const cartItems = cart?.cartItems ?? [];
       const cartItemCount =
-        typeof triggerPayload.cartItemCount === "number"
-          ? triggerPayload.cartItemCount
-          : hasLiveCart
-            ? cart.cartItemCount
-            : Number(snapshot.context.cartItemCount || 0);
-      const cartValue =
-        typeof triggerPayload.cartValue === "number"
-          ? triggerPayload.cartValue
-          : hasLiveCart
-            ? cart.cartValue
-            : snapshot.cartValue;
+        cart?.cartItemCount ?? Number(snapshot.context.cartItemCount || 0);
+      const cartValue = cart?.cartValue ?? snapshot.cartValue;
       const auth = await this.options.sessionManager.getSignedAuthPayload();
       if (!auth) {
         return fallback(
@@ -185,6 +204,9 @@ export class OfferPoller {
         moneyFormat: currency.moneyFormat,
         moneyWithCurrencyFormat: currency.moneyWithCurrencyFormat,
         locale: currency.locale,
+        market: String(
+          (window as any).Shopify?.country || currency.locale || "",
+        ),
         dismissedWidgets: this.options.widgetManager.getDismissedWidgets(),
         trigger,
         triggerCategory: triggerPayload.triggerCategory,
@@ -215,9 +237,20 @@ export class OfferPoller {
         );
       }
 
-      const decision = (await response.json()) as OfferDecision;
+      let decision = (await response.json()) as OfferDecision & {
+        measurement?: unknown;
+      };
       if (!isCurrentPage()) return null;
+      if ("measurement" in decision) {
+        this.options.sessionManager.applyMeasurement?.(decision.measurement);
+        this.options.widgetManager.setHoldout?.(
+          (decision.measurement as { arm?: string })?.arm === "holdout",
+        );
+      }
+      if (decision.reasoning === "holdout_assigned") return null;
+      if (decision.reasoning?.startsWith("plan_")) return null;
       if (!decision.widgetType) {
+        if (cartAdd) return null;
         if (decision.reasoning?.startsWith("proactive_")) {
           this.recordRuntime({
             trigger,
@@ -232,6 +265,17 @@ export class OfferPoller {
           decision.reasoning || "The server found no eligible offer.",
           response.status,
         );
+      }
+
+      if (
+        cartAdd &&
+        (decision.widgetType !== "upsell_drawer" ||
+          decision.payload?.mutationId !== triggerPayload.mutationId)
+      )
+        return null;
+      if (cartAdd) {
+        decision = await hydrateCartCardPrices(decision);
+        if (!isCurrentPage() || !decision.widgetType) return null;
       }
 
       const placement = this.options.widgetManager.mountDecision(decision);
@@ -265,6 +309,16 @@ export class OfferPoller {
   private handleNavigationEvent = (event: Event) => {
     const detail = (event as CustomEvent).detail as
       Record<string, unknown> | undefined;
+    if (
+      detail?.confirmed === true &&
+      detail.mutationId &&
+      ["add_to_cart", "quantity_changed", "remove_from_cart"].includes(
+        String(detail.type),
+      )
+    ) {
+      this.invalidateCart(String(detail.mutationId));
+      return;
+    }
     if (detail?.type !== "page_view") return;
     this.abortRequest();
     this.pageVersion += 1;
@@ -272,9 +326,54 @@ export class OfferPoller {
     this.startupTimers.forEach((timer) => window.clearTimeout(timer));
     this.startupTimers.clear();
     this.options.widgetManager.resetPageContext();
-    this.scheduleStartupRequest("navigation", 300);
-    if (getCurrentPageType() === "product") {
+    if (!this.options.sessionManager.getSettings().focusedMode)
+      this.scheduleStartupRequest("navigation", 300);
+    if (
+      !this.options.sessionManager.getSettings().focusedMode &&
+      getCurrentPageType() === "product"
+    ) {
       this.scheduleStartupRequest("social_proof", 600);
+    }
+  };
+
+  private invalidateCart(id: string) {
+    if (this.mutationId === id) return;
+    this.mutationId = id;
+    this.mutationVersion += 1;
+    this.abortRequest();
+    this.pendingRequests.clear();
+    this.startupTimers.forEach((timer) => window.clearTimeout(timer));
+    this.startupTimers.clear();
+    this.options.widgetManager.clearCartRecommendation();
+  }
+
+  private handlePageHide = () => {
+    this.pageVersion += 1;
+    this.abortRequest();
+    this.pendingRequests.clear();
+    this.options.widgetManager.clearCartRecommendation?.();
+  };
+
+  private checkReturnedCart = async () => {
+    if (
+      this.stopped ||
+      this.checkingCart ||
+      !this.cartSignature ||
+      document.visibilityState === "hidden"
+    )
+      return;
+    this.checkingCart = true;
+    const version = this.mutationVersion;
+    try {
+      const cart = await readShopifyCart();
+      if (!cart || this.stopped || version !== this.mutationVersion) return;
+      const signature = JSON.stringify(cart.cartItems);
+      if (signature !== this.cartSignature) {
+        this.cartSignature = signature;
+        this.invalidateCart(`external:${Date.now()}`);
+      }
+    } finally {
+      this.checkingCart = false;
     }
   };
 
@@ -330,6 +429,7 @@ export class OfferPoller {
         headers: {
           "Content-Type": "application/json",
           "X-AOVBoost-Shop": this.options.shop,
+          Authorization: `Bearer ${body.sessionToken}`,
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -350,6 +450,9 @@ export class OfferPoller {
     httpStatus?: number,
   ): OfferDecision | null {
     const settings = this.options.sessionManager.getSettings();
+    if (settings.holdout) return null;
+    if (["cart_item_added", "add_to_cart", "cart_restored"].includes(trigger))
+      return null;
     const decision = buildLocalFallbackDecision(trigger, {
       ...triggerPayload,
       threshold:
@@ -669,73 +772,20 @@ async function getCurrentProductId() {
     STOREFRONT_READ_TIMEOUT_MS,
   );
   try {
-    const response = await fetch(`/products/${handle}.js`, {
-      headers: { Accept: "application/json" },
-      keepalive: true,
-      signal: controller.signal,
-    });
+    const root = cartUrl("read").replace(/cart\.js$/, "");
+    const response = await fetch(
+      `${root}products/${encodeURIComponent(handle)}.js`,
+      {
+        headers: { Accept: "application/json" },
+        keepalive: true,
+        signal: controller.signal,
+      },
+    );
     if (!response.ok) return undefined;
     const storefrontProduct = await response.json();
     return toProductGid(storefrontProduct.id);
   } catch {
     return undefined;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
-
-async function readCart() {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(
-    () => controller.abort(),
-    STOREFRONT_READ_TIMEOUT_MS,
-  );
-  try {
-    const response = await fetch("/cart.js", {
-      headers: { Accept: "application/json" },
-      keepalive: true,
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`Cart read failed: ${response.status}`);
-    const cart = await response.json();
-    setStorefrontCurrency(cart.currency);
-    const items = Array.isArray(cart.items) ? cart.items : [];
-    const cartProductIds = items
-      .map((item: Record<string, unknown>) => getCartItemProductId(item))
-      .filter(Boolean);
-    const cartVariantIds = items
-      .map((item: Record<string, unknown>) => getCartItemVariantId(item))
-      .filter(Boolean);
-
-    return {
-      cartToken: cart.token || "",
-      cartProductIds,
-      cartVariantIds,
-      cartItems: items.map((item: Record<string, unknown>) => ({
-        productId: getCartItemProductId(item),
-        variantId: getCartItemVariantId(item),
-        quantity: Number(item.quantity || 1),
-        title: String(item.product_title || item.title || ""),
-        handle:
-          String(item.handle || item.url || "")
-            .split("/products/")[1]
-            ?.split(/[?#/]/)[0] || "",
-      })),
-      cartItemCount: Number(cart.item_count || items.length || 0),
-      cartValue: Number(cart.total_price || 0) / 100,
-      currency: String(cart.currency || ""),
-    };
-  } catch {
-    return {
-      cartToken: "",
-      cartProductIds: [],
-      cartVariantIds: [],
-      cartItems: [],
-      cartItemCount: 0,
-      cartValue: 0,
-      currency: "",
-    };
   } finally {
     window.clearTimeout(timeout);
   }
@@ -747,41 +797,4 @@ function toProductGid(value: unknown) {
   return text.startsWith("gid://shopify/Product/")
     ? text
     : `gid://shopify/Product/${text}`;
-}
-
-function toVariantGid(value: unknown) {
-  const text = String(value || "");
-  if (!text) return "";
-  return text.startsWith("gid://shopify/ProductVariant/")
-    ? text
-    : `gid://shopify/ProductVariant/${text}`;
-}
-
-function getCartItemProductId(item: Record<string, unknown>) {
-  const product = asRecord(item.product);
-  return toProductGid(
-    item.product_id ||
-      item.productId ||
-      item.product_gid ||
-      item.productGid ||
-      product.id,
-  );
-}
-
-function getCartItemVariantId(item: Record<string, unknown>) {
-  const variant = asRecord(item.variant);
-  return toVariantGid(
-    item.variant_id ||
-      item.variantId ||
-      item.id ||
-      item.variant_gid ||
-      item.variantGid ||
-      variant.id,
-  );
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 }

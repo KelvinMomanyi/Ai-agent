@@ -6,12 +6,14 @@ import type {
 } from "../ai/types";
 import { catalogProductToWidgetProduct } from "./catalogGuard.server";
 import prisma from "../db.server";
+import { capturePairingProvenance } from "./pairingProvenance.server";
 import { getActiveBundlesForProduct } from "./bundle.server";
 import {
-  getRecommendationCatalog,
-  pickCatalogProducts,
-  type CatalogCacheProduct,
-} from "./catalogCache.server";
+  selectPairingRecommendations,
+  getPairingDenials,
+  type PairingRules,
+} from "./pairingRecommendations.server";
+import { stripPrivateSignals } from "../utils/storefrontPayload.server";
 
 export async function buildOfferCandidates(input: {
   shop: string;
@@ -19,29 +21,66 @@ export async function buildOfferCandidates(input: {
   currentProductId?: string;
   sourceProductId?: string;
   excludeProductIds?: string[];
+  settings?: PairingRules;
+  cartOnly?: boolean;
 }): Promise<OfferCandidate[]> {
   const recommendationSourceProductId =
     input.sourceProductId ||
     input.currentProductId ||
     input.session.cartProductIds[0] ||
     input.session.viewedProductIds.at(-1);
-  const [catalog, bundles] = await Promise.all([
-    getRecommendationCatalog({
+  const settings = input.settings ||
+    (await prisma.appSettings.findUnique({
+      where: { shop: input.shop },
+      select: {
+        blockedProductIds: true,
+        excludedCollectionIds: true,
+        preferredProductIds: true,
+        upsellPriorityProductIds: true,
+        pairingMode: true,
+        pairingStrictness: true,
+        pairingSensitiveKeywords: true,
+        verticalPreset: true,
+      },
+    })) || {
+      blockedProductIds: [],
+      excludedCollectionIds: [],
+      preferredProductIds: [],
+      upsellPriorityProductIds: [],
+    };
+  const [selected, allBundles] = await Promise.all([
+    selectPairingRecommendations({
       shop: input.shop,
       sourceProductId: recommendationSourceProductId,
-    }),
-    getActiveBundlesForProduct(input.shop, input.currentProductId, {
+      cartProductIds: input.session.cartProductIds,
       excludeProductIds: input.excludeProductIds,
+      settings,
+      limit: input.cartOnly ? 12 : 5,
     }),
+    input.cartOnly
+      ? Promise.resolve([])
+      : getActiveBundlesForProduct(input.shop, input.currentProductId, {
+          excludeProductIds: input.excludeProductIds,
+        }),
   ]);
-  const catalogProducts = pickCatalogProducts({
-    catalog,
+  const denied = await getPairingDenials({
+    shop: input.shop,
     sourceProductId: recommendationSourceProductId,
     cartProductIds: input.session.cartProductIds,
-    excludeProductIds: input.excludeProductIds,
-    query: String(input.session.context?.lastSearchQuery || ""),
-    limit: 5,
+    targetProductIds: allBundles.flatMap((bundle) =>
+      bundle.items.map((item) => item.productId),
+    ),
   });
+  const bundles = allBundles.filter((bundle) =>
+    bundle.items.every(
+      (item) =>
+        !denied.has(item.productId) &&
+        !settings.blockedProductIds.includes(item.productId) &&
+        !item.product.collectionIds.some((id) =>
+          settings.excludedCollectionIds.includes(id),
+        ),
+    ),
+  );
 
   const bundleCandidates: OfferCandidate[] = bundles.map((bundle) => ({
     id: bundle.id,
@@ -54,39 +93,59 @@ export async function buildOfferCandidates(input: {
     payload: {
       bundle,
       items: bundle.items.map((item) => ({
-        ...catalogProductToWidgetProduct(item.product),
+        ...stripPrivateSignals(catalogProductToWidgetProduct(item.product)),
         quantity: item.quantity,
       })),
     },
   }));
 
-  const affinityCandidates: OfferCandidate[] = catalogProducts.map(
-    (product, index) => ({
+  const affinityCandidates: OfferCandidate[] = selected.map(
+    ({ product, reason, tier }, index) => ({
       id: product.id,
       type: "product",
       widgetType:
         input.session.cartProductIds.length > 0 ? "upsell_drawer" : "rec_strip",
       productId: product.id,
       title: product.title,
-      score: scoreCatalogCandidate(
-        product,
-        index,
-        recommendationSourceProductId,
-      ),
-      affinityScore: scoreCatalogCandidate(
-        product,
-        index,
-        recommendationSourceProductId,
-      ),
+      score:
+        (tier === "approved"
+          ? 0.99
+          : tier === "auto_approved"
+            ? 0.9
+            : tier === "copurchase"
+              ? 0.8
+              : 0.5) -
+        index * 0.005,
+      affinityScore:
+        (tier === "approved"
+          ? 0.99
+          : tier === "auto_approved"
+            ? 0.9
+            : tier === "copurchase"
+              ? 0.8
+              : 0.5) -
+        index * 0.005,
       payload: {
-        product: catalogProductToWidgetProduct(product),
+        pairingTier:
+          tier === "approved"
+            ? 0
+            : tier === "auto_approved"
+              ? 1
+              : tier === "copurchase"
+                ? 2
+                : 3,
+        product: stripPrivateSignals(catalogProductToWidgetProduct(product)),
         affinity: {
-          score: scoreCatalogCandidate(
-            product,
-            index,
-            recommendationSourceProductId,
-          ),
-          reason: "Selected from the synced store catalog.",
+          score:
+            (tier === "approved"
+              ? 0.99
+              : tier === "auto_approved"
+                ? 0.9
+                : tier === "copurchase"
+                  ? 0.8
+                  : 0.5) -
+            index * 0.005,
+          reason,
           orderCount: Math.max(0, Number(product.orderCount || 0)),
         },
       },
@@ -98,17 +157,6 @@ export async function buildOfferCandidates(input: {
   );
 }
 
-function scoreCatalogCandidate(
-  product: CatalogCacheProduct,
-  index: number,
-  sourceProductId?: string,
-) {
-  const sourceBoost = sourceProductId ? 0.2 : 0;
-  const categoryBoost =
-    product.category && product.category !== "uncategorized" ? 0.1 : 0;
-  return Math.max(0.25, 0.72 + sourceBoost + categoryBoost - index * 0.04);
-}
-
 export async function createOfferRecord(input: {
   shop: string;
   sessionId: string;
@@ -118,13 +166,33 @@ export async function createOfferRecord(input: {
   experimentId?: string | null;
 }) {
   if (!input.decision.widgetType) return null;
+  const source = String(
+    input.triggerContext.sourceProductId ||
+      input.triggerContext.currentProductId ||
+      (input.triggerContext.cartProductIds as string[] | undefined)?.[0] ||
+      "",
+  );
+  const targets = Array.isArray(input.decision.payload.products)
+    ? input.decision.payload.products.map((entry: any) =>
+        String(entry.productId || entry.product?.id || ""),
+      )
+    : [];
+  const pairingProvenance = ["upsell_drawer", "upsell", "rec_strip"].includes(
+    input.decision.widgetType,
+  )
+    ? await capturePairingProvenance(input.shop, source, targets)
+    : [];
+  if (pairingProvenance === null) return null;
+  const payload = stripPrivateSignals(input.decision.payload);
+  delete payload.offerId;
 
   return prisma.offer.create({
     data: {
       shop: input.shop,
       sessionId: input.sessionId,
       widgetType: input.decision.widgetType,
-      payload: input.decision.payload as Prisma.InputJsonValue,
+      payload: payload as Prisma.InputJsonValue,
+      pairingProvenance: pairingProvenance as unknown as Prisma.InputJsonValue,
       triggerContext: input.triggerContext as Prisma.InputJsonValue,
       aiProvider: input.decision.aiProvider,
       abVariant: input.abVariant || null,

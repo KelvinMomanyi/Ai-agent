@@ -2,6 +2,7 @@ import type { AovboostEvent, EventBus } from "./eventBus";
 import type { OfferPoller } from "./offerPoller";
 import type { SessionManager } from "./sessionManager";
 import { setStorefrontCurrency } from "./widgets/BaseWidget";
+import { readShopifyCart } from "./cartState";
 
 type TriggerDefinition = {
   category: string;
@@ -56,8 +57,14 @@ const TRIGGERS = {
   cart_item_added: {
     category: "cart_checkout",
     widgetHint: "upsell_drawer",
-    throttleMs: 2500,
+    throttleMs: 0,
     requestDelayMs: 50,
+  },
+  cart_restored: {
+    category: "cart_checkout",
+    widgetHint: "none",
+    requestOffer: false,
+    throttleMs: 0,
   },
   cart_abandoned: {
     category: "cart_checkout",
@@ -181,6 +188,8 @@ export class TriggerRouter {
   private firedAt = new Map<string, number>();
   private timers = new Map<string, number>();
   private activePriceTarget: HTMLElement | null = null;
+  private cartReadVersion = 0;
+  private seenMutations = new Set<string>();
   private options: TriggerRouterOptions;
 
   constructor(options: TriggerRouterOptions) {
@@ -225,6 +234,8 @@ export class TriggerRouter {
   }
 
   trigger(type: string, payload: TriggerPayload = {}): void {
+    if (["cart_item_added", "add_to_cart", "cart_restored"].includes(type))
+      return;
     this.fire(type, payload);
   }
 
@@ -276,14 +287,16 @@ export class TriggerRouter {
     }
 
     if (detail.type === "add_to_cart") {
-      this.syncCartAndFire("cart_item_added", detail);
+      if (detail.confirmed === true && detail.mutationId)
+        this.syncCartAndFire("cart_item_added", detail);
     }
 
     if (
       detail.type === "remove_from_cart" ||
       detail.type === "quantity_changed"
     ) {
-      this.syncCartAndFire("cart_item_removed", detail);
+      if (detail.confirmed === true && detail.mutationId)
+        this.syncCartAndFire("cart_item_removed", detail);
     }
 
     if (detail.type === "cart_update") {
@@ -319,7 +332,7 @@ export class TriggerRouter {
   private handleCustomTrigger = (event: Event) => {
     const detail = normalizePayload((event as CustomEvent).detail);
     const type = String(detail.type || detail.trigger || "").trim();
-    if (type) this.fire(type, detail);
+    if (type) this.trigger(type, detail);
   };
 
   private handleProfileEvent = (event: Event) => {
@@ -519,20 +532,29 @@ export class TriggerRouter {
   }
 
   private installInitialCartTracking(): void {
-    if (!/\/cart(?:\/|$)/.test(window.location.pathname)) return;
+    const version = this.cartReadVersion;
+    this.setTimer(
+      "initial_cart",
+      async () => {
+        const cart = await readShopifyCart();
+        if (
+          !cart ||
+          version !== this.cartReadVersion ||
+          this.abortController.signal.aborted
+        )
+          return;
+        setStorefrontCurrency(cart.currency);
 
-    window.setTimeout(async () => {
-      const cart = await this.readCart();
-      if (cart.cartItemCount <= 0) return;
-
-      const payload = {
-        ...cart,
-        source: "initial_cart_state",
-      };
-      this.options.eventBus.track("cart_update", payload);
-      this.fire("cart_item_added", payload);
-      this.handleCartState(payload);
-    }, 900);
+        const payload = {
+          ...cart,
+          source: "initial_cart_state",
+        };
+        this.options.eventBus.track("cart_update", payload);
+        this.fire("cart_restored", payload);
+        this.handleCartState(payload);
+      },
+      100,
+    );
   }
 
   private installPostPurchaseTracking(): void {
@@ -565,61 +587,40 @@ export class TriggerRouter {
     trigger: KnownTrigger,
     basePayload: TriggerPayload,
   ): void {
-    window.setTimeout(async () => {
-      const cart = await this.readCart();
-      const payload = { ...basePayload, ...cart };
-      this.fire(trigger, payload);
-      this.options.eventBus.track("cart_update", payload);
-      this.handleCartState(payload);
-    }, 350);
-  }
-
-  private async readCart() {
-    try {
-      const response = await fetch("/cart.js", {
-        headers: { Accept: "application/json" },
-        keepalive: true,
-      });
-      if (!response.ok) throw new Error(`Cart read failed: ${response.status}`);
-      const cart = await response.json();
-      setStorefrontCurrency(cart.currency);
-      const items = Array.isArray(cart.items) ? cart.items : [];
-      const cartProductIds = items
-        .map((item: Record<string, unknown>) => getCartItemProductId(item))
-        .filter(Boolean);
-      const cartVariantIds = items
-        .map((item: Record<string, unknown>) => getCartItemVariantId(item))
-        .filter(Boolean);
-
-      return {
-        cartToken: cart.token || "",
-        cartProductIds,
-        cartVariantIds,
-        cartItems: items.map((item: Record<string, unknown>) => ({
-          productId: getCartItemProductId(item),
-          variantId: getCartItemVariantId(item),
-          quantity: Number(item.quantity || 1),
-          title: String(item.product_title || item.title || ""),
-          handle:
-            String(item.handle || item.url || "")
-              .split("/products/")[1]
-              ?.split(/[?#/]/)[0] || "",
-        })),
-        cartItemCount: Number(cart.item_count || items.length || 0),
-        cartValue: Number(cart.total_price || 0) / 100,
-        currency: String(cart.currency || ""),
-      };
-    } catch {
-      return {
-        cartToken: "",
-        cartProductIds: [],
-        cartVariantIds: [],
-        cartItems: [],
-        cartItemCount: 0,
-        cartValue: 0,
-        currency: "",
-      };
-    }
+    const mutationId = String(basePayload.mutationId || "");
+    if (!mutationId || this.seenMutations.has(mutationId)) return;
+    this.seenMutations.add(mutationId);
+    if (this.seenMutations.size > 200)
+      this.seenMutations.delete(this.seenMutations.values().next().value!);
+    const version = ++this.cartReadVersion;
+    this.setTimer(
+      "cart_sync",
+      async () => {
+        const cart = await readShopifyCart();
+        if (
+          !cart ||
+          version !== this.cartReadVersion ||
+          this.abortController.signal.aborted
+        )
+          return;
+        setStorefrontCurrency(cart.currency);
+        const payload = { ...basePayload, ...cart };
+        this.options.eventBus.track("cart_update", payload);
+        if (
+          trigger === "cart_item_added" &&
+          basePayload.recommendationOrigin !== true &&
+          cart.cartItemCount > 0
+        )
+          this.fire(trigger, payload);
+        else if (
+          trigger !== "cart_item_added" &&
+          !this.options.sessionManager.getSettings().focusedMode
+        )
+          this.fire(trigger, payload);
+        this.handleCartState(payload);
+      },
+      250,
+    );
   }
 
   private handleCartState(payload: TriggerPayload): void {
@@ -645,6 +646,12 @@ export class TriggerRouter {
   }
 
   private fire(type: string, payload: TriggerPayload = {}): void {
+    if (this.abortController.signal.aborted) return;
+    if (
+      this.options.sessionManager.getSettings().focusedMode &&
+      !["cart_item_added", "cart_restored"].includes(type)
+    )
+      return;
     const definition = getTriggerDefinition(type);
     const now = Date.now();
     const throttleMs = definition.throttleMs ?? 10 * 1000;
@@ -748,37 +755,6 @@ function toProductGid(value: unknown) {
   return text.startsWith("gid://shopify/Product/")
     ? text
     : `gid://shopify/Product/${text}`;
-}
-
-function toVariantGid(value: unknown) {
-  const text = String(value || "");
-  if (!text) return "";
-  return text.startsWith("gid://shopify/ProductVariant/")
-    ? text
-    : `gid://shopify/ProductVariant/${text}`;
-}
-
-function getCartItemProductId(item: Record<string, unknown>) {
-  const product = normalizePayload(item.product);
-  return toProductGid(
-    item.product_id ||
-      item.productId ||
-      item.product_gid ||
-      item.productGid ||
-      product.id,
-  );
-}
-
-function getCartItemVariantId(item: Record<string, unknown>) {
-  const variant = normalizePayload(item.variant);
-  return toVariantGid(
-    item.variant_id ||
-      item.variantId ||
-      item.id ||
-      item.variant_gid ||
-      item.variantGid ||
-      variant.id,
-  );
 }
 
 function closestPriceElement(target: EventTarget | null) {

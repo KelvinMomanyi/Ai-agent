@@ -143,6 +143,9 @@ export class BundleWidget extends BaseWidget {
           return;
         }
         if (button) button.textContent = "Bundle added ✓";
+        this.track("recommendation_added", {
+          productIds: products.map((product) => product.id),
+        });
         document.dispatchEvent(
           new CustomEvent("add-to-cart", {
             detail: { source: "bundle_widget" },

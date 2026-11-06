@@ -256,7 +256,7 @@ export async function syncBundleDiscountFunction(
     prisma.appSettings.upsert({
       where: { shop },
       update: {},
-      create: { shop },
+      create: { shop, pairingMode: "autopilot" },
     }),
     prisma.bundle.findMany({
       where: { shop, isActive: true },

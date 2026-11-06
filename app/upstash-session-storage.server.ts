@@ -6,6 +6,14 @@ import prisma from "./db.server";
 const SESSION_KEY_PREFIX = "shopify:session:";
 const LEGACY_SHOP_SESSIONS_KEY = "shopify:shop-sessions";
 const shopSessionsKey = (shop: string) => `shopify:shop-sessions:${shop}`;
+const PERSISTENCE_BACKOFF_MS = [100, 200];
+
+export class SessionPersistenceError extends Error {
+  constructor() {
+    super("Shopify credentials could not be durably persisted");
+    this.name = "SessionPersistenceError";
+  }
+}
 
 export class UpstashSessionStorage implements SessionStorage {
   private redis: Redis | null;
@@ -21,10 +29,28 @@ export class UpstashSessionStorage implements SessionStorage {
   }
 
   async storeSession(session: Session): Promise<boolean> {
-    const storedInPrisma = await this.storeSessionInPrisma(session);
+    let storedInPrisma = false;
+    for (let attempt = 0; attempt <= PERSISTENCE_BACKOFF_MS.length; attempt++) {
+      // Retry the same returned pair; never request another token rotation.
+      storedInPrisma = await this.storeSessionInPrisma(session);
+      if (storedInPrisma) break;
+      if (attempt < PERSISTENCE_BACKOFF_MS.length) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, PERSISTENCE_BACKOFF_MS[attempt]),
+        );
+      }
+    }
     // Rotated credentials must survive cache loss and process restarts.
     // Never acknowledge a cache-only write as a successful token rotation.
-    if (!storedInPrisma) return false;
+    if (!storedInPrisma) {
+      // Do not log the database exception: Prisma errors can include credentials.
+      console.error("AOVBoost CRITICAL: durable session write failed", {
+        shop: session.shop,
+        attempts: PERSISTENCE_BACKOFF_MS.length + 1,
+      });
+      // The Shopify SDK ignores a false result, but propagates a rejection.
+      throw new SessionPersistenceError();
+    }
     if (!this.redis) return storedInPrisma;
 
     try {

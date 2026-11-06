@@ -1,4 +1,8 @@
-import { data as json, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
+import {
+  data as json,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "react-router";
 import {
   getPendingStorefrontLiveEvents,
   LIVE_POLL_INTERVAL_MS,
@@ -12,6 +16,8 @@ import {
   logStorefrontAuthError,
 } from "../utils/storefrontAuth.server";
 import { getStorefrontSessionRecovery } from "../utils/storefrontSessionRecovery.server";
+import { stripPrivateSignals } from "../utils/storefrontPayload.server";
+import { enrollHoldout } from "../models/holdout.server";
 
 const LIVE_REQUESTS_PER_MINUTE = 12;
 
@@ -66,6 +72,8 @@ async function handleLiveRequest(request: Request, credentials: LiveAuthInput) {
     if (!isLiveEventsEnabled()) {
       return liveJson({ enabled: false, events: [] });
     }
+    if ((await enrollHoldout(auth.shop, auth.sessionId))?.arm === "holdout")
+      return liveJson({ enabled: false, events: [] });
 
     const requestCount = await incrementRateLimit(
       cacheKeys.liveRateLimit(auth.sessionId),
@@ -128,12 +136,9 @@ async function handleLiveRequest(request: Request, credentials: LiveAuthInput) {
   }
 }
 
-function liveJson(value: {
-  enabled: boolean;
-  events: unknown[];
-}) {
+function liveJson(value: { enabled: boolean; events: unknown[] }) {
   return json(
-    { ...value, pollAfterMs: LIVE_POLL_INTERVAL_MS },
+    stripPrivateSignals({ ...value, pollAfterMs: LIVE_POLL_INTERVAL_MS }),
     { headers: liveHeaders() },
   );
 }

@@ -1,4 +1,6 @@
 import { getProducts, type WidgetPayload } from "./BaseWidget";
+import { cartDrawerSlot } from "./cartDrawerPlacement";
+import { isElementVisible as isVisible } from "./visibility";
 
 export type StorefrontPage =
   | "home"
@@ -13,6 +15,7 @@ export type WidgetPlacement = {
   zone: "assistant" | "merchandising" | "notice" | "campaign" | "overlay";
   reason: string;
   inline?: boolean;
+  cartDrawer?: boolean;
 };
 
 const EXCLUDED =
@@ -53,32 +56,6 @@ export function getStorefrontPage(): StorefrontPage {
   if (template === "index" || template === "home") return "home";
   if (template === "cart") return "cart";
   return "other";
-}
-
-function isVisible(element: HTMLElement) {
-  if (
-    !element.isConnected ||
-    element.closest(
-      "[hidden], [inert], [aria-hidden='true'], details:not([open])",
-    )
-  )
-    return false;
-  for (
-    let current: HTMLElement | null = element;
-    current;
-    current = current.parentElement
-  ) {
-    const style = getComputedStyle(current);
-    if (
-      style.display === "none" ||
-      style.visibility === "hidden" ||
-      style.visibility === "collapse" ||
-      style.opacity === "0" ||
-      style.contentVisibility === "hidden"
-    )
-      return false;
-  }
-  return true;
 }
 
 export function isUsableAnchor(element: HTMLElement) {
@@ -218,6 +195,21 @@ export function resolveWidgetPlacement(
       zone: "assistant",
       reason: "single_assistant_dock",
     };
+  if (
+    type === "upsell_drawer" &&
+    payload.triggerType === "cart_item_added" &&
+    payload.mutationId
+  ) {
+    const drawer = cartDrawerSlot();
+    if (drawer)
+      return {
+        target: drawer,
+        zone: "merchandising",
+        reason: "native_cart_drawer_slot",
+        inline: true,
+        cartDrawer: true,
+      };
+  }
   if (!main) return deny("no_main_content");
   const slot = findSlot(main, type);
   const place = (
@@ -266,7 +258,8 @@ export function resolveWidgetPlacement(
   }
   if (type === "upsell_drawer") {
     // Complements belong to the cart, never a second modal over the theme's cart.
-    if (page !== "cart") return deny("upsell_waits_for_cart_page");
+    if (page !== "cart") return deny("no_supported_cart_surface");
+    if (hasBlockingSurface()) return deny("avoid_competing_overlay");
     if (slot && !slot.closest("form"))
       return {
         target: slot,

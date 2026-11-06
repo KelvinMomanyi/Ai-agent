@@ -8,13 +8,15 @@ export type AiGatewayRequest = {
   userPrompt: string;
   schemaType?: "json" | "text";
   maxTokens?: number;
-  timeoutProfile?: "urgent" | "normal" | "relaxed";
+  timeoutProfile?: "urgent" | "normal" | "relaxed" | "reasoning";
+  jobClass?: "pairing_reasoning";
   fallback?: string;
   shop?: string;
   signal?: AbortSignal;
 };
 
 export type AiGatewayResult = {
+  modelVersion?: string;
   content: string | null;
   provider: AiProvider;
   executionMs: number;
@@ -24,6 +26,7 @@ export type AiGatewayResult = {
 
 type AiService = {
   name: Exclude<AiProvider, "none">;
+  modelVersion: string;
   url: string;
   headers: Record<string, string>;
   buildBody: (request: AiGatewayRequest) => unknown;
@@ -33,21 +36,22 @@ type AiService = {
 let lastAiProvider: AiProvider = "none";
 
 const MODEL_COOLDOWN_MS = 30_000;
-const modelHealth = new Map<
-  Exclude<AiProvider, "none">,
-  { downUntil: number }
->();
+const modelHealth = new Map<string, { downUntil: number }>();
 
 const TIMEOUT_MS = {
   urgent: Number(process.env.AOVBOOST_AI_TIMEOUT_URGENT_MS || 2500),
   normal: Number(process.env.AOVBOOST_AI_TIMEOUT_NORMAL_MS || 3500),
   relaxed: Number(process.env.AOVBOOST_AI_TIMEOUT_RELAXED_MS || 5800),
+  reasoning: Number(process.env.AOVBOOST_AI_TIMEOUT_REASONING_MS || 12000),
 };
 
 const TOTAL_TIMEOUT_MS = {
   urgent: Number(process.env.AOVBOOST_AI_TOTAL_TIMEOUT_URGENT_MS || 4800),
   normal: Number(process.env.AOVBOOST_AI_TOTAL_TIMEOUT_NORMAL_MS || 5000),
   relaxed: Number(process.env.AOVBOOST_AI_TOTAL_TIMEOUT_RELAXED_MS || 8000),
+  reasoning: Number(
+    process.env.AOVBOOST_AI_TOTAL_TIMEOUT_REASONING_MS || 25000,
+  ),
 };
 
 function makeOpenAiService(
@@ -58,6 +62,7 @@ function makeOpenAiService(
 ): AiService {
   return {
     name,
+    modelVersion: model,
     url,
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -70,22 +75,43 @@ function makeOpenAiService(
         { role: "user", content: request.userPrompt },
       ],
       max_tokens: request.maxTokens || 400,
+      ...(request.jobClass === "pairing_reasoning" && name === "mistral"
+        ? { reasoning_effort: "high" }
+        : {}),
       ...(name === "deepseek"
         ? { thinking: { type: "disabled" } }
         : { temperature: 0 }),
       response_format:
         request.schemaType === "json" ? { type: "json_object" } : undefined,
     }),
-    extractContent: (data: any) => data.choices?.[0]?.message?.content ?? null,
+    extractContent: (data: any) => {
+      const content = data.choices?.[0]?.message?.content;
+      return typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content
+              .filter(
+                (part: any) =>
+                  part.type === "text" && typeof part.text === "string",
+              )
+              .map((part: any) => part.text)
+              .join("")
+          : null;
+    },
   };
 }
 
-function getAiServices(): AiService[] {
+function getAiServices(request?: AiGatewayRequest): AiService[] {
+  const reasoning = request?.jobClass === "pairing_reasoning";
+  const googleModel = reasoning
+    ? process.env.GOOGLE_AI_REASONING_MODEL || "gemini-3.1-pro-preview"
+    : process.env.GOOGLE_AI_MODEL || "gemini-3.6-flash";
   return [
     process.env.GOOGLE_API_KEY
       ? {
           name: "gemini" as const,
-          url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(process.env.GOOGLE_AI_MODEL || "gemini-3.6-flash")}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
+          modelVersion: googleModel,
+          url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(googleModel)}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
           headers: { "Content-Type": "application/json" },
           buildBody: (request: AiGatewayRequest) => ({
             systemInstruction: {
@@ -112,7 +138,9 @@ function getAiServices(): AiService[] {
           "mistral",
           process.env.MISTRAL_API_KEY,
           "https://api.mistral.ai/v1/chat/completions",
-          process.env.MISTRAL_AI_MODEL || "mistral-small-latest",
+          reasoning
+            ? process.env.MISTRAL_AI_REASONING_MODEL || "mistral-large-4-0"
+            : process.env.MISTRAL_AI_MODEL || "mistral-small-latest",
         )
       : null,
     process.env.GROQ_API_KEY
@@ -120,7 +148,11 @@ function getAiServices(): AiService[] {
           "groq",
           process.env.GROQ_API_KEY,
           "https://api.groq.com/openai/v1/chat/completions",
-          process.env.GROQ_AI_MODEL || "llama-3.3-70b-versatile",
+          reasoning
+            ? process.env.GROQ_AI_REASONING_MODEL ||
+                process.env.GROQ_AI_MODEL ||
+                "llama-3.3-70b-versatile"
+            : process.env.GROQ_AI_MODEL || "llama-3.3-70b-versatile",
         )
       : null,
     process.env.DEEPSEEK_API_KEY
@@ -128,7 +160,11 @@ function getAiServices(): AiService[] {
           "deepseek",
           process.env.DEEPSEEK_API_KEY,
           "https://api.deepseek.com/chat/completions",
-          process.env.DEEPSEEK_AI_MODEL || "deepseek-v4-flash",
+          reasoning
+            ? process.env.DEEPSEEK_AI_REASONING_MODEL ||
+                process.env.DEEPSEEK_AI_MODEL ||
+                "deepseek-v4-flash"
+            : process.env.DEEPSEEK_AI_MODEL || "deepseek-v4-flash",
         )
       : null,
   ].filter(Boolean) as AiService[];
@@ -158,8 +194,34 @@ export async function callAI(
   const timeoutMs = getTimeoutMs(timeoutProfile);
   const deadlineAt = startedAt + getTotalTimeoutMs(timeoutProfile);
   lastAiProvider = "none";
+  const services = getAvailableServices(request);
 
-  for (const service of getAvailableServices()) {
+  // Reject an exhausted shop before it can drain the shared daily budget.
+  if (
+    request.shop &&
+    services.length > 0 &&
+    !request.signal?.aborted &&
+    !(await (
+      await import("../models/usage.server")
+    ).monthlyAiAvailable(request.shop))
+  ) {
+    return {
+      content:
+        request.fallback ??
+        getGatewayFallback(request.triggerName, request.schemaType),
+      provider: "none",
+      executionMs: Date.now() - startedAt,
+      fallbackUsed: true,
+      errors: [
+        {
+          provider: "none",
+          message: "Monthly AI allowance unavailable or exhausted",
+        },
+      ],
+    };
+  }
+
+  for (const service of services) {
     if (request.signal?.aborted) break;
     const remainingMs = deadlineAt - Date.now();
     if (remainingMs <= 200) {
@@ -179,6 +241,17 @@ export async function callAI(
       break;
     }
     try {
+      if (
+        !(await (
+          await import("../models/usage.server")
+        ).reserveMonthlyAiCall(request.shop))
+      ) {
+        errors.push({
+          provider: service.name,
+          message: "Monthly AI allowance unavailable or exhausted",
+        });
+        break;
+      }
       const response = await fetch(service.url, {
         method: "POST",
         headers: service.headers,
@@ -194,7 +267,7 @@ export async function callAI(
       if (!response.ok) {
         const message = `HTTP ${response.status}`;
         errors.push({ provider: service.name, message });
-        markModelDown(service.name);
+        markModelDown(service);
         logGatewayAttempt(request, service.name, startedAt, false, message);
         continue;
       }
@@ -209,10 +282,11 @@ export async function callAI(
           continue;
         }
         lastAiProvider = service.name;
-        markModelUp(service.name);
+        markModelUp(service);
         logGatewayAttempt(request, service.name, startedAt, true);
         return {
           content,
+          modelVersion: service.modelVersion,
           provider: service.name,
           executionMs: Date.now() - startedAt,
           fallbackUsed: false,
@@ -222,13 +296,13 @@ export async function callAI(
 
       const message = "Empty model response";
       errors.push({ provider: service.name, message });
-      markModelDown(service.name);
+      markModelDown(service);
       logGatewayAttempt(request, service.name, startedAt, false, message);
     } catch (error) {
       if (request.signal?.aborted) break;
       const message = getErrorMessage(error);
       errors.push({ provider: service.name, message });
-      markModelDown(service.name);
+      markModelDown(service);
       logGatewayAttempt(request, service.name, startedAt, false, message);
     } finally {
       await release();
@@ -289,20 +363,22 @@ export function getLastAiProvider(): AiProvider {
   return lastAiProvider;
 }
 
-function getAvailableServices() {
+function getAvailableServices(request?: AiGatewayRequest) {
   const now = Date.now();
-  return getAiServices().filter((service) => {
-    const health = modelHealth.get(service.name);
+  return getAiServices(request).filter((service) => {
+    const health = modelHealth.get(`${service.name}:${service.modelVersion}`);
     return !health || health.downUntil <= now;
   });
 }
 
-function markModelDown(provider: Exclude<AiProvider, "none">) {
-  modelHealth.set(provider, { downUntil: Date.now() + MODEL_COOLDOWN_MS });
+function markModelDown(service: AiService) {
+  modelHealth.set(`${service.name}:${service.modelVersion}`, {
+    downUntil: Date.now() + MODEL_COOLDOWN_MS,
+  });
 }
 
-function markModelUp(provider: Exclude<AiProvider, "none">) {
-  modelHealth.delete(provider);
+function markModelUp(service: AiService) {
+  modelHealth.delete(`${service.name}:${service.modelVersion}`);
 }
 
 function getTimeoutMs(
@@ -310,7 +386,7 @@ function getTimeoutMs(
 ) {
   const timeout = TIMEOUT_MS[profile];
   return Number.isFinite(timeout) && timeout > 0
-    ? Math.min(timeout, 10_000)
+    ? Math.min(timeout, profile === "reasoning" ? 15_000 : 10_000)
     : TIMEOUT_MS.normal;
 }
 
@@ -319,7 +395,7 @@ function getTotalTimeoutMs(
 ) {
   const timeout = TOTAL_TIMEOUT_MS[profile];
   return Number.isFinite(timeout) && timeout > 0
-    ? Math.min(timeout, 15_000)
+    ? Math.min(timeout, profile === "reasoning" ? 30_000 : 15_000)
     : TOTAL_TIMEOUT_MS.normal;
 }
 

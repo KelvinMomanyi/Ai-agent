@@ -8,9 +8,15 @@ const mocks = vi.hoisted(() => ({
   authenticatedAdmin: vi.fn(),
   applicationAdmin: vi.fn(),
   hasSigningKey: vi.fn(),
+  shopUpsert: vi.fn(),
+  afterAuth: vi.fn(),
+  SessionPersistenceError: class extends Error {},
 }));
-vi.mock("./db.server", () => ({ default: {} }));
+vi.mock("./db.server", () => ({
+  default: { shop: { upsert: mocks.shopUpsert } },
+}));
 vi.mock("./upstash-session-storage.server", () => ({
+  SessionPersistenceError: mocks.SessionPersistenceError,
   UpstashSessionStorage: class {
     loadSession = mocks.loadSession;
   },
@@ -29,15 +35,83 @@ vi.mock("@shopify/shopify-app-react-router/server", async (original) => ({
   ...(await original<
     typeof import("@shopify/shopify-app-react-router/server")
   >()),
-  shopifyApp: (config: { sessionStorage: unknown }) => ({
-    sessionStorage: config.sessionStorage,
-    authenticate: { admin: mocks.authenticatedAdmin },
-    unauthenticated: { admin: mocks.backgroundAdmin },
-  }),
+  shopifyApp: (config: {
+    sessionStorage: unknown;
+    hooks: { afterAuth: (context: unknown) => Promise<void> };
+  }) => {
+    mocks.afterAuth.mockImplementation(config.hooks.afterAuth);
+    return {
+      sessionStorage: config.sessionStorage,
+      authenticate: { admin: mocks.authenticatedAdmin },
+      unauthenticated: { admin: mocks.backgroundAdmin },
+    };
+  },
 }));
-import { unauthenticated } from "./shopify.server";
+import { authenticate, unauthenticated } from "./shopify.server";
 
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  // Preserve the captured afterAuth implementation across tests.
+  vi.clearAllMocks();
+  mocks.loadSession.mockReset();
+  mocks.migrate.mockReset();
+  mocks.backgroundAdmin.mockReset();
+  mocks.authenticatedAdmin.mockReset();
+  mocks.hasSigningKey.mockReset();
+});
+
+describe("interactive Shopify authentication", () => {
+  it("returns a retryable error when the SDK cannot persist credentials", async () => {
+    mocks.authenticatedAdmin.mockRejectedValue(
+      new mocks.SessionPersistenceError("not persisted"),
+    );
+    await expect(
+      authenticate.admin(new Request("https://app.example.com/app")),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(mocks.migrate).not.toHaveBeenCalled();
+    expect(mocks.backgroundAdmin).not.toHaveBeenCalled();
+    expect(mocks.authenticatedAdmin).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves Shopify authentication redirects", async () => {
+    const redirect = new Response(null, { status: 302 });
+    mocks.authenticatedAdmin.mockRejectedValue(redirect);
+    await expect(
+      authenticate.admin(new Request("https://app.example.com/app")),
+    ).rejects.toBe(redirect);
+  });
+
+  it("returns the authenticated context when no migration is needed", async () => {
+    const session = { shop: "test.myshopify.com" };
+    const context = { session, admin: {} };
+    mocks.authenticatedAdmin.mockResolvedValue(context);
+    mocks.migrate.mockResolvedValue(session);
+    expect(
+      await authenticate.admin(new Request("https://app.example.com/app")),
+    ).toBe(context);
+    expect(mocks.backgroundAdmin).not.toHaveBeenCalled();
+  });
+
+  it("stores installation metadata without duplicating session credentials", async () => {
+    await mocks.afterAuth({
+      session: {
+        shop: "test.myshopify.com",
+        accessToken: "fake-access",
+        refreshToken: "fake-refresh",
+        scope: "read_products",
+      },
+    });
+    expect(mocks.shopUpsert).toHaveBeenCalledWith({
+      where: { shopDomain: "test.myshopify.com" },
+      update: { scope: "read_products" },
+      create: {
+        shopDomain: "test.myshopify.com",
+        accessToken: "",
+        scope: "read_products",
+      },
+    });
+    expect(JSON.stringify(mocks.shopUpsert.mock.calls)).not.toContain("fake-");
+  });
+});
 
 describe("background Shopify authentication", () => {
   it("migrates stored legacy credentials before creating the background client", async () => {

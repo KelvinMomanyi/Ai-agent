@@ -16,11 +16,27 @@ import {
 } from "../models/productCatalogMapping";
 import { invalidateCatalogCache } from "../models/catalogCache.server";
 import { redis } from "../redis.server";
+import { authenticateDataWebhook } from "../services/data-webhook.server";
+import { recordHoldoutOrder } from "../models/holdout.server";
+import { invalidateEntitlements } from "../models/entitlements.server";
+import { clearBillingDataCache } from "../models/usage.server";
+import {
+  markPairingDirty,
+  markPairingDeletionDirty,
+  schedulePairingDrain,
+} from "../jobs/pairingAutopilot.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic, payload } = await authenticate.webhook(request);
+  const { shop, topic, payload } = await authenticateDataWebhook(
+    request,
+    authenticate.webhook,
+  );
 
   try {
+    if (topic === "APP_SUBSCRIPTIONS_UPDATE") {
+      await invalidateEntitlements(shop);
+      return new Response("OK");
+    }
     if (topic === "APP_UNINSTALLED") {
       await purgeShopData(shop);
       return new Response("OK");
@@ -43,6 +59,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
       if (!product) {
         if (productId) {
+          await markPairingDeletionDirty(shop, productId);
           await deleteProduct(shop, productId);
           await invalidateCatalogCacheSafely(shop);
         }
@@ -69,6 +86,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           payload,
         });
         await invalidateCatalogCacheSafely(shop);
+        await markPairingDirty(shop, [product.id]);
       }
       return new Response("OK");
     }
@@ -78,6 +96,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         (payload as any).admin_graphql_api_id || (payload as any).id,
       );
       if (productId) {
+        await markPairingDeletionDirty(shop, productId);
         await deleteProduct(shop, productId);
         await invalidateCatalogCacheSafely(shop);
       }
@@ -85,12 +104,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     if (topic === "ORDERS_CREATE") {
+      schedulePairingDrain(shop);
       const settings = await prisma.appSettings.findUnique({
         where: { shop },
         select: { analyticsEnabled: true },
       });
       if (settings?.analyticsEnabled === false) return new Response("OK");
-      const attribution = extractOrderAttribution(payload);
+      const attribution = extractOrderAttribution(payload, shop);
+      await recordHoldoutOrder(
+        shop,
+        payload as Record<string, any>,
+        attribution,
+      );
       const orderId = String(
         (payload as any).admin_graphql_api_id || (payload as any).id || "",
       );
@@ -223,6 +248,11 @@ async function invalidateCatalogCacheSafely(shop: string) {
 
 async function deleteShopData(shop: string, deleteSessions: boolean) {
   await prisma.$transaction([
+    prisma.monthlyUsage.deleteMany({ where: { shop } }),
+    prisma.entitlementSnapshot.deleteMany({ where: { shop } }),
+    prisma.productPairingState.deleteMany({ where: { shop } }),
+    prisma.holdoutOrder.deleteMany({ where: { shop } }),
+    prisma.holdoutEnrollment.deleteMany({ where: { shop } }),
     prisma.offer.deleteMany({ where: { shop } }),
     prisma.shopperEvent.deleteMany({ where: { shop } }),
     prisma.chatMessage.deleteMany({ where: { shop } }),
@@ -230,6 +260,7 @@ async function deleteShopData(shop: string, deleteSessions: boolean) {
     prisma.shopperSession.deleteMany({ where: { shop } }),
     prisma.bundleItem.deleteMany({ where: { bundle: { shop } } }),
     prisma.bundle.deleteMany({ where: { shop } }),
+    prisma.productRelationship.deleteMany({ where: { shop } }),
     prisma.productAffinity.deleteMany({ where: { shop } }),
     prisma.productVariantOrderStat.deleteMany({ where: { shop } }),
     prisma.productOrderStat.deleteMany({ where: { shop } }),
@@ -246,17 +277,21 @@ async function deleteShopData(shop: string, deleteSessions: boolean) {
 }
 
 async function purgeShopData(shop: string) {
-  await Promise.all([
+  const cacheCleanup = await Promise.allSettled([
     redis.del(`installed:${shop}`),
     redis.del(`settings:${shop}`),
     redis.del(`public-settings:${shop}`),
+    redis.del(`pairing-drain:${shop}`),
     invalidateCatalogCache(shop),
+    clearBillingDataCache(shop),
   ]);
   const sessions = await sessionStorage.findSessionsByShop(shop);
   if (sessions.length > 0) {
     await sessionStorage.deleteSessions(sessions.map(({ id }) => id));
   }
   await deleteShopData(shop, true);
+  if (cacheCleanup.some((result) => result.status === "rejected"))
+    throw new Error("Shop cache cleanup needs a webhook retry");
 }
 
 async function recordProductSystemEvents(input: {

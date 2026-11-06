@@ -5,7 +5,7 @@ import {
   processCatalogSyncChunk,
   startCatalogSync,
 } from "../jobs/aovboost.server";
-import { cacheKeys, getJsonCache } from "../redis.server";
+import { cacheKeys } from "../redis.server";
 import { authenticate } from "../shopify.server";
 import { optionsResponse, withCors } from "../utils/cors.server";
 
@@ -48,14 +48,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 async function getCatalogSyncStatus(shop: string) {
-  const [durableProgress, cachedProgress, catalogReadiness] = await Promise.all([
+  const [durableProgress, catalogReadiness] = await Promise.all([
     getCatalogSyncProgress(shop),
-    getJsonCache(cacheKeys.syncProgress(shop)),
     getCatalogReadiness(shop),
   ]);
 
   return {
-    progress: durableProgress || cachedProgress,
+    progress: durableProgress,
     productCount: catalogReadiness.storedProductCount,
     catalogReadiness,
     progressKey: cacheKeys.syncProgress(shop),

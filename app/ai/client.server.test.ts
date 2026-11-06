@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { callAI } from "./client.server";
+vi.mock("../models/usage.server", () => ({
+  monthlyAiAvailable: async () => true,
+  reserveMonthlyAiCall: async () => true,
+}));
 
 const originalEnvironment = {
   GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
@@ -53,6 +57,8 @@ describe("AI gateway grounding contract", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     restoreEnvironment();
   });
 
@@ -127,6 +133,86 @@ describe("AI gateway grounding contract", () => {
     expect(result.errors).toContainEqual({
       provider: "gemini",
       message: "Model returned invalid JSON",
+    });
+  });
+  it("uses the configured reasoning profile without changing the ordinary model", async () => {
+    vi.stubEnv("GOOGLE_AI_REASONING_MODEL", "reasoning-test-model");
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({
+              candidates: [
+                { content: { parts: [{ text: '{"pairings":[]}' }] } },
+              ],
+            }),
+            { status: 200 },
+          ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await callAI({
+      triggerName: "pairing:test",
+      jobClass: "pairing_reasoning",
+      timeoutProfile: "reasoning",
+      systemPrompt: "rules",
+      userPrompt: "catalog",
+      schemaType: "json",
+      fallback: '{"pairings":[]}',
+    });
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "reasoning-test-model:generateContent",
+    );
+    expect(result.modelVersion).toBe("reasoning-test-model");
+    await callAI({
+      triggerName: "chat:test",
+      systemPrompt: "rules",
+      userPrompt: "message",
+      fallback: "fallback",
+    });
+    expect(String(fetchMock.mock.calls[1][0])).toContain(
+      "gemini-test-model:generateContent",
+    );
+  });
+  it("keeps Mistral thinking chunks out of parsed pairing JSON", async () => {
+    vi.stubEnv("GOOGLE_API_KEY", "");
+    vi.stubEnv("MISTRAL_API_KEY", "synthetic");
+    vi.stubEnv("MISTRAL_AI_REASONING_MODEL", "reasoning-mistral-test");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: [
+                  {
+                    type: "thinking",
+                    thinking: [{ text: "private reasoning" }],
+                  },
+                  { type: "text", text: '{"pairings":[]}' },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await callAI({
+      triggerName: "pairing:test",
+      jobClass: "pairing_reasoning",
+      timeoutProfile: "reasoning",
+      systemPrompt: "rules",
+      userPrompt: "catalog",
+      schemaType: "json",
+      fallback: "fallback",
+    });
+    expect(result.content).toBe('{"pairings":[]}');
+    expect(result.fallbackUsed).toBe(false);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      model: "reasoning-mistral-test",
+      reasoning_effort: "high",
     });
   });
 });

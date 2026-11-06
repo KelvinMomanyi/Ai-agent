@@ -7,12 +7,10 @@ import {
 import { generateWidgetCopy } from "./copyWriter.server";
 import { DECISION_ENGINE_SYSTEM } from "./prompts";
 import type { DecisionInput, OfferDecision } from "./types";
-import { getActiveBundlesForProduct } from "../models/bundle.server";
 import { getBundleDiscountVersion } from "../models/bundleDiscount.server";
 import { catalogProductToWidgetProduct } from "../models/catalogGuard.server";
 import {
   getRecommendationCatalog,
-  pickCatalogProducts,
   type CatalogCacheProduct,
 } from "../models/catalogCache.server";
 
@@ -45,32 +43,31 @@ export async function getOfferDecision(
     input.currentProductId ||
     input.cartProductIds[0] ||
     input.session.viewedProductIds.at(-1);
-  const [catalog, bundles] = await Promise.all([
-    getRecommendationCatalog({
-      shop: input.shop,
-      sourceProductId: recommendationSourceProductId,
-    }),
-    getActiveBundlesForProduct(input.shop, input.currentProductId, {
-      excludeProductIds: input.settings.blockedProductIds,
-    }),
-  ]);
-  const promptCatalogProducts = pickCatalogProducts({
-    catalog,
+  const catalog = await getRecommendationCatalog({
+    shop: input.shop,
     sourceProductId: recommendationSourceProductId,
-    cartProductIds: input.cartProductIds,
-    excludeProductIds: input.settings.blockedProductIds,
-    query: getTriggerQuery(input.trigger?.payload),
-    limit: 35,
   });
-  const affinities = promptCatalogProducts
-    .slice(0, 5)
-    .map((product, index) =>
-      catalogProductToAffinity(
-        product,
-        index,
-        catalog.byId[recommendationSourceProductId || ""],
-      ),
-    );
+  // Approval precedence and reasons come from the server's verified candidates.
+  // Never rebuild another catalog list after selection.
+  const productCandidates = input.candidates.filter(
+    (candidate) => candidate.type === "product",
+  );
+  const bundles = input.candidates
+    .filter((candidate) => candidate.type === "bundle")
+    .map((candidate) => candidate.payload.bundle)
+    .filter(Boolean);
+  const promptCatalogProducts = productCandidates.map(
+    (candidate) => candidate.payload.product as CatalogCacheProduct,
+  );
+  const affinities = productCandidates.slice(0, 5).map((candidate) => ({
+    targetId: candidate.productId,
+    target: candidate.payload.product,
+    score: candidate.score,
+    reason:
+      asRecord(candidate.payload.affinity).reason ||
+      "Selected from your synced store catalog.",
+    orderCount: Number(asRecord(candidate.payload.affinity).orderCount || 0),
+  }));
 
   const context = {
     shop: input.shop,
@@ -156,14 +153,7 @@ export async function getOfferDecision(
 
   if (!decision.widgetType)
     return noOffer(decision.reasoning, decision.aiProvider);
-  const requiredCartUpsell =
-    decision.widgetType === "upsell_drawer" &&
-    (input.trigger?.type === "cart_item_added" ||
-      input.trigger?.type === "add_to_cart");
-  if (
-    input.recentlyDismissedWidgets.includes(decision.widgetType) &&
-    !requiredCartUpsell
-  ) {
+  if (input.recentlyDismissedWidgets.includes(decision.widgetType)) {
     return noOffer("Widget was recently dismissed.", decision.aiProvider);
   }
 
@@ -202,6 +192,9 @@ export async function getOfferDecision(
     {
       signal: input.signal,
       useAI:
+        !["upsell_drawer", "rec_strip", "social_proof", "bundle"].includes(
+          decision.widgetType,
+        ) &&
         !decisionAskedAi &&
         ![
           "initial",
@@ -359,32 +352,6 @@ Prefer chat with a concise personalized greeting, using catalog-backed products 
   }
 }
 
-function catalogProductToAffinity(
-  product: CatalogCacheProduct,
-  index: number,
-  source?: CatalogCacheProduct,
-) {
-  const sharedTags = source
-    ? product.tags.filter((tag) => source.tags.includes(tag)).length
-    : 0;
-  const sameCategory =
-    source && product.category === source.category ? 0.18 : 0;
-  const score = Math.max(
-    0.25,
-    0.82 + sameCategory + sharedTags * 0.03 - index * 0.05,
-  );
-
-  return {
-    targetId: product.id,
-    target: product,
-    score,
-    reason: source
-      ? `Catalog match for ${source.title}.`
-      : "Catalog-backed recommendation.",
-    orderCount: Math.max(0, Number(product.orderCount || 0)),
-  };
-}
-
 function toPromptCatalogProduct(product: CatalogCacheProduct) {
   return {
     id: product.id,
@@ -395,27 +362,8 @@ function toPromptCatalogProduct(product: CatalogCacheProduct) {
     category: product.category,
     vendor: product.vendor,
     tags: product.tags.slice(0, 8),
-    inventory: product.inventory,
     variantId: product.variants[0]?.id || "",
   };
-}
-
-function getTriggerQuery(payload?: Record<string, unknown>) {
-  if (!payload) return "";
-  return [
-    payload.query,
-    payload.searchQuery,
-    payload.searchTerm,
-    payload.message,
-    payload.productTitle,
-    payload.title,
-    payload.category,
-  ]
-    .filter(
-      (value): value is string =>
-        typeof value === "string" && value.trim().length > 0,
-    )
-    .join(" ");
 }
 
 export function buildHeuristicOfferDecision(
@@ -543,11 +491,7 @@ export function buildHeuristicOfferDecision(
     input.settings.upsellEnabled &&
     cartHasItems &&
     !isRecoveryOrThresholdTrigger(triggerType) &&
-    (triggerType === "cart_item_added" ||
-      triggerType === "checkout_started" ||
-      triggerType === "add_to_cart" ||
-      input.session.journeyStage === "buying" ||
-      input.currentPageType === "cart")
+    (triggerType === "cart_item_added" || triggerType === "add_to_cart")
   ) {
     return {
       widgetType: "upsell_drawer",

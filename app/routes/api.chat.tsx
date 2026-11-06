@@ -1,4 +1,5 @@
 import { isInstalledShop } from "../models/installedShop.server";
+import { enrollHoldout } from "../models/holdout.server";
 import {
   data as json,
   type ActionFunctionArgs,
@@ -210,10 +211,15 @@ const handleChatRequest = async ({ request }: ActionFunctionArgs) => {
   const settings = await prisma.appSettings.upsert({
     where: { shop },
     update: {},
-    create: { shop },
+    create: { shop, pairingMode: "autopilot" },
   });
   const analyticsEnabled =
     settings.analyticsEnabled && body.analyticsConsent !== false;
+  if ((await enrollHoldout(shop, sessionId, settings))?.arm === "holdout")
+    return json(
+      { error: "Recommendations are withheld for measurement." },
+      { status: 403, headers: withCors() },
+    );
   if (!settings.chatEnabled) {
     return json(
       { error: "The sales assistant is currently disabled." },
