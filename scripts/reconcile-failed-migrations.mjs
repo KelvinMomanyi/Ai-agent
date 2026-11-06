@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 
 import { PrismaClient } from "@prisma/client";
+import { inspectFocusedCartMigration, focusedCartRecoveryMessage } from "./focused-cart-migration-check.mjs";
 
 const durableCatalogMigration = "20260803090000_durable_catalog_sync";
 const variantStatsMigration = "20260811130000_product_variant_order_stats";
@@ -127,6 +128,8 @@ function assertCompatibleSubset(actual, expected, objectName) {
 }
 
 async function getFailedMigration(prisma, migrationName) {
+  const [history] = await prisma.$queryRaw`SELECT to_regclass('public._prisma_migrations') IS NOT NULL present`;
+  if (!history.present) return null;
   const rows = await prisma.$queryRaw`
     SELECT "id", "logs"
     FROM "_prisma_migrations"
@@ -248,6 +251,8 @@ const prisma = new PrismaClient({ datasourceUrl: migrationDatabaseUrl });
 const resolutions = [];
 
 try {
+  const focusedCart = await inspectFocusedCartMigration(prisma);
+  if (focusedCart.status !== "not_failed") throw new Error(focusedCartRecoveryMessage(focusedCart));
   const failedDurableCatalog = await getFailedMigration(
     prisma,
     durableCatalogMigration,

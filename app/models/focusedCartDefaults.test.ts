@@ -20,10 +20,19 @@ let db: PGlite;
 beforeAll(async () => {
   db = new PGlite();
   await db.exec(`CREATE TABLE "AppSettings" (id TEXT PRIMARY KEY, shop TEXT UNIQUE, "chatEnabled" BOOLEAN DEFAULT true, "bundlesEnabled" BOOLEAN DEFAULT true, "upsellEnabled" BOOLEAN DEFAULT true, "discountNudgeEnabled" BOOLEAN DEFAULT true, "exitIntentEnabled" BOOLEAN DEFAULT true, "postPurchaseEnabled" BOOLEAN DEFAULT true, "proactiveMessagesEnabled" BOOLEAN DEFAULT true, "maxProductRecommendations" INTEGER DEFAULT 3, "hesitationDetectionEnabled" BOOLEAN DEFAULT true, "bundleSupportEnabled" BOOLEAN DEFAULT true, "updatedAt" TIMESTAMP NOT NULL);
-    CREATE TABLE "Session" (shop TEXT); CREATE TABLE "Shop" ("shopDomain" TEXT);
+    CREATE TABLE "session" (shop TEXT); CREATE TABLE "Shop" ("shopDomain" TEXT);
     INSERT INTO "AppSettings" (id,shop,"chatEnabled","updatedAt") VALUES ('custom','custom.myshopify.com',false,CURRENT_TIMESTAMP);
-    INSERT INTO "Session" (shop) VALUES ('session-only.myshopify.com'),('session-only.myshopify.com');
+    INSERT INTO "session" (shop) VALUES ('session-only.myshopify.com'),('session-only.myshopify.com');
     INSERT INTO "Shop" ("shopDomain") VALUES ('legacy-shop.myshopify.com');`);
+  await db.exec(
+    readFileSync(
+      new URL(
+        "../../prisma/migrations/20261105135000_session_migration_compatibility/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
   const sql = readFileSync(
     new URL(
       "../../prisma/migrations/20261105140000_focused_cart_defaults/migration.sql",
