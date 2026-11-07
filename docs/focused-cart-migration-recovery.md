@@ -1,5 +1,76 @@
 # Focused-cart migration recovery
 
+## 7 November update: recover during the normal build
+
+Plan recorded before source edits. The owner has now supplied repeated build logs
+confirming the exact casing error and compatible schema. The manual-only guard
+keeps stopping normal deployments, so extend the existing migration reconciliation
+to prepare a single narrowly guarded rollback of that failed migration record.
+Starting commit ea046f7 is clean; the previous local gate passed 699 tests in 92 files.
+
+- Only this known error, an unchanged historical migration checksum and compatible
+  schema qualify. Require exactly one unresolved failure and no failed/applied
+  compatibility migration whose state conflicts with the proposed retry.
+- Before changing history, require the exact reviewed compatibility SQL and the
+  original focused-default SQL in the checkout, allowing only line-ending changes.
+  Missing or changed files must stop the build.
+- Use Prisma's existing resolve --rolled-back command through the established
+  reconciliation runner. Never mark the migration applied, update business rows
+  directly or reset the database. The existing migrate deploy step then applies
+  the compatibility migration before retrying focused defaults.
+- A completed/rolled-back record is a no-op on later builds. Reject unknown failures,
+  schema drift and failed recovery commands. Add orchestration/real-SQL tests and
+  run npm run verify without executing any production command here.
+
+Keep the normal build command npm run vercel-build. No temporary build override is
+needed once this update is released. The initial investigation/manual fallback is
+recorded below; its manual-only behavior is superseded by this guarded build path.
+
+Current deployment steps:
+
+1. Commit/release this patch, including the new recovery helper and existing
+   compatibility migration. If the earlier one-time build override was used,
+   restore `buildCommand` to `npm run vercel-build` before deploying this update.
+2. Redeploy the affected Vercel environment normally. Its existing pre-build step
+   validates the error, schema, unique shop key, failed-record checksum and both
+   reviewed SQL files. It then runs only
+   `prisma migrate resolve --rolled-back 20261105140000_focused_cart_defaults`.
+3. The existing `prisma migrate deploy` build command applies pending SQL in order.
+   On subsequent successful builds, no unresolved failure remains, so recovery is
+   skipped. Other failures, altered/missing files and unexpected schema still stop
+   the build for review. No reset or mark-applied shortcut is used.
+
+The standalone check command stays read-only. Only the existing build resolution
+runner may execute the approved Prisma metadata command during a user-initiated
+deployment. Codex has not run that command or connected to production here.
+
+Files changed in this update: new `scripts/focused-cart-migration-recovery.mjs`;
+the existing reconciliation runner; one fixed rollback alias in package.json;
+`app/models/focusedCartMigration.integration.test.ts`; new
+`app/migration-reconciliation.test.ts`; and this report. There is no new or edited
+migration, dependency, environment variable, runtime feature or Vercel build-command
+change. Existing migration files remain immutable.
+
+Validation on 7 November 2026:
+
+| Command | Result |
+| --- | --- |
+| Targeted recovery/default/orchestration tests | Passed: 29 tests before the final uniqueness guard; the full suite also validates that added case. |
+| `npm.cmd run verify` | Passed, exit 0: 713 tests in 93 files, typecheck, lint, SDK build/size checks, Prisma generation and production client/server builds. Fourteen new regressions over the previous 699-test baseline. |
+| `node --check` on changed scripts | Passed; syntax validation only. |
+| `git diff --check` | Passed. No migration file was changed. |
+
+The real-SQL recovery suite now has 18 cases and the mocked orchestration suite
+has six. They verify no-op future builds, missing/altered SQL, failed-record
+checksum and line endings, another unresolved failure, compatibility drift, the
+unique shop index needed for an idempotent backfill, and stop-on-error execution.
+Prisma command spawning is mocked; history resolution is simulated only in an
+isolated in-memory database. The initial test-only WASM startup timeout was fixed
+by waiting for PGlite readiness in its existing longer setup hook. No live Prisma
+resolve, production migration, deploy, credential access, commit or push occurred.
+
+## Initial 6 November investigation and manual fallback
+
 Plan recorded before edits, 6 November 2026. Latest local gate passed 689 tests in
 91 files. The owner reported P3009 for 20261105140000_focused_cart_defaults; the
 original database error/log is not included. No production connection will be made.
@@ -70,6 +141,10 @@ Files changed:
 - This recovery report.
 
 ## Operator recovery steps
+
+The following is the **manual fallback** from the initial patch. It is not required
+for the confirmed casing failure once the 7 November automatic build update above
+is deployed.
 
 Do this from the reviewed patched checkout with its installed Prisma 6 dependencies,
 using your trusted deployment environment and intended database. Test against a
