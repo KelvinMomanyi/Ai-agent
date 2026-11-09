@@ -158,15 +158,18 @@ export async function getPlanStatus(shop: string, admin?: BillingAdmin) {
     entitlement,
     usage,
     plan,
-    notice: displayLimitReached
-      ? "Your monthly recommendation allowance is used or reserved. New offers pause until capacity resets or you upgrade."
-      : analyticsRequired
-        ? "Enable analytics in recommendation settings to use the Free plan's displayed-offer allowance."
-        : !usage.available && entitlement.tier === "free"
-          ? "Usage verification is temporarily unavailable. New free offers pause until it recovers."
-          : entitlement.state === "unverified"
-            ? "Your plan needs verification. Deterministic recommendations continue; AI is paused until the plan is verified."
-            : null,
+    notice:
+      entitlement.state === "test"
+        ? "Billing test mode is active. Pro features are enabled without a Shopify subscription. AI usage limits still apply."
+        : displayLimitReached
+          ? "Your monthly recommendation allowance is used or reserved. New offers pause until capacity resets or you upgrade."
+          : analyticsRequired
+            ? "Enable analytics in recommendation settings to use the Free plan's displayed-offer allowance."
+            : !usage.available && entitlement.tier === "free"
+              ? "Usage verification is temporarily unavailable. New free offers pause until it recovers."
+              : entitlement.state === "unverified"
+                ? "Your plan needs verification. Deterministic recommendations continue; AI is paused until the plan is verified."
+                : null,
   };
 }
 export async function reserveOfferDisplay(

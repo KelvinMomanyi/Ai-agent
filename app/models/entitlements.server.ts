@@ -9,7 +9,7 @@ export type Entitlement = {
   tier: PlanTier | "unverified";
   subscriptionName: string | null;
   checkedAt: number;
-  state: "verified" | "grace" | "unverified";
+  state: "verified" | "grace" | "unverified" | "test";
   unmapped: boolean;
 };
 export type BillingAdmin = {
@@ -34,6 +34,18 @@ const configVersion = () =>
     .digest("hex")
     .slice(0, 16);
 export const entitlementCacheKey = (shop: string) => `entitlement:${shop}`;
+
+export function billingTestModeEnabled() {
+  if (config.billingTestMode !== true) return false;
+  // Vercel previews also run production builds; use the deployment environment.
+  // Unknown/custom deployments and missing Vercel metadata fail closed.
+  if (process.env.VERCEL_ENV)
+    return ["preview", "development"].includes(process.env.VERCEL_ENV);
+  return (
+    process.env.VERCEL !== "1" &&
+    ["development", "test"].includes(process.env.NODE_ENV ?? "")
+  );
+}
 
 export function mapSubscriptions(
   subscriptions: Array<{ name: string; status: string }>,
@@ -79,6 +91,8 @@ export function mapSubscriptions(
   };
 }
 export function limitsFor(entitlement: Entitlement) {
+  if (entitlement.state === "test")
+    return { ...config.tiers.pro, label: "Pro (test mode)" };
   if (entitlement.tier === "unverified")
     return {
       ...config.tiers.pro,
@@ -90,6 +104,7 @@ export function limitsFor(entitlement: Entitlement) {
 function valid(value: any): value is Entitlement {
   return (
     value &&
+    value.state !== "test" &&
     ["free", "pro"].includes(value.tier) &&
     Number.isFinite(value.checkedAt) &&
     value.checkedAt <= Date.now() &&
@@ -111,6 +126,15 @@ export async function getEntitlements(
   shop: string,
   admin?: BillingAdmin,
 ): Promise<Entitlement> {
+  // Synthetic access is never cached or persisted as a verified subscription.
+  if (billingTestModeEnabled())
+    return {
+      tier: "pro",
+      subscriptionName: null,
+      checkedAt: Date.now(),
+      state: "test",
+      unmapped: false,
+    };
   const key = entitlementCacheKey(shop);
   let cached: Entitlement | null = null;
   try {

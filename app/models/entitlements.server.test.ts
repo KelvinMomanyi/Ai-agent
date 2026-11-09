@@ -29,6 +29,7 @@ import {
   PLAN_CONFIG,
   entitlementCacheKey,
   hostedUpgradeUrl,
+  billingTestModeEnabled,
 } from "./entitlements.server";
 const original = structuredClone(PLAN_CONFIG);
 const shop = "one.myshopify.com";
@@ -45,6 +46,10 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-11-05T00:00:00Z"));
   PLAN_CONFIG.billingSource = "admin_api";
+  PLAN_CONFIG.billingTestMode = false;
+  vi.stubEnv("NODE_ENV", "test");
+  vi.stubEnv("VERCEL_ENV", undefined);
+  vi.stubEnv("VERCEL", undefined);
   mocks.get.mockImplementation(async (key) => mocks.cache.get(key));
   mocks.set.mockImplementation(async (key, value) =>
     mocks.cache.set(key, value),
@@ -58,6 +63,96 @@ beforeEach(() => {
 afterEach(() => {
   Object.assign(PLAN_CONFIG, structuredClone(original));
   vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
+describe("billing test override", () => {
+  it.each([
+    ["development", undefined, undefined, true],
+    ["test", undefined, undefined, true],
+    ["production", "preview", "1", true],
+    ["production", "development", "1", true],
+    ["production", "production", "1", false],
+    ["development", "production", "1", false],
+    ["production", undefined, undefined, false],
+    [undefined, undefined, undefined, false],
+    ["development", undefined, "1", false],
+    ["development", "staging", "1", false],
+  ])(
+    "requires an allowed environment (NODE_ENV=%s, VERCEL_ENV=%s, VERCEL=%s)",
+    (nodeEnv, vercelEnv, vercel, enabled) => {
+      PLAN_CONFIG.billingTestMode = true;
+      vi.stubEnv("NODE_ENV", nodeEnv);
+      vi.stubEnv("VERCEL_ENV", vercelEnv);
+      vi.stubEnv("VERCEL", vercel);
+      expect(billingTestModeEnabled()).toBe(enabled);
+    },
+  );
+  it.each([false, "true", "false", undefined])(
+    "requires the literal boolean true rather than %s",
+    (value) => {
+      PLAN_CONFIG.billingTestMode = value as boolean;
+      expect(billingTestModeEnabled()).toBe(false);
+    },
+  );
+  it("grants uncached Pro access without verifying or persisting a subscription", async () => {
+    PLAN_CONFIG.billingTestMode = true;
+    PLAN_CONFIG.billingSource = "unconfirmed";
+    for (const tenant of [shop, "two.myshopify.com"]) {
+      const entitlement = await getEntitlements(tenant, admin);
+      expect(entitlement).toMatchObject({
+        tier: "pro",
+        state: "test",
+        subscriptionName: null,
+        unmapped: false,
+      });
+      expect(limitsFor(entitlement)).toMatchObject({
+        label: "Pro (test mode)",
+        monthlyDisplays: null,
+        monthlyAiCalls: PLAN_CONFIG.tiers.pro.monthlyAiCalls,
+        features: {
+          holdoutReporting: true,
+          advancedPlacements: true,
+          inventoryAware: false,
+          reorderInsights: false,
+        },
+      });
+    }
+    for (const operation of [
+      mocks.graphql,
+      mocks.get,
+      mocks.set,
+      mocks.find,
+      mocks.save,
+    ])
+      expect(operation).not.toHaveBeenCalled();
+  });
+  it("restores real billing immediately when switched off or running in production", async () => {
+    PLAN_CONFIG.billingTestMode = true;
+    expect((await getEntitlements(shop, admin)).state).toBe("test");
+    PLAN_CONFIG.billingTestMode = false;
+    mocks.graphql.mockResolvedValue(subscriptions([]));
+    expect(await getEntitlements(shop, admin)).toMatchObject({
+      tier: "free",
+      state: "verified",
+    });
+    PLAN_CONFIG.billingTestMode = true;
+    expect((await getEntitlements(shop, admin)).state).toBe("test");
+    vi.stubEnv("VERCEL_ENV", "production");
+    expect(await getEntitlements(shop, admin)).toMatchObject({
+      tier: "free",
+      state: "verified",
+    });
+    expect(mocks.graphql).toHaveBeenCalledTimes(1);
+  });
+  it("keeps unconfirmed production billing unverified even with the switch on", async () => {
+    PLAN_CONFIG.billingTestMode = true;
+    PLAN_CONFIG.billingSource = "unconfirmed";
+    vi.stubEnv("VERCEL_ENV", "production");
+    const entitlement = await getEntitlements(shop, admin);
+    expect(entitlement.state).toBe("unverified");
+    expect(limitsFor(entitlement).monthlyAiCalls).toBe(0);
+    expect(mocks.graphql).not.toHaveBeenCalled();
+  });
 });
 describe("Shopify plan verification", () => {
   it("maps confirmed absent subscriptions to free, and exact configured active names to pro", () => {

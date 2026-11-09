@@ -4,6 +4,7 @@ import {
   PLAN_CONFIG,
   hostedUpgradeUrl,
   invalidateEntitlements,
+  billingTestModeEnabled,
 } from "./entitlements.server";
 
 export const CREATE_SUBSCRIPTION = `#graphql
@@ -34,6 +35,7 @@ export async function upgradeAction({ request }: ActionFunctionArgs) {
   const { session, admin, redirect } = await authenticate.admin(request);
   const intent = (await request.formData()).get("intent");
   if (intent === "refresh") {
+    if (billingTestModeEnabled()) return data({ ok: true });
     try {
       await invalidateEntitlements(session.shop);
     } catch {
@@ -46,6 +48,11 @@ export async function upgradeAction({ request }: ActionFunctionArgs) {
   }
   if (intent !== "upgrade")
     return new Response("Unknown action", { status: 400 });
+  if (billingTestModeEnabled())
+    return data(
+      { error: "Billing test mode is active. No subscription is required." },
+      { status: 409 },
+    );
   const hosted = hostedUpgradeUrl(session.shop);
   if (hosted) return redirect(hosted, { target: "_top" });
   const price = configuredRecurringPrice();

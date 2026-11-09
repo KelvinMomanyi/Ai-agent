@@ -44,10 +44,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       plan: limitsFor(entitlement),
       month: usageMonth().toISOString(),
       canUpgrade: Boolean(
-        hostedUpgradeUrl(session.shop) ||
-        (PLAN_CONFIG.billingSource === "admin_api" &&
-          PLAN_CONFIG.upgradeMode === "billing_api" &&
-          configuredRecurringPrice()),
+        entitlement.state !== "test" &&
+        (hostedUpgradeUrl(session.shop) ||
+          (PLAN_CONFIG.billingSource === "admin_api" &&
+            PLAN_CONFIG.upgradeMode === "billing_api" &&
+            configuredRecurringPrice())),
       ),
     },
     { headers: { "Cache-Control": "no-store" } },
@@ -66,7 +67,13 @@ export default function PlanAndUsage() {
     <Page title="Plan & usage">
       <BlockStack gap="400">
         {error ? <Banner tone="critical">{error}</Banner> : null}
-        {entitlement.state !== "verified" ? (
+        {entitlement.state === "test" ? (
+          <Banner tone="info" title="Billing test mode is active">
+            Pro features are enabled for this test environment without a Shopify
+            subscription. AI usage limits still apply. No charges are created by
+            test mode.
+          </Banner>
+        ) : entitlement.state !== "verified" ? (
           <Banner
             tone="warning"
             title={
@@ -163,11 +170,11 @@ export default function PlanAndUsage() {
                   Choose or change plan on Shopify
                 </Button>
               </Form>
-            ) : (
+            ) : entitlement.state !== "test" ? (
               <Text as="p">
                 Plan upgrades are awaiting billing setup by the app owner.
               </Text>
-            )}
+            ) : null}
           </BlockStack>
         </Card>
         <Card>

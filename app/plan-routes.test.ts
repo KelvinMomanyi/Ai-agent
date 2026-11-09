@@ -26,6 +26,10 @@ const req = (intent = "upgrade") =>
   }) as any;
 beforeEach(() => {
   vi.resetAllMocks();
+  PLAN_CONFIG.billingTestMode = false;
+  vi.stubEnv("NODE_ENV", "test");
+  vi.stubEnv("VERCEL_ENV", undefined);
+  vi.stubEnv("VERCEL", undefined);
   vi.stubEnv("SHOPIFY_APP_URL", "https://app.test");
   mocks.auth.mockResolvedValue({
     session: { shop: "one.myshopify.com" },
@@ -39,6 +43,27 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 describe("explicit plan actions", () => {
+  it("authenticates but never creates a charge or invalidates billing while test mode is active", async () => {
+    PLAN_CONFIG.billingTestMode = true;
+    PLAN_CONFIG.billingSource = "admin_api";
+    PLAN_CONFIG.upgradeMode = "billing_api";
+    PLAN_CONFIG.proRecurringPrice = {
+      amount: 7,
+      currencyCode: "USD",
+      interval: "EVERY_30_DAYS",
+      test: false,
+    } as any;
+    expect(((await upgradeAction(req())) as any).init.status).toBe(409);
+    PLAN_CONFIG.upgradeMode = "shopify_hosted";
+    expect(((await upgradeAction(req())) as any).init.status).toBe(409);
+    expect(((await upgradeAction(req("refresh"))) as any).data).toEqual({
+      ok: true,
+    });
+    expect(mocks.auth).toHaveBeenCalledTimes(3);
+    expect(mocks.graphql).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.invalidate).not.toHaveBeenCalled();
+  });
   it("requires admin authentication and never creates a charge without configured pricing", async () => {
     const result = (await upgradeAction(req())) as any;
     expect(result.init.status).toBe(409);

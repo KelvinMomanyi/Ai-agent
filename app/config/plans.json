@@ -1,5 +1,6 @@
 {
   "billingSource": "unconfirmed",
+  "billingTestMode": true,
   "appHandle": "ai-agent-21",
   "upgradeMode": "unconfigured",
   "proRecurringPrice": null,

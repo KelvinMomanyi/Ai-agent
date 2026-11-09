@@ -28,6 +28,7 @@ import {
   getPlanStatus,
   reserveOfferDisplay,
   reserveMonthlyAiCall,
+  monthlyAiAvailable,
   recordDisplayedOffers,
   usageMonth,
   usageKeys,
@@ -52,6 +53,30 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 describe("monthly shared usage", () => {
+  it("uses Pro allowances in test mode and retains shared AI usage limits", async () => {
+    mocks.entitlement.mockResolvedValue({
+      ...free,
+      tier: "pro",
+      state: "test",
+    });
+    const status = await getPlanStatus(shop);
+    expect(status.notice).toContain("Billing test mode is active");
+    expect(status.plan.features.holdoutReporting).toBe(true);
+    expect(status.plan.features.advancedPlacements).toBe(true);
+    expect(await reserveOfferDisplay(shop, "offer")).toBe(true);
+    expect(await monthlyAiAvailable(shop)).toBe(true);
+    expect(await reserveMonthlyAiCall(shop)).toBe(true);
+    expect(mocks.eval.mock.lastCall?.[2].slice(4, 7)).toEqual([
+      "ai",
+      "",
+      status.plan.monthlyAiCalls,
+    ]);
+    mocks.eval.mockResolvedValue([0, 400, status.plan.monthlyAiCalls, 0, 0]);
+    expect(await monthlyAiAvailable(shop)).toBe(false);
+    expect(await reserveMonthlyAiCall(shop)).toBe(false);
+    mocks.eval.mockRejectedValue(new Error("Redis unavailable"));
+    expect(await reserveMonthlyAiCall(shop)).toBe(false);
+  });
   it("seeds atomic counters from tenant-scoped durable totals with UTC calendar boundaries", async () => {
     await getUsage(shop);
     expect(mocks.find).toHaveBeenCalledWith({
