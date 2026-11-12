@@ -2,6 +2,7 @@ import { Redis } from "@upstash/redis";
 import { Session } from "@shopify/shopify-api";
 import type { SessionStorage } from "@shopify/shopify-app-session-storage";
 import prisma from "./db.server";
+import { redisConnection } from "./redis-configuration.server.mjs";
 
 const SESSION_KEY_PREFIX = "shopify:session:";
 const LEGACY_SHOP_SESSIONS_KEY = "shopify:shop-sessions";
@@ -19,11 +20,14 @@ export class UpstashSessionStorage implements SessionStorage {
   private redis: Redis | null;
 
   constructor() {
+    const connection = redisConnection();
     this.redis =
-      process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+      connection.status === "configured"
         ? new Redis({
-            url: process.env.UPSTASH_REDIS_REST_URL,
-            token: process.env.UPSTASH_REDIS_REST_TOKEN,
+            url: connection.url!,
+            token: connection.token!,
+            retry: { retries: 1, backoff: () => 100 },
+            signal: () => AbortSignal.timeout(1500),
           })
         : null;
   }

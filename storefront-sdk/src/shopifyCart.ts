@@ -1,3 +1,5 @@
+import { discoverCartSections, refreshCartSections } from "./cartSections";
+
 /** Shopify Ajax cart mutations, using locale-aware URLs and bundled sections.
  * https://shopify.dev/docs/api/ajax/reference/cart#bundled-section-rendering
  */
@@ -32,7 +34,7 @@ export async function mutateShopifyCart(
   const focusedCheckout = document.activeElement?.matches(
     "button[name='checkout']",
   );
-  const sections = [
+  const dawnSections = [
     "cart-icon-bubble",
     "cart-drawer",
     "main-cart-items",
@@ -43,6 +45,21 @@ export async function mutateShopifyCart(
       document.getElementById(`shopify-section-${id}`) ||
       (id === "cart-drawer" && nativeDrawer),
   );
+  // Dawn's controller owns these surfaces. Other themes expose their actual
+  // template/section-group IDs through Shopify's section wrappers.
+  const dynamicSections = discoverCartSections().filter(
+    ({ target }) =>
+      !dawnSections.some((id) => {
+        const element = document.getElementById(id);
+        return element && target.contains(element);
+      }) && !target.contains(nativeDrawer),
+  );
+  const sections = [
+    ...new Set([
+      ...dawnSections,
+      ...dynamicSections.map((section) => section.id),
+    ]),
+  ].slice(0, 5);
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 15_000);
   try {
@@ -65,6 +82,35 @@ export async function mutateShopifyCart(
     const result = await response.json();
     // A missing/broken theme section must never turn a confirmed cart write into a retry.
     try {
+      const dynamic = dynamicSections.filter((section) =>
+        sections.includes(section.id),
+      );
+      const missing = dynamic.filter(
+        (section) => typeof result.sections?.[section.id] !== "string",
+      );
+      if (missing.length) {
+        // Section rendering can fail independently of a successful cart write.
+        // Retry only the read, never the accepted POST.
+        try {
+          const url = new URL(window.location.pathname, window.location.origin);
+          url.searchParams.set(
+            "sections",
+            missing.map((section) => section.id).join(","),
+          );
+          const refreshed = await fetch(url.href, {
+            credentials: "same-origin",
+            cache: "no-store",
+            signal: controller.signal,
+          });
+          if (refreshed.ok)
+            result.sections = {
+              ...result.sections,
+              ...(await refreshed.json()),
+            };
+        } catch {
+          /* Shopify already accepted the cart mutation. */
+        }
+      }
       let nativeRendered = false;
       if (
         nativeDrawer?.renderContents &&
@@ -80,6 +126,7 @@ export async function mutateShopifyCart(
         }
       }
       for (const id of sections) {
+        if (!dawnSections.includes(id)) continue;
         if (id === "cart-drawer" && nativeRendered) continue;
         const html = result.sections?.[id];
         if (typeof html !== "string") continue;
@@ -97,6 +144,7 @@ export async function mutateShopifyCart(
             .querySelector("#CartDrawer-Overlay")
             ?.addEventListener("click", () => nativeDrawer.close?.());
       }
+      refreshCartSections(dynamic, result.sections || {});
       if (
         focusedInDrawer &&
         drawerWasOpen &&

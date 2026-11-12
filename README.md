@@ -47,6 +47,22 @@ extension.
    DEEPSEEK_AI_MODEL
    ```
 
+   Vercel Marketplace Upstash can supply `KV_REST_API_URL` and `KV_REST_API_TOKEN`
+   instead of the direct Upstash pair. Cache, billing, distributed claims and
+   Shopify session storage use the same selected connection. If replacing an
+   existing direct endpoint with Marketplace credentials, explicitly set
+   `AOVBOOST_REDIS_SOURCE=vercel_kv`; `upstash` selects the direct pair, and the
+   default `auto` preserves an existing direct configuration. Credentials from
+   different pairs are never combined, and a read-only token cannot substitute
+   for the shared write credential.
+
+   Run `npm run health:check -- <shop>.myshopify.com` in the intended environment
+   before releasing. It checks database/Redis access without writing counters,
+   lists missing billing configuration by variable name, and prints no secrets.
+   Billing configuration readiness does not verify a subscription; use the
+   authenticated plan screen to verify the actual plan. The command exits with
+   failure if required services or the billing-source configuration are missing.
+
    AI model variables are optional overrides. The production defaults are
    `gemini-3.6-flash`, `mistral-small-latest`,
    `llama-3.3-70b-versatile`, and `deepseek-v4-flash`. Providers are tried in

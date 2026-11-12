@@ -1,17 +1,80 @@
 # Live-store verification — 12 November 2026
 
-Latest status after the owner's extension deployment: **the published SDK now
-detects the native cart add and requests an offer, but the live offer endpoint
-returns HTTP 500 through Shopify's app proxy**. No recommendation card renders.
-Production logs correlate that request with Redis DNS failures. This is not a
-complete end-to-end pass. The earlier run below is preserved as historical
-evidence and is superseded by the post-deployment retest at the end.
+Latest status after the owner's backend deployment: **the real storefront now
+shows recommendations and accepts one exactly once**. Both observed offer
+requests returned HTTP 200 within the SDK timeout. The earlier offer HTTP 500
+blocker is resolved for these runs. A remaining Velour cart display issue and
+unavailable Redis usage/billing operations prevent a complete end-to-end pass.
+
+The [subsequent local correction report](remaining-issues-remediation-2026-11-12.md)
+records the implemented cart refresh and Redis connection changes, completed
+regression checks, and required account/release steps. Those changes have not
+yet replaced this live baseline.
 
 Story: open AOVBoost in Shopify Admin, verify setup and catalog, add a product
 through the real storefront theme, see and accept one recommendation, and verify
 the resulting authorized test order in reporting.
 
-## Current live target
+## Latest retest: backend recovery deployed
+
+- Production: READY deployment `dpl_4HMpYEBgBXR9cUqCYio2YiuC11bH`, commit
+  `c06093377450a0535f82e9d373ea5f6d76d14a67`, served through
+  `https://ai-agent-dusky-nine.vercel.app`.
+- Store: `newsliderapp.myshopify.com`, development plan, KES, Velour theme.
+  Published Shopify SDK `ai-agent-21-86` matches the reviewed local asset by
+  SHA-256 on both product and cart pages. No asset or endpoint overrides.
+- Browser: the owner's unlocked storefront in an isolated Chrome session.
+  Desktop viewport 1440 x 960 and a second 390 x 844 viewport in the same session;
+  the latter is a responsive-layout check, not a physical-device/browser test.
+
+| Boundary | Latest result | Evidence |
+| --- | --- | --- |
+| Real native product add | Passed twice | Waited for the SDK initial cart read, then submitted the theme's real product form; Shopify redirected to `/cart`, containing one unit of variant `54200156684591` |
+| Offer response | Passed twice | POST `/apps/aovboost/offer` returned 200, `upsell_drawer`, two products; request-to-parsed-JSON times 3,555 ms desktop and 3,322 ms narrow viewport |
+| Visible recommendation | Passed | Actual card rendered in the native cart; no observed page errors or failed offer requests |
+| Storefront response privacy | Passed for tested field names | Desktop product-bearing response contained no matching `unitCost`, `margin`, `marginBand`, `inventoryQuantity` or `quantityAvailable` field names |
+| Accept one recommendation | Passed | Real card button issued exactly one `/cart/add.js`; Shopify then held source variant `54200156684591` and recommendation variant `54200132206895`, each at quantity one |
+| Acceptance recursion | Passed for six-second window | Zero further offer requests after acceptance |
+| Cart UI refresh | **Failed** | Before reload, the cart form still had one quantity input and its screenshot showed only the original line; `/cart.js` already contained two lines. Reload displayed both lines with two quantity inputs |
+| Restored cart | Passed for 7.5-second window | Reload preserved both lines, made zero offer requests and displayed zero cards |
+| Telemetry persistence | Passed for this QA offer | Read-only database check found `shown: true`, `clicked: true`, plus this offer's `widget_impression`, `widget_click` and `recommendation_added` events |
+| Conversion accounting | No conversion claimed | QA offer remains `converted: false`, `revenueImpact: null`; no order or payment was submitted |
+| Narrow viewport and dismissal | Passed for observed card | Two products and two option selectors; card bounds within 390 px viewport, no internal horizontal overflow; keyboard Escape removed the card without adding a product |
+| QA cleanup | Passed | Guarded removal of only known QA lines returned 200; final cart empty, zero cards and zero offer requests during seven-second reload window |
+| Admin UI, checkout and order reporting | Not verified | Admin tab still at Shopify login; test gateway unconfirmed; no checkout or order completed |
+| Billing and shared usage | **Still unavailable** | Production logs for the successful request still report Redis DNS failure and unavailable billing verification; impression traffic also reports `usage_shared_totals: unavailable` |
+
+The accepted line contains the app's private offer/session linkage properties.
+No holdout measurement cart attribute was present; saved holdout is disabled.
+This does not test holdout assignment, incrementality, purchase attribution or
+monthly billable totals. The stored provider for the owned QA offer is
+`heuristic`; this is not a paid-AI execution test. No `RecommendationOutcome`
+rows were returned for this cart offer; that table is populated by the chat
+recommendation path, so the verified cart evidence is the Offer and ShopperEvent
+records above, not chat outcome reporting or an authenticated dashboard.
+
+The desktop offer was created at `2026-11-12T06:33:56.525Z`, impressed at
+`06:34:00.393Z`, clicked at `06:36:03.942Z` and successfully added at
+`06:36:04.780Z`. Its production request was
+`gtc5b-1794465233644-253bf94f24ff`. That request's logs still report
+`redis_cache_fallback: dns_failure` and `billing_verification: unavailable`,
+despite the successful HTTP 200 product response. Catalog recovery works around
+the cache failure; it does not repair Redis or verify billing.
+
+Remaining work: refresh the actual Velour cart lines, totals and count after
+acceptance; restore the configured shared Redis service; confirm the billing
+integration; then verify authenticated Admin, a genuine test-gateway order,
+order attribution and reporting. No store product, merchant setting, subscription
+or payment configuration was changed during this retest.
+
+Sanitized ignored evidence under `test-results/live-shopify/2026-11-12/`:
+`backend-recovery-live.json/.png`, `live-acceptance.json/.png`,
+`reload-after-acceptance.json`, `cart-after-reload.png`, `qa-reporting.json`,
+`mobile-viewport.json/.png`, `cleanup-accepted-cart.json` and `final-cleanup.json`.
+No account credentials, cart tokens, login state or browser-storage exports were
+saved. Earlier runs below are historical and superseded by this section.
+
+## Historical initial live target
 
 - Connected store: `newsliderapp.myshopify.com`. A fresh authenticated Admin API
   query reports `partnerDevelopment: true` and public plan `Development`; currency
@@ -28,7 +91,7 @@ the resulting authorized test order in reporting.
   browser profile, account cookies, login state or session token was imported,
   printed or saved. The owner unlocked the storefront through the normal page.
 
-## Observed flow
+## Historical initial observed flow
 
 | Boundary | Result | Fresh evidence |
 | --- | --- | --- |
@@ -52,7 +115,7 @@ The source product was checked through the connected Shopify product tool and
 is currently ACTIVE. Its selected variant is the same variant observed in the
 real Shopify cart. No product or merchant recommendation setting was changed.
 
-## Confirmed infrastructure failure
+## Historical initial infrastructure investigation
 
 The read-only health script again found a reachable configured PostgreSQL
 database, the expected `MonthlyUsage`, `EntitlementSnapshot` and `Product` tables,
@@ -88,7 +151,7 @@ catalog/usage operations can be relied on. This run does not claim that an offer
 request returned the new `catalog_temporarily_unavailable` response: no such
 request was made by the published SDK.
 
-## Evidence and next steps
+## Historical initial evidence and next steps
 
 Sanitized scenario JSON and a storefront-only screenshot are ignored artifacts
 under `test-results/live-shopify/2026-11-12/`. No login screenshots, request
@@ -105,7 +168,7 @@ its single acceptance, then verify a test-gateway order and reporting. Billing
 source/configuration remains unconfirmed; the Production deployment intentionally
 does not grant the repository's Preview/Development test-mode entitlement.
 
-## Retest after the owner's Shopify extension deployment
+## Historical retest after the Shopify extension deployment
 
 The owner reported deploying the new version. A fresh native-add run used the
 published CDN asset exclusively, with no overrides. It waited for the SDK's

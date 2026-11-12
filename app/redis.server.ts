@@ -1,12 +1,14 @@
 import { Redis } from "@upstash/redis";
 import { randomUUID } from "node:crypto";
 import { reportDependencyFailure } from "./utils/dependencyFailure.server";
+import { redisConnection } from "./redis-configuration.server.mjs";
 
+const connection = redisConnection();
 const upstash =
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  connection.status === "configured"
     ? new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN,
+        url: connection.url!,
+        token: connection.token!,
         retry: { retries: 1, backoff: () => 100 },
         signal: () => AbortSignal.timeout(1500),
       })
@@ -327,9 +329,7 @@ export async function claimExpiringKeyStatus(
   }
 
   if (process.env.NODE_ENV === "production") {
-    warnClaimStoreUnavailable(
-      "UPSTASH_REDIS_REST_URL/TOKEN are not configured",
-    );
+    warnClaimStoreUnavailable("Shared Redis credentials are not configured");
     return "unavailable";
   }
 

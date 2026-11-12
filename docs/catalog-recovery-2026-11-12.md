@@ -1,9 +1,10 @@
 # Catalog recovery after the live offer failure — 12 November 2026
 
-The backend corrections are implemented locally and verified. They have not
-been deployed. The already-published Shopify extension `ai-agent-21-86` does
-not need rebuilding or republishing for this backend change. No database
-migration, product edit, pairing change or billing change is required.
+The backend corrections are deployed and verified on the real storefront.
+Production deployment `dpl_4HMpYEBgBXR9cUqCYio2YiuC11bH` serves commit
+`c06093377450a0535f82e9d373ea5f6d76d14a67`. The published Shopify extension
+`ai-agent-21-86` matches the reviewed local asset. No database migration,
+product edit, pairing change or billing change was needed.
 
 ## Corrected behavior
 
@@ -68,14 +69,32 @@ These are **candidate-code checks against real synced data**, not a successful
 deployed shopper journey. Local remote-database timings were approximately
 11–19 seconds for preview and 13.3 seconds for the cart decision. They do not
 establish deployed latency or compliance with the storefront SDK's eight-second
-request timeout. Production response timing, visible display, one acceptance,
-no recursion and reporting still require a deployed browser test.
+request timeout. The subsequent deployed browser test below establishes those
+observed production timings independently of these local diagnostics.
+
+The owner's deployed version subsequently returned two recommendations through
+the real Shopify app proxy in **3,555 ms** at a desktop viewport and **3,322 ms**
+at a 390 x 844 viewport. Both were HTTP 200 product-bearing responses using the
+published SDK, without browser overrides. A card rendered in each run. One
+desktop acceptance made exactly one cart-add request, added one recommendation
+unit, and caused zero further offer requests during six seconds. The database
+contains the owned offer's impression, click and successful-add events. Reload
+preserved the two-line cart without triggering an offer. Known QA lines were
+removed and the final cart was empty.
+
+The Velour cart display remained stale immediately after acceptance and showed
+both lines only after reload. Redis DNS, shared usage and billing verification
+errors also remain in production logs. No checkout, purchase, authenticated
+Admin reporting, paid AI or holdout measurement pass is claimed. See the
+[live verification report](live-store-verification-2026-11-12.md) for evidence
+and limits.
 
 ## Release and remaining operational work
 
-Redeploy the reviewed backend to the existing `ai-agent` Vercel project, then
-repeat the real `newsliderapp` native-add test using the published SDK. No
-Shopify extension deployment or migration is needed for these corrections.
+The owner deployed the reviewed backend to the existing `ai-agent` Vercel
+project and the real `newsliderapp` native-add test passed through acceptance.
+The remaining storefront correction is updating the actual theme cart lines,
+totals and count immediately after a successful recommendation add.
 
 The external Redis endpoint itself still needs restoration/replacement for
 normal shared usage/AI operations. Existing verified Free-plan caps continue

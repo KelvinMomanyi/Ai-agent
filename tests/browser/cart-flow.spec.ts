@@ -110,6 +110,67 @@ test("reloading a restored cart stays quiet", async ({ page, request }) => {
   );
 });
 
+test("Velour-shaped dynamic sections update lines, totals and badge after one acceptance and retain quantity controls", async ({
+  page,
+  request,
+}) => {
+  await request.post("/__qa/reset", { data: { mode: "velour" } });
+  await start(page);
+  await page.getByRole("button", { name: "Add Shampoo" }).click();
+  await expect(page).toHaveURL(/\/cart$/);
+  await expect(surface(page)).toBeVisible();
+  await page
+    .getByRole("textbox", { name: "Order notes" })
+    .fill("Keep these instructions");
+  const mutations: string[] = [];
+  const navigations: string[] = [];
+  page.on("request", (req) => {
+    if (
+      req.method() === "POST" &&
+      new URL(req.url()).pathname === "/cart/add.js"
+    )
+      mutations.push("add");
+  });
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) navigations.push("navigation");
+  });
+  await surface(page)
+    .getByRole("button", { name: "Add to cart", exact: true })
+    .click();
+  await expect(page.locator(".cart-item")).toHaveCount(2);
+  await expect(page.locator(".cart-subtotal__value")).toHaveText("$32.00");
+  await expect(page.locator("[data-cart-count]")).toHaveText("2");
+  await expect(page.getByRole("textbox", { name: "Order notes" })).toHaveValue(
+    "Keep these instructions",
+  );
+  // Confirmed cart mutations intentionally retire the old offer. The accepted
+  // item must remain visible in the refreshed native cart without a new offer.
+  await expect(surface(page)).toHaveCount(0);
+  expect(mutations).toHaveLength(1);
+  expect(navigations).toHaveLength(0);
+  const quantity = page.getByRole("spinbutton", {
+    name: "Quantity for Conditioner",
+  });
+  await quantity.fill("2");
+  await quantity.dispatchEvent("change");
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get("/__qa/state")).json()).cart.item_count,
+    )
+    .toBe(3);
+  await expect
+    .poll(async () =>
+      (await (await request.get("/__qa/state")).json()).events.some(
+        (event: any) => event.type === "recommendation_added",
+      ),
+    )
+    .toBe(true);
+  expect((await (await request.get("/__qa/state")).json()).offers).toHaveLength(
+    1,
+  );
+});
+
 test("waits for a native popup to close before using the floating fallback", async ({
   page,
   request,

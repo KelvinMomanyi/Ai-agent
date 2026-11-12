@@ -16,7 +16,9 @@ const product = (id) => ({
 });
 function reset(options = {}) {
   state = {
-    mode: ["drawer", "popup", "floating", "redirect"].includes(options.mode)
+    mode: ["drawer", "popup", "floating", "redirect", "velour"].includes(
+      options.mode,
+    )
       ? options.mode
       : "drawer",
     holdout: options.holdout === true,
@@ -86,6 +88,15 @@ const json = (res, value, status = 200) => {
   });
   res.end(JSON.stringify(value));
 };
+// Minimal Velour-shaped sections: dynamic cart wrapper, native quantity
+// controls, editable notes and a header badge. No production theme code/data.
+function velourSection(id) {
+  const value = cart();
+  if (id === "sections--88__header")
+    return `<div id="shopify-section-${id}"><header><button type="button" aria-label="Cart">Cart <span data-cart-count>${value.item_count}</span></button></header></div>`;
+  if (id !== "template--77__cart") return null;
+  return `<div id="shopify-section-${id}"><div class="cart-container"><h2>Shopping Cart</h2><form action="/cart" method="post"><table><tbody>${value.items.map((item, index) => `<tr class="cart-item" data-line="${index + 1}"><td>${item.title}</td><td><input name="updates[]" type="number" min="0" aria-label="Quantity for ${item.title}" value="${item.quantity}"></td></tr>`).join("")}</tbody></table><label>Order notes<textarea name="note"></textarea></label><p>Subtotal: <strong class="cart-subtotal__value">$${(value.total_price / 100).toFixed(2)}</strong></p><button name="checkout">Checkout</button></form></div></div>`;
+}
 async function body(req) {
   let text = "";
   for await (const chunk of req) {
@@ -117,6 +128,8 @@ async function page(path) {
       )
     ).replace('class="drawer active"', 'class="drawer"');
   }
+  if (isCart && state.mode === "velour")
+    markup = `${velourSection("sections--88__header")}<main>${velourSection("template--77__cart")}</main>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AOVBoost local browser simulation</title>
@@ -139,7 +152,7 @@ async function page(path) {
       if(form){
         form.action='/cart/add'; form.method='post';
         form.querySelector('button').textContent='Add Shampoo';
-        if(mode!=='redirect')form.addEventListener('submit',async(event)=>{
+        if(!['redirect','velour'].includes(mode))form.addEventListener('submit',async(event)=>{
           event.preventDefault();
           const response=await fetch('/cart/add.js',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:101,quantity:1})});
           if(!response.ok)return;
@@ -157,6 +170,18 @@ async function page(path) {
       document.addEventListener('aovboost:cart-updated',async()=>{
         const cart=await(await fetch('/cart.js')).json();document.querySelector('#cart-count').textContent=cart.item_count;
       });
+      if(mode==='velour') {
+        function bindNativeCart() {
+          const form=document.querySelector('.cart-container form');
+          if(!form || form.dataset.liveCartBound==='true')return;
+          form.dataset.liveCartBound='true';
+          form.querySelectorAll('input[name="updates[]"]').forEach(input=>input.addEventListener('change',async()=>{
+            const response=await fetch('/cart/change.js',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({line:Number(input.closest('[data-line]').dataset.line),quantity:Number(input.value)})});
+            const cart=await response.json();document.querySelector('#cart-count').textContent=cart.item_count;
+          }));
+        }
+        document.addEventListener('shopify:section:load',bindNativeCart);bindNativeCart();
+      }
     </script>
     <script src="/assets/aovboost-sdk.js" defer></script></body></html>`;
 }
@@ -185,6 +210,16 @@ const server = createServer(async (req, res) => {
       return res.end();
     }
     if (path === "/cart.js") return json(res, cart());
+    if (path === "/cart" && url.searchParams.has("sections"))
+      return json(
+        res,
+        Object.fromEntries(
+          url.searchParams
+            .get("sections")
+            .split(",")
+            .map((id) => [id, velourSection(id)]),
+        ),
+      );
     if (["/cart/add.js", "/cart/add"].includes(path) && req.method === "POST") {
       const data = await body(req);
       const inputs = data.items || [data];
@@ -200,7 +235,26 @@ const server = createServer(async (req, res) => {
         res.writeHead(303, { Location: "/cart" });
         return res.end();
       }
-      return json(res, { ...cart().items.at(-1), items: cart().items });
+      return json(res, {
+        ...cart().items.at(-1),
+        items: cart().items,
+        ...(state.mode === "velour"
+          ? {
+              sections: Object.fromEntries(
+                (data.sections || []).map((id) => [id, velourSection(id)]),
+              ),
+            }
+          : {}),
+      });
+    }
+    if (path === "/cart/change.js" && req.method === "POST") {
+      const data = await body(req);
+      const line = state.lines[Number(data.line) - 1];
+      if (!line || !Number.isInteger(data.quantity) || data.quantity < 0)
+        return json(res, { error: "Invalid synthetic line" }, 422);
+      line.quantity = data.quantity;
+      state.lines = state.lines.filter((item) => item.quantity > 0);
+      return json(res, cart());
     }
     if (path === "/cart/update.js") {
       Object.assign(state.attributes, (await body(req)).attributes || {});

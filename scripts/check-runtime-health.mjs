@@ -1,5 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { Redis } from "@upstash/redis";
+import { readFile } from "node:fs/promises";
+import { redisConnection } from "../app/redis-configuration.server.mjs";
 
 // Read-only checks. Never emit connection strings, credentials, raw errors or
 // product/customer data. The selected env file determines the target services.
@@ -8,11 +10,12 @@ if (shop && !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop)) {
   throw new Error("Pass a permanent myshopify.com shop domain");
 }
 const prisma = new PrismaClient({ log: [] });
+const connection = redisConnection();
 const redis =
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  connection.status === "configured"
     ? new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN,
+        url: connection.url,
+        token: connection.token,
         retry: { retries: 0 },
         signal: () => AbortSignal.timeout(5000),
       })
@@ -65,7 +68,7 @@ try {
 } finally {
   await prisma.$disconnect();
 }
-if (!redis) report.redis = { available: false, reason: "not_configured" };
+if (!redis) report.redis = { available: false, reason: connection.status };
 else {
   try {
     report.redis = { available: (await redis.ping()) === "PONG" };
@@ -94,10 +97,33 @@ else {
     };
   }
 }
+report.redis.source = connection.source || null;
+const plans = JSON.parse(
+  await readFile(new URL("../app/config/plans.json", import.meta.url), "utf8"),
+);
+const source = process.env.AOVBOOST_BILLING_SOURCE ?? plans.billingSource;
+const knownSource = ["admin_api", "shopify_app_pricing"].includes(source);
+const required =
+  source === "shopify_app_pricing"
+    ? [
+        "SHOPIFY_PARTNER_ID",
+        "SHOPIFY_PARTNER_APP_ID",
+        "SHOPIFY_PARTNER_API_TOKEN",
+      ]
+    : [];
+const missing = required.filter((key) => !process.env[key]);
+report.billing = {
+  configurationOnly: true,
+  source: knownSource ? source : "unconfirmed",
+  configured: knownSource && missing.length === 0,
+  missing,
+  subscriptionVerified: false,
+};
 console.log(JSON.stringify(report, null, 2));
 if (
   !report.database?.available ||
   !report.redis?.available ||
+  !report.billing.configured ||
   Object.values(report.database?.schema || {}).some((exists) => !exists)
 )
   process.exitCode = 1;
