@@ -53,6 +53,35 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 describe("monthly shared usage", () => {
+  it("does not claim zero usage when the durable seed cannot be read", async () => {
+    mocks.find.mockRejectedValue(new Error("database offline"));
+    expect(await getUsage(shop)).toMatchObject({
+      available: false,
+      totalsKnown: false,
+    });
+    expect(await reserveMonthlyAiCall(shop)).toBe(false);
+    expect(mocks.eval).not.toHaveBeenCalled();
+  });
+  it.each([
+    [1, -1, 80, 0, 0],
+    [1, null, 80, 0, 0],
+    [2, 400, 80, 0, 0],
+    [1, 400, 0.5, 0, 0],
+  ])("refuses malformed or corrupt shared usage: %j", async (...values) => {
+    mocks.eval.mockResolvedValue(values);
+    expect(await getUsage(shop)).toMatchObject({ available: false });
+    expect(await reserveMonthlyAiCall(shop)).toBe(false);
+  });
+  it("keeps valid shared totals usable if both rollup and retry-key cleanup fail", async () => {
+    mocks.eval.mockResolvedValue([1, 410, 85, 0, 1]);
+    mocks.execute.mockRejectedValue(new Error("write unavailable"));
+    mocks.del.mockRejectedValue(new Error("cleanup unavailable"));
+    expect(await getUsage(shop)).toMatchObject({
+      available: true,
+      displayed: 410,
+      aiCalls: 85,
+    });
+  });
   it("uses Pro allowances in test mode and retains shared AI usage limits", async () => {
     mocks.entitlement.mockResolvedValue({
       ...free,

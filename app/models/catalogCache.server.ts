@@ -5,8 +5,9 @@ import {
   getJsonCache,
   setJsonCache,
   redis,
-  claimExpiringKey,
+  claimExpiringKeyStatus,
 } from "../redis.server";
+import { CatalogUnavailableError } from "../utils/catalogAvailability.server";
 import {
   getSafeDefaultVariantId,
   getSyncedProductVariants,
@@ -63,6 +64,7 @@ const HOT_CATALOG_TTL_SECONDS = 4 * 60 * 60;
 const CATEGORY_CATALOG_TTL_SECONDS = 60 * 60;
 const HOT_PRODUCT_LIMIT = 500;
 const CATEGORY_PRODUCT_LIMIT = 250;
+const pendingHotCatalogs = new Map<string, Promise<CatalogSnapshot>>();
 
 export async function getCatalogReadiness(shop: string) {
   const key = `catalog:${shop}:readiness:v2`;
@@ -264,13 +266,32 @@ async function getHotCatalogSnapshot(shop: string) {
   const key = `${hotCatalogKey(shop)}:${await catalogVersion(shop)}`;
   const cached = await readSnapshot(key);
   if (cached) return cached;
+  const pending = pendingHotCatalogs.get(key);
+  if (pending) return pending;
+  const task = fillHotCatalogSnapshot(shop, key).finally(() => {
+    if (pendingHotCatalogs.get(key) === task) pendingHotCatalogs.delete(key);
+  });
+  if (pendingHotCatalogs.size < 100) pendingHotCatalogs.set(key, task);
+  return task;
+}
+
+async function fillHotCatalogSnapshot(shop: string, key: string) {
   // Coalesce cache fills across instances and webhook invalidation bursts. The
   // renderer validates referenced products against fresh, tenant-scoped rows.
-  if (!(await claimExpiringKey(`catalog:${shop}:hot-fill`, 5))) {
-    return (
-      (await readSnapshot(`catalog:${shop}:last-hot`)) ||
-      buildCatalogSnapshot(shop, [])
-    );
+  const claim = await claimExpiringKeyStatus(`catalog:${shop}:hot-fill`, 5);
+  if (claim !== "acquired") {
+    const previous = await readSnapshot(`catalog:${shop}:last-hot`);
+    if (previous) return previous;
+    if (claim === "busy") {
+      // A cold concurrent request can use the winner's snapshot. Never pretend
+      // an unavailable/busy cache is a genuinely empty merchant catalog.
+      for (const delay of [50, 100, 200]) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        const ready = await readSnapshot(key);
+        if (ready) return ready;
+      }
+    }
+    throw new CatalogUnavailableError();
   }
 
   const [stats, recentProducts, productCount] = await Promise.all([
@@ -310,10 +331,10 @@ async function getCategoryCatalogSnapshot(shop: string, category: string) {
   const cached = await readSnapshot(key);
   if (cached) return cached;
   if (
-    !(await claimExpiringKey(
+    (await claimExpiringKeyStatus(
       `catalog:${shop}:category-fill:${safeCacheKey(category)}`,
       5,
-    ))
+    )) !== "acquired"
   )
     return null;
 

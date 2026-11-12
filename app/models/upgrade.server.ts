@@ -1,6 +1,10 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import {
+  billingSource,
+  billingUpgradeMode,
+} from "./billingConfiguration.server";
+import {
   PLAN_CONFIG,
   hostedUpgradeUrl,
   invalidateEntitlements,
@@ -57,8 +61,8 @@ export async function upgradeAction({ request }: ActionFunctionArgs) {
   if (hosted) return redirect(hosted, { target: "_top" });
   const price = configuredRecurringPrice();
   if (
-    PLAN_CONFIG.billingSource !== "admin_api" ||
-    PLAN_CONFIG.upgradeMode !== "billing_api" ||
+    billingSource() !== "admin_api" ||
+    billingUpgradeMode() !== "billing_api" ||
     !price
   )
     return data(

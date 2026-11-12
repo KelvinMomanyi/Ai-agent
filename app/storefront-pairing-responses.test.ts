@@ -133,6 +133,7 @@ import { action as liveAction } from "./routes/api.live";
 import { loader as sessionLoader } from "./routes/api.session";
 import { toPublicAppSettings } from "./models/settings.server";
 import { stripPrivateSignals } from "./utils/storefrontPayload.server";
+import { CatalogUnavailableError } from "./utils/catalogAvailability.server";
 
 const shop = "one.myshopify.com",
   targetId = "gid://shopify/Product/2";
@@ -327,6 +328,27 @@ describe("serialized storefront response privacy and pairing cache", () => {
     cartProductIds: ["gid://shopify/Product/1"],
     cartItemCount: 1,
   };
+  it("returns a retryable no-card response for a catalog outage without creating offers", async () => {
+    mocks.candidates.mockRejectedValue(new CatalogUnavailableError());
+    const result = await offerAction(
+      post("/api/offer", {
+        ...body,
+        trigger: "cart_item_added",
+        triggerPayload: { confirmed: true, mutationId: "outage" },
+      }),
+    );
+    expect((result as any).data).toMatchObject({
+      widgetType: null,
+      reasoning: "catalog_temporarily_unavailable",
+    });
+    expect((result as any).init).toMatchObject({
+      status: 503,
+      headers: { "Retry-After": "5", "Cache-Control": "no-store" },
+    });
+    expect(mocks.createOffer).not.toHaveBeenCalled();
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    expect(JSON.stringify((result as any).data)).not.toMatch(privateKeys);
+  });
   it("stops a free shop at its displayed allowance before AI or offer creation", async () => {
     mocks.entitlement.mockResolvedValue({ tier: "free", state: "verified" });
     mocks.usage.mockResolvedValue({

@@ -1,4 +1,5 @@
 import { isInstalledShop } from "../models/installedShop.server";
+import { CatalogUnavailableError } from "../utils/catalogAvailability.server";
 import { findProductIdsByVariants } from "../models/productLookup.server";
 import {
   data as json,
@@ -535,6 +536,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await setJsonCache(cacheKey, response, 30);
     return json({ ...response, measurement }, { headers: withCors() });
   } catch (error) {
+    if (error instanceof CatalogUnavailableError) {
+      return json(noCartOffer("catalog_temporarily_unavailable"), {
+        status: 503,
+        headers: withCors({ "Retry-After": "5", "Cache-Control": "no-store" }),
+      });
+    }
     if (isStorefrontAuthError(error)) {
       const storefrontSession = await getStorefrontSessionRecovery(request);
       logStorefrontAuthError(request, "api.offer", error);

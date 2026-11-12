@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import config from "../config/plans.json";
 import prisma from "../db.server";
 import { billingRedis } from "../redis.server";
+import {
+  billingSource,
+  billingUpgradeMode,
+  managedPlanHandles,
+} from "./billingConfiguration.server";
+import { reportDependencyFailure } from "../utils/dependencyFailure.server";
 
 export const PLAN_CONFIG = config;
 export type PlanTier = "free" | "pro";
@@ -26,7 +32,11 @@ const configVersion = () =>
   createHash("sha256")
     .update(
       JSON.stringify([
-        config.billingSource,
+        billingSource(),
+        process.env.SHOPIFY_PARTNER_ID,
+        process.env.SHOPIFY_PARTNER_APP_ID,
+        managedPlanHandles("free"),
+        managedPlanHandles("pro"),
         config.tiers.free.subscriptionNames,
         config.tiers.pro.subscriptionNames,
       ]),
@@ -73,7 +83,7 @@ export function mapSubscriptions(
       !names.has(sub.name.trim().toLowerCase()),
   );
   const subscription = recognized || unknown || free;
-  const confirmedEmpty = config.billingSource === "admin_api";
+  const confirmedEmpty = billingSource() === "admin_api";
   return {
     tier: subscription
       ? recognized || unknown
@@ -178,35 +188,49 @@ async function refresh(
       Date.now() - stored.checkedAt < 300_000
     )
       return stored;
-    // Modern Shopify App Pricing requires a separate Partner API integration.
-    // Do not infer "free" from its empty Admin API subscriptions list.
-    if (
-      config.billingSource === "shopify_app_pricing" ||
-      config.billingSource === "unconfirmed"
-    )
+    // Each billing source uses its own API. An empty Admin subscription list
+    // cannot establish a managed pricing entitlement.
+    if (billingSource() === "unconfirmed")
       throw new Error("Billing source requires configuration");
     const admin =
       supplied ||
       (await (await import("../shopify.server")).unauthenticated.admin(shop))
         .admin;
-    const response = await admin.graphql(SUBSCRIPTIONS_QUERY, {
-      tries: 1,
-      signal: AbortSignal.timeout(1500),
-    });
-    const result = await response.json();
-    const subscriptions =
-      result.data?.currentAppInstallation?.activeSubscriptions;
-    if (
-      !response.ok ||
-      result.errors?.length ||
-      !Array.isArray(subscriptions) ||
-      !subscriptions.every(
-        (sub: any) =>
-          typeof sub.name === "string" && typeof sub.status === "string",
+    let entitlement: Entitlement;
+    if (billingSource() === "shopify_app_pricing") {
+      const { getManagedSubscriptions } =
+        await import("./managedBilling.server");
+      const subscriptions = await getManagedSubscriptions(shop, admin);
+      entitlement =
+        subscriptions === null
+          ? {
+              tier: "free",
+              subscriptionName: null,
+              checkedAt: Date.now(),
+              state: "verified",
+              unmapped: false,
+            }
+          : mapSubscriptions(subscriptions);
+    } else {
+      const response = await admin.graphql(SUBSCRIPTIONS_QUERY, {
+        tries: 1,
+        signal: AbortSignal.timeout(1500),
+      });
+      const result = await response.json();
+      const subscriptions =
+        result.data?.currentAppInstallation?.activeSubscriptions;
+      if (
+        !response.ok ||
+        result.errors?.length ||
+        !Array.isArray(subscriptions) ||
+        !subscriptions.every(
+          (sub: any) =>
+            typeof sub.name === "string" && typeof sub.status === "string",
+        )
       )
-    )
-      throw new Error("Subscription query unavailable");
-    const entitlement = mapSubscriptions(subscriptions);
+        throw new Error("Subscription query unavailable");
+      entitlement = mapSubscriptions(subscriptions);
+    }
     if (entitlement.state === "unverified")
       return previous ? { ...previous, state: "grace" } : entitlement;
     try {
@@ -244,7 +268,8 @@ async function refresh(
       /* A confirmed result is usable even when cache persistence fails. */
     }
     return entitlement;
-  } catch {
+  } catch (error) {
+    reportDependencyFailure("billing_verification", error);
     if (previous) return { ...previous, state: "grace" };
     return {
       tier: "unverified",
@@ -265,7 +290,7 @@ export async function invalidateEntitlements(shop: string) {
 }
 export function hostedUpgradeUrl(shop: string) {
   if (
-    config.upgradeMode !== "shopify_hosted" ||
+    billingUpgradeMode() !== "shopify_hosted" ||
     !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop) ||
     !/^[a-z0-9-]+$/.test(config.appHandle)
   )

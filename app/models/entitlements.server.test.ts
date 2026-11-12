@@ -64,6 +64,72 @@ afterEach(() => {
   Object.assign(PLAN_CONFIG, structuredClone(original));
   vi.useRealTimers();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
+describe("managed billing entitlement integration", () => {
+  it("verifies managed plans through Partner API and preserves outage grace", async () => {
+    vi.stubEnv("AOVBOOST_BILLING_SOURCE", "shopify_app_pricing");
+    vi.stubEnv("SHOPIFY_PARTNER_ID", "123");
+    vi.stubEnv("SHOPIFY_PARTNER_APP_ID", "gid://shopify/App/456");
+    vi.stubEnv("SHOPIFY_PARTNER_API_TOKEN", "synthetic");
+    vi.stubEnv("AOVBOOST_MANAGED_PRO_HANDLES", "pro_plan");
+    const identity = { id: "gid://shopify/Shop/789", myshopifyDomain: shop };
+    mocks.graphql.mockImplementation(
+      async () => new Response(JSON.stringify({ data: { shop: identity } })),
+    );
+    const partner = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              activeSubscription: {
+                shop: identity,
+                items: [{ handle: "pro_plan", price: { active: true } }],
+              },
+            },
+          }),
+        ),
+    );
+    vi.stubGlobal("fetch", partner);
+    const initial = await getEntitlements(shop, admin);
+    expect(initial).toMatchObject({
+      tier: "pro",
+      state: "verified",
+      unmapped: false,
+    });
+    expect(mocks.save).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { shop } }),
+    );
+    vi.advanceTimersByTime(301_000);
+    partner.mockRejectedValue(new Error("Partner unavailable"));
+    expect(await getEntitlements(shop, admin)).toMatchObject({
+      tier: "pro",
+      state: "grace",
+      checkedAt: initial.checkedAt,
+    });
+  });
+  it("accepts no managed contract only after a successful authenticated Partner response", async () => {
+    vi.stubEnv("AOVBOOST_BILLING_SOURCE", "shopify_app_pricing");
+    vi.stubEnv("SHOPIFY_PARTNER_ID", "123");
+    vi.stubEnv("SHOPIFY_PARTNER_APP_ID", "gid://shopify/App/456");
+    vi.stubEnv("SHOPIFY_PARTNER_API_TOKEN", "synthetic");
+    const identity = { id: "gid://shopify/Shop/789", myshopifyDomain: shop };
+    mocks.graphql.mockImplementation(
+      async () => new Response(JSON.stringify({ data: { shop: identity } })),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ data: { activeSubscription: null } })),
+      ),
+    );
+    expect(await getEntitlements(shop, admin)).toMatchObject({
+      tier: "free",
+      state: "verified",
+    });
+  });
 });
 describe("billing test override", () => {
   it.each([

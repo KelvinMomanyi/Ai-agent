@@ -31,6 +31,36 @@ const cart = () =>
     }),
   );
 describe("identical invisible cart linkage for both arms", () => {
+  it("links holdout after a cart update derived from the original add payload", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+    const recordEvent = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const session = {
+      anonymousId: "session",
+      recordEvent,
+      getSnapshot: () => ({ viewedProductIds: [] }),
+      getSettings: () => ({ analyticsEnabled: false }),
+      getAuthPayload: () => ({ sessionToken: "synthetic" }),
+      getMeasurement: () => measurement("holdout"),
+    } as any;
+    bus = new EventBus({ shop: "one", sessionManager: session });
+    linker = new MeasurementCartLink(session, bus);
+    linker.init();
+    bus.track("cart_update", {
+      type: "add_to_cart",
+      confirmed: true,
+      mutationId: "confirmed-add",
+      cartItemCount: 1,
+    });
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(recordEvent.mock.calls[0][0].type).toBe("cart_update");
+    expect(fetch.mock.calls[0][0]).toBe("/fr/cart/update.js");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      attributes: { __aovboost_measurement__: measurement("holdout").link },
+    });
+  });
   it.each(["holdout", "exposed"] as const)(
     "links the %s arm without changing lines or opening a widget",
     async (arm) => {

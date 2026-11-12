@@ -27,7 +27,10 @@
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
     "test": "vitest run --config vitest.config.ts",
-    "tokens:audit": "node --env-file=.env scripts/audit-offline-tokens.mjs"
+    "test:browser": "npm run build:sdk && playwright test",
+    "test:browser:report": "playwright show-report",
+    "tokens:audit": "node --env-file=.env scripts/audit-offline-tokens.mjs",
+    "health:check": "node --env-file=.env scripts/check-runtime-health.mjs"
   },
   "type": "module",
   "engines": {
@@ -58,6 +61,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.14",
+    "@playwright/test": "^1.65.0",
     "@shopify/api-codegen-preset": "^2.0.1",
     "@types/eslint": "^9.6.1",
     "@types/jsonwebtoken": "^9.0.10",

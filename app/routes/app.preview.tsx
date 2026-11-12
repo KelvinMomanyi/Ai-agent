@@ -5,6 +5,7 @@ import {
   useLoaderData,
   useNavigation,
   useSubmit,
+  useRevalidator,
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
 } from "react-router";
@@ -23,13 +24,20 @@ import {
 import prisma from "../db.server";
 import { getAdminOfferPreview } from "../models/offerPreview.server";
 import { authenticate } from "../shopify.server";
+import { CatalogUnavailableError } from "../utils/catalogAvailability.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const source =
     new URL(request.url).searchParams.get("sourceProductId") || undefined;
   const [preview, response] = await Promise.all([
-    getAdminOfferPreview(session.shop, source),
+    getAdminOfferPreview(session.shop, source).then(
+      (preview) => ({ ...preview, unavailable: false }),
+      (error: unknown) => {
+        if (!(error instanceof CatalogUnavailableError)) throw error;
+        return { sources: [], source: null, products: [], unavailable: true };
+      },
+    ),
     admin.graphql(
       `#graphql\nquery AOVBoostPreviewCurrency { shop { currencyCode } }`,
     ),
@@ -49,10 +57,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await request.formData();
   if (form.get("intent") !== "reviewed")
     return new Response("Invalid action", { status: 400 });
-  const preview = await getAdminOfferPreview(
-    session.shop,
-    String(form.get("sourceProductId") || "") || undefined,
-  );
+  let preview;
+  try {
+    preview = await getAdminOfferPreview(
+      session.shop,
+      String(form.get("sourceProductId") || "") || undefined,
+    );
+  } catch (error) {
+    if (!(error instanceof CatalogUnavailableError)) throw error;
+    return new Response(
+      "The preview is temporarily unavailable. Please retry.",
+      {
+        status: 503,
+        headers: { "Retry-After": "5", "Cache-Control": "no-store" },
+      },
+    );
+  }
   if (!preview.source || !preview.products.length)
     return new Response("No available preview to review", { status: 409 });
   const onboardingPreviewedAt = new Date();
@@ -72,6 +92,7 @@ export default function OfferPreview() {
   const { preview, currencyCode } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const submit = useSubmit();
+  const revalidator = useRevalidator();
   return (
     <Page
       title="Preview an offer"
@@ -102,7 +123,22 @@ export default function OfferPreview() {
                 />
               </Card>
             ) : null}
-            {preview.source && preview.products.length ? (
+            {preview.unavailable ? (
+              <Banner tone="warning" title="Preview temporarily unavailable">
+                <BlockStack gap="300">
+                  <Text as="p">
+                    Your recommendation catalog could not be loaded. Retry in a
+                    moment. Your product and pairing settings have not changed.
+                  </Text>
+                  <Button
+                    onClick={() => revalidator.revalidate()}
+                    loading={revalidator.state !== "idle"}
+                  >
+                    Retry preview
+                  </Button>
+                </BlockStack>
+              </Banner>
+            ) : preview.source && preview.products.length ? (
               <>
                 <Text as="p">
                   When {preview.source.title} is in the cart, a catalog

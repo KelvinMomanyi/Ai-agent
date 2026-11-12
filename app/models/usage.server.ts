@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { billingRedis } from "../redis.server";
+import { reportDependencyFailure } from "../utils/dependencyFailure.server";
 import { getAppSettings } from "./settings.server";
 import {
   getEntitlements,
@@ -69,6 +70,7 @@ type Usage = {
   aiCalls: number;
   pending: number;
   available: boolean;
+  totalsKnown: boolean;
 };
 async function operation(
   shop: string,
@@ -84,6 +86,7 @@ async function operation(
     displayed: durable?.displayed || 0,
     aiCalls: durable?.aiCalls || 0,
     pending: 0,
+    totalsKnown: true,
   };
   try {
     const now = Date.now();
@@ -105,7 +108,11 @@ async function operation(
     if (
       !Array.isArray(values) ||
       values.length !== 5 ||
-      values.some((n) => !Number.isFinite(Number(n)))
+      values.some(
+        (n) => n === null || !Number.isSafeInteger(Number(n)) || Number(n) < 0,
+      ) ||
+      ![0, 1].includes(Number(values[0])) ||
+      ![0, 1].includes(Number(values[4]))
     )
       throw new Error("Invalid usage totals");
     const [allowed, displayed, aiCalls, pending, rollup] = values.map(Number);
@@ -114,10 +121,14 @@ async function operation(
         await prisma.$executeRaw(
           usageRollupQuery(shop, month, displayed, aiCalls),
         );
-      } catch {
+      } catch (error) {
         // Retry the same cumulative totals on the next request; never reset counters.
-        await billingRedis.del(usageKeys(shop, month)[2]);
-        console.error("AOVBoost usage rollup failed", { shop });
+        reportDependencyFailure("usage_rollup", error);
+        try {
+          await billingRedis.del(usageKeys(shop, month)[2]);
+        } catch (releaseError) {
+          reportDependencyFailure("usage_rollup_retry", releaseError);
+        }
       }
     }
     return {
@@ -126,8 +137,10 @@ async function operation(
       aiCalls,
       pending,
       available: true,
+      totalsKnown: true,
     };
-  } catch {
+  } catch (error) {
+    reportDependencyFailure("usage_shared_totals", error);
     return { ...base, allowed: false, available: false };
   }
 }
@@ -137,8 +150,15 @@ export async function getUsage(
 ): Promise<Usage> {
   try {
     return await operation(shop, "read", "", -1, month);
-  } catch {
-    return { displayed: 0, aiCalls: 0, pending: 0, available: false };
+  } catch (error) {
+    reportDependencyFailure("usage_durable_totals", error);
+    return {
+      displayed: 0,
+      aiCalls: 0,
+      pending: 0,
+      available: false,
+      totalsKnown: false,
+    };
   }
 }
 export async function getPlanStatus(shop: string, admin?: BillingAdmin) {

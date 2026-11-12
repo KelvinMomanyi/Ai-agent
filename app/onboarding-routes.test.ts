@@ -92,6 +92,7 @@ import {
   action as previewAction,
 } from "./routes/app.preview";
 import { action as settingsAction } from "./routes/app.settings";
+import { CatalogUnavailableError } from "./utils/catalogAvailability.server";
 import { loader as sessionLoader } from "./routes/api.session";
 
 const shop = "one.myshopify.com";
@@ -144,6 +145,23 @@ afterEach(() => {
 });
 
 describe("onboarding route boundaries", () => {
+  it("distinguishes a temporary catalog outage in Preview and prevents acknowledgement writes", async () => {
+    mocks.preview.mockRejectedValue(new CatalogUnavailableError());
+    const result = await previewLoader({
+      request: new Request("https://app.example.com/app/preview"),
+    } as LoaderFunctionArgs);
+    expect(result.data.preview).toMatchObject({
+      unavailable: true,
+      sources: [],
+      products: [],
+    });
+    expect(result.init?.headers).toMatchObject({ "Cache-Control": "no-store" });
+    expect(
+      (await previewAction(post("/app/preview", { intent: "reviewed" })))
+        .status,
+    ).toBe(503);
+    expect(mocks.settingsUpsert).not.toHaveBeenCalled();
+  });
   it("validates holdout limits, requires analytics and starts a new cohort on configuration change", async () => {
     for (const holdoutPercent of ["-1", "31", "1.5", "not-a-number"]) {
       const result = await settingsAction(

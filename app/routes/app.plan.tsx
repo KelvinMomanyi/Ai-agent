@@ -20,8 +20,11 @@ import {
   getEntitlements,
   limitsFor,
   hostedUpgradeUrl,
-  PLAN_CONFIG,
 } from "../models/entitlements.server";
+import {
+  billingSource,
+  billingUpgradeMode,
+} from "../models/billingConfiguration.server";
 import { getUsage, usageMonth } from "../models/usage.server";
 import {
   configuredRecurringPrice,
@@ -46,8 +49,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       canUpgrade: Boolean(
         entitlement.state !== "test" &&
         (hostedUpgradeUrl(session.shop) ||
-          (PLAN_CONFIG.billingSource === "admin_api" &&
-            PLAN_CONFIG.upgradeMode === "billing_api" &&
+          (billingSource() === "admin_api" &&
+            billingUpgradeMode() === "billing_api" &&
             configuredRecurringPrice())),
       ),
     },
@@ -110,8 +113,11 @@ export default function PlanAndUsage() {
         ) : null}
         {!usage.available ? (
           <Banner tone="warning">
-            Usage storage is temporarily unavailable. These are the last durable
-            totals. Free offers and paid AI pause while shared limits cannot be
+            Usage storage is temporarily unavailable.{" "}
+            {usage.totalsKnown
+              ? "These are the last saved totals."
+              : "Usage totals cannot currently be verified."}{" "}
+            Free offers and paid AI pause while shared limits cannot be
             verified.
           </Banner>
         ) : null}
@@ -135,12 +141,16 @@ export default function PlanAndUsage() {
               rows={[
                 [
                   "Displayed recommendations",
-                  usage.displayed,
+                  usage.totalsKnown ? usage.displayed : "Unavailable",
                   plan.monthlyDisplays === null
                     ? "Unlimited"
                     : plan.monthlyDisplays,
                 ],
-                ["AI provider attempts", usage.aiCalls, plan.monthlyAiCalls],
+                [
+                  "AI provider attempts",
+                  usage.totalsKnown ? usage.aiCalls : "Unavailable",
+                  plan.monthlyAiCalls,
+                ],
               ]}
             />
             <Text as="p" tone="subdued">

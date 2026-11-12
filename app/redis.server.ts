@@ -1,5 +1,6 @@
 import { Redis } from "@upstash/redis";
 import { randomUUID } from "node:crypto";
+import { reportDependencyFailure } from "./utils/dependencyFailure.server";
 
 const upstash =
   process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
@@ -285,16 +286,25 @@ export async function claimExpiringKey(
   key: string,
   ttlSeconds: number,
 ): Promise<boolean> {
+  return (await claimExpiringKeyStatus(key, ttlSeconds)) === "acquired";
+}
+
+/** Distinguish normal contention from a failed distributed dependency. */
+export async function claimExpiringKeyStatus(
+  key: string,
+  ttlSeconds: number,
+): Promise<"acquired" | "busy" | "unavailable"> {
   if (upstash) {
     try {
       const result = await upstash.set(key, "1", {
         ex: ttlSeconds,
         nx: true,
       });
-      return result === "OK";
+      return result === "OK" ? "acquired" : "busy";
     } catch (error) {
       warnClaimStoreUnavailable(error);
-      return false;
+      reportDependencyFailure("redis_claim", error);
+      return "unavailable";
     }
   }
 
@@ -302,12 +312,12 @@ export async function claimExpiringKey(
     warnClaimStoreUnavailable(
       "UPSTASH_REDIS_REST_URL/TOKEN are not configured",
     );
-    return false;
+    return "unavailable";
   }
 
-  if (getMemoryValue(key) !== null) return false;
+  if (getMemoryValue(key) !== null) return "busy";
   setMemoryValue(key, "1", ttlSeconds);
-  return true;
+  return "acquired";
 }
 
 export const cacheKeys = {
@@ -339,9 +349,9 @@ function warnClaimStoreUnavailable(error: unknown) {
   if (claimStoreWarningLogged) return;
   claimStoreWarningLogged = true;
   console.warn(
-    "AOVBoost distributed store unavailable; guarded operations are fail-closed:",
-    error instanceof Error ? error.message : String(error),
+    "AOVBoost distributed store unavailable; guarded operations are fail-closed",
   );
+  reportDependencyFailure("redis_guarded_operations", error);
 }
 
 async function withRedis<T>(
@@ -355,10 +365,7 @@ async function withRedis<T>(
     redisRetryAt = Date.now() + 30_000;
     if (Date.now() - redisWarningAt > 60_000) {
       redisWarningAt = Date.now();
-      console.warn(
-        "AOVBoost Redis fallback active:",
-        error instanceof Error ? error.message : String(error),
-      );
+      reportDependencyFailure("redis_cache_fallback", error);
     }
     return fallback();
   }

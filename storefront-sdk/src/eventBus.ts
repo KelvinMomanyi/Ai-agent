@@ -105,13 +105,14 @@ export class EventBus {
       }
     }
     const event: AovboostEvent = {
-      type,
       ts: now,
       sessionId: this.options.sessionManager.anonymousId,
       shop: this.options.shop,
       url: window.location.href,
       referrer: document.referrer,
       ...payload,
+      // Derived events may carry an older event's payload; keep the new name.
+      type,
     };
 
     this.options.sessionManager.recordEvent(event);
