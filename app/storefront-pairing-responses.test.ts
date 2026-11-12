@@ -328,7 +328,7 @@ describe("serialized storefront response privacy and pairing cache", () => {
     cartProductIds: ["gid://shopify/Product/1"],
     cartItemCount: 1,
   };
-  it("returns a retryable no-card response for a catalog outage without creating offers", async () => {
+  it("returns a proxy-safe no-card response for a complete catalog outage without creating offers", async () => {
     mocks.candidates.mockRejectedValue(new CatalogUnavailableError());
     const result = await offerAction(
       post("/api/offer", {
@@ -342,8 +342,7 @@ describe("serialized storefront response privacy and pairing cache", () => {
       reasoning: "catalog_temporarily_unavailable",
     });
     expect((result as any).init).toMatchObject({
-      status: 503,
-      headers: { "Retry-After": "5", "Cache-Control": "no-store" },
+      headers: { "Cache-Control": "no-store" },
     });
     expect(mocks.createOffer).not.toHaveBeenCalled();
     expect(mocks.reserve).not.toHaveBeenCalled();

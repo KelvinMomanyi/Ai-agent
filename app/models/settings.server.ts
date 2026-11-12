@@ -34,7 +34,9 @@ export async function getAppSettings(shop: string) {
 
 export async function getPublicAppSettings(shop: string) {
   const key = `public-settings:${shop}`;
-  const cached = await getJsonCache<PublicAppSettings>(key);
+  const cached = await getJsonCache<PublicAppSettings>(key, {
+    allowMemoryFallback: false,
+  });
   if (cached)
     return {
       ...cached,

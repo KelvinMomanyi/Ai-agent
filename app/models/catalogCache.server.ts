@@ -8,6 +8,7 @@ import {
   claimExpiringKeyStatus,
 } from "../redis.server";
 import { CatalogUnavailableError } from "../utils/catalogAvailability.server";
+import { readCatalogDuringCacheOutage } from "./catalogDatabaseFallback.server";
 import {
   getSafeDefaultVariantId,
   getSyncedProductVariants,
@@ -65,6 +66,13 @@ const CATEGORY_CATALOG_TTL_SECONDS = 60 * 60;
 const HOT_PRODUCT_LIMIT = 500;
 const CATEGORY_PRODUCT_LIMIT = 250;
 const pendingHotCatalogs = new Map<string, Promise<CatalogSnapshot>>();
+const fallbackSnapshots = new Map<
+  string,
+  { snapshot: CatalogSnapshot; bytes: number; expiresAt: number }
+>();
+const FALLBACK_CACHE_BYTES = 8_000_000;
+const FALLBACK_CACHE_MS = 5000;
+let fallbackSnapshotBytes = 0;
 
 export async function getCatalogReadiness(shop: string) {
   const key = `catalog:${shop}:readiness:v2`;
@@ -118,6 +126,7 @@ export async function refreshCatalogCache(shop: string) {
 
 /** Versioned keys prevent an in-flight old rebuild from overwriting newer data. */
 export async function invalidateCatalogCache(shop: string) {
+  removeFallbackSnapshot(shop);
   await redis.set(`catalog:${shop}:version`, randomUUID(), "EX", 7 * 24 * 3600);
   await redis.del(`catalog:${shop}:readiness:v2`);
 }
@@ -282,6 +291,16 @@ async function fillHotCatalogSnapshot(shop: string, key: string) {
   if (claim !== "acquired") {
     const previous = await readSnapshot(`catalog:${shop}:last-hot`);
     if (previous) return previous;
+    if (claim === "unavailable") {
+      const entry = fallbackSnapshots.get(shop);
+      if (entry && entry.expiresAt > Date.now()) return entry.snapshot;
+      removeFallbackSnapshot(shop);
+      const { products, productCount } =
+        await readCatalogDuringCacheOutage(shop);
+      const snapshot = buildCatalogSnapshot(shop, products, productCount);
+      rememberFallbackSnapshot(shop, snapshot);
+      return snapshot;
+    }
     if (claim === "busy") {
       // A cold concurrent request can use the winner's snapshot. Never pretend
       // an unavailable/busy cache is a genuinely empty merchant catalog.
@@ -324,6 +343,34 @@ async function fillHotCatalogSnapshot(shop: string, key: string) {
     ),
   ]);
   return snapshot;
+}
+
+function removeFallbackSnapshot(shop: string) {
+  const entry = fallbackSnapshots.get(shop);
+  if (entry) fallbackSnapshotBytes -= entry.bytes;
+  fallbackSnapshots.delete(shop);
+}
+
+function rememberFallbackSnapshot(shop: string, snapshot: CatalogSnapshot) {
+  // Count indexes as well as products; unlike quota state this is an optional,
+  // short-lived per-instance cache. Missing/oversized entries simply use SQL.
+  const bytes = Buffer.byteLength(JSON.stringify(snapshot));
+  if (bytes > FALLBACK_CACHE_BYTES) return;
+  for (const [key, entry] of fallbackSnapshots) {
+    if (entry.expiresAt <= Date.now()) removeFallbackSnapshot(key);
+  }
+  while (
+    fallbackSnapshots.size >= 20 ||
+    fallbackSnapshotBytes + bytes > FALLBACK_CACHE_BYTES
+  ) {
+    removeFallbackSnapshot(fallbackSnapshots.keys().next().value!);
+  }
+  fallbackSnapshots.set(shop, {
+    snapshot,
+    bytes,
+    expiresAt: Date.now() + FALLBACK_CACHE_MS,
+  });
+  fallbackSnapshotBytes += bytes;
 }
 
 async function getCategoryCatalogSnapshot(shop: string, category: string) {

@@ -1,10 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   cache: new Map<string, unknown>(),
   claim: vi.fn(),
   products: vi.fn(),
   stats: vi.fn(),
   count: vi.fn(),
+  fallback: vi.fn(),
+}));
+vi.mock("./catalogDatabaseFallback.server", () => ({
+  readCatalogDuringCacheOutage: mocks.fallback,
 }));
 vi.mock("../redis.server", () => ({
   getJsonCache: async (key: string) => mocks.cache.get(key) || null,
@@ -32,6 +36,7 @@ import {
   getRecommendationCatalog,
   invalidateCatalogCache,
 } from "./catalogCache.server";
+import { CatalogUnavailableError } from "../utils/catalogAvailability.server";
 
 const shop = "shop.test";
 const product = (id: string) => ({
@@ -48,16 +53,65 @@ const product = (id: string) => ({
   updatedAt: new Date("2026-11-02"),
   orderStats: null,
 });
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
   mocks.cache.clear();
   mocks.claim.mockResolvedValue("acquired");
   mocks.products.mockResolvedValue([product("p1")]);
   mocks.stats.mockResolvedValue([]);
   mocks.count.mockResolvedValue(1);
+  mocks.fallback.mockRejectedValue(new CatalogUnavailableError());
+  await invalidateCatalogCache(shop);
+  mocks.cache.clear();
 });
+afterEach(() => vi.useRealTimers());
 
 describe("catalog cache fill budget", () => {
+  it("expires the short-lived fallback without weakening fresh product validation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-12T04:00:00Z"));
+    mocks.claim.mockResolvedValue("unavailable");
+    mocks.fallback.mockResolvedValue({ products: [product("p1")], productCount: 1 });
+    await getRecommendationCatalog({ shop });
+    vi.advanceTimersByTime(5001);
+    mocks.fallback.mockResolvedValue({ products: [product("p2")], productCount: 1 });
+    expect((await getRecommendationCatalog({ shop })).products[0].id).toBe("p2");
+    expect(mocks.fallback).toHaveBeenCalledTimes(2);
+  });
+  it("serves the durable catalog during a Redis outage and briefly caches the bounded result", async () => {
+    mocks.claim.mockResolvedValue("unavailable");
+    mocks.fallback.mockResolvedValue({
+      products: [product("p1"), product("p2")],
+      productCount: 2,
+    });
+    const result = await getRecommendationCatalog({ shop });
+    expect(result.products.map(({ id }) => id)).toEqual(["p1", "p2"]);
+    expect(result.productCount).toBe(2);
+    expect((await getRecommendationCatalog({ shop })).products).toHaveLength(2);
+    expect(mocks.fallback).toHaveBeenCalledTimes(1);
+    expect(mocks.fallback).toHaveBeenCalledWith(shop);
+    expect(mocks.products).not.toHaveBeenCalled();
+  });
+
+  it("invalidates fallback snapshots and keeps shops isolated", async () => {
+    mocks.claim.mockResolvedValue("unavailable");
+    mocks.fallback.mockResolvedValue({
+      products: [product("p1")],
+      productCount: 1,
+    });
+    await getRecommendationCatalog({ shop });
+    mocks.fallback.mockResolvedValue({
+      products: [product("p2")],
+      productCount: 1,
+    });
+    expect(
+      (await getRecommendationCatalog({ shop: "other.test" })).products[0].id,
+    ).toBe("p2");
+    await invalidateCatalogCache(shop);
+    expect((await getRecommendationCatalog({ shop })).products[0].id).toBe(
+      "p2",
+    );
+  });
   it("stores each product once and reconstructs indexes on cache hits", async () => {
     const first = await getRecommendationCatalog({ shop });
     const stored = mocks.cache.get(`catalog:${shop}:hot:0`) as Record<

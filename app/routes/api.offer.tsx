@@ -538,8 +538,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } catch (error) {
     if (error instanceof CatalogUnavailableError) {
       return json(noCartOffer("catalog_temporarily_unavailable"), {
-        status: 503,
-        headers: withCors({ "Retry-After": "5", "Cache-Control": "no-store" }),
+        // App-proxy 5xx responses can become opaque Shopify error documents.
+        // A dependency outage is a normal no-card decision; cart success stands.
+        headers: withCors({ "Cache-Control": "no-store" }),
       });
     }
     if (isStorefrontAuthError(error)) {
@@ -700,7 +701,11 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 async function getCachedAppSettings(shop: string): Promise<AppSettings> {
   const key = `settings:${shop}`;
-  const cached = await getJsonCache<AppSettings>(key);
+  // Merchant exclusions and pause controls must not depend on instance-local
+  // invalidation while Redis is down. Read the durable settings in that case.
+  const cached = await getJsonCache<AppSettings>(key, {
+    allowMemoryFallback: false,
+  });
   if (cached) return cached;
 
   const settings = await prisma.appSettings.upsert({

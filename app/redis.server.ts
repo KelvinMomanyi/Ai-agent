@@ -21,26 +21,36 @@ const MAX_MEMORY_ENTRIES = 1000;
 /** Billing counters must never silently fall back to per-instance memory. */
 export const billingRedis = {
   async get(key: string): Promise<unknown> {
-    if (!upstash) throw new Error("Shared billing store unavailable");
-    return upstash.get(key);
+    return withSharedRedis((client) => client.get(key));
   },
   async set(key: string, value: string, seconds: number) {
-    if (!upstash) throw new Error("Shared billing store unavailable");
-    await upstash.set(key, value, { ex: seconds });
+    await withSharedRedis((client) => client.set(key, value, { ex: seconds }));
   },
   async del(key: string) {
-    if (!upstash) throw new Error("Shared billing store unavailable");
-    await upstash.del(key);
+    await withSharedRedis((client) => client.del(key));
   },
   async eval(
     script: string,
     keys: string[],
     args: Array<string | number>,
   ): Promise<unknown> {
-    if (!upstash) throw new Error("Shared billing store unavailable");
-    return upstash.eval(script, keys, args);
+    return withSharedRedis((client) => client.eval(script, keys, args));
   },
 };
+
+async function withSharedRedis<T>(
+  operation: (client: Redis) => Promise<T>,
+): Promise<T> {
+  if (!upstash || Date.now() < redisRetryAt)
+    throw new Error("Shared billing store unavailable");
+  try {
+    return await operation(upstash);
+  } catch (error) {
+    redisRetryAt = Date.now() + 30_000;
+    reportDependencyFailure("redis_billing", error);
+    throw error;
+  }
+}
 
 /**
  * Upstash's HTTP client works in serverless runtimes. The memory fallback keeps
@@ -132,10 +142,16 @@ export const redis = {
   },
 };
 
-export async function getJsonCache<T>(key: string): Promise<T | null> {
+export async function getJsonCache<T>(
+  key: string,
+  options: { allowMemoryFallback?: boolean } = {},
+): Promise<T | null> {
   const value = await withRedis(
     (client) => client.get<string>(key),
-    () => getMemoryValue<string>(key),
+    () =>
+      options.allowMemoryFallback === false
+        ? null
+        : getMemoryValue<string>(key),
   );
   if (!value) return null;
 
@@ -295,6 +311,7 @@ export async function claimExpiringKeyStatus(
   ttlSeconds: number,
 ): Promise<"acquired" | "busy" | "unavailable"> {
   if (upstash) {
+    if (Date.now() < redisRetryAt) return "unavailable";
     try {
       const result = await upstash.set(key, "1", {
         ex: ttlSeconds,
@@ -302,6 +319,7 @@ export async function claimExpiringKeyStatus(
       });
       return result === "OK" ? "acquired" : "busy";
     } catch (error) {
+      redisRetryAt = Date.now() + 30_000;
       warnClaimStoreUnavailable(error);
       reportDependencyFailure("redis_claim", error);
       return "unavailable";
