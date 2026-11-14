@@ -9,8 +9,16 @@ import { RecStrip } from "./RecStrip";
 import { SocialProof } from "./SocialProof";
 import { ToastNudge } from "./ToastNudge";
 import { UpsellDrawer } from "./UpsellDrawer";
-import type { BaseWidget, WidgetPayload } from "./BaseWidget";
+import type { WidgetPayload } from "./BaseWidget";
+import {
+  BaseWidget,
+  getProducts,
+  getStorefrontCurrency,
+  text,
+} from "./BaseWidget";
+import { cartUrl, mutateShopifyCart } from "../shopifyCart";
 import type { StorefrontSettings } from "../sessionManager";
+import type { WidgetCoordinator } from "../agent/types";
 import { loadThemeEngine } from "../theme/loader";
 import { readThemeIdentity } from "../theme/identity";
 import {
@@ -43,11 +51,14 @@ type MountedWidget = {
 };
 
 export class WidgetManager {
+  readonly agentExperience = true;
   setHoldout(holdout: boolean) {
     this.settings = { ...this.settings, holdout };
+    this.agentCore?.setHoldout(holdout);
     if (holdout) this.destroyActive();
   }
   private chatWidget: MountedWidget | null = null;
+  private agentCore?: WidgetCoordinator;
   private bannerWidget: MountedWidget | null = null;
   private overlayWidget: MountedWidget | null = null;
   private inlineWidgets = new Map<string, MountedWidget>();
@@ -77,6 +88,7 @@ export class WidgetManager {
       detail.source === "verified_native_form_redirect"
         ? String(detail.mutationId || "")
         : "";
+    if (this.agentCore) return;
     const revision = ++this.adaptiveRevision;
     this.adaptive?.destroy();
     this.adaptiveKey = "";
@@ -123,7 +135,54 @@ export class WidgetManager {
     document.removeEventListener("aovboost:event", this.onCartThemeEvent);
   }
 
-  mountDecision(decision: OfferDecision): PlacementOutcome {
+  setAgentCore(core: WidgetCoordinator): void {
+    this.agentCore = core;
+  }
+  getRecommendationProducts(payload: WidgetPayload) {
+    return getProducts(payload);
+  }
+  getRecommendationScope() {
+    const currency = getStorefrontCurrency();
+    return {
+      root: cartUrl("read").replace(/cart\.js$/, ""),
+      currency: currency.code,
+      locale: currency.locale || "",
+      market: String(
+        (window as Window & { Shopify?: { country?: string } }).Shopify
+          ?.country || "",
+      ),
+    };
+  }
+
+  isProviderEnabled(type: string): boolean {
+    return isWidgetEnabled(type, { ...this.settings, holdout: false });
+  }
+
+  mountDecision(
+    decision: OfferDecision,
+    trigger = "offer_ready",
+  ): PlacementOutcome {
+    return this.agentCore
+      ? this.agentCore.offer(decision, trigger)
+      : this.mountLegacyDecision(decision);
+  }
+
+  mountProvider(decision: OfferDecision): Promise<PlacementOutcome> {
+    return new Promise((resolve, reject) => {
+      try {
+        const result = this.mountLegacyDecision(decision, resolve, reject);
+        if (result.status !== "pending") resolve(result);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  private mountLegacyDecision(
+    decision: OfferDecision,
+    settled?: (result: PlacementOutcome) => void,
+    failed?: (error: unknown) => void,
+  ): PlacementOutcome {
     if (this.pagePath !== window.location.pathname) this.resetPageContext();
     const result = (status: PlacementOutcome["status"], reason: string) => {
       this.lastPlacement = { status, reason };
@@ -133,7 +192,10 @@ export class WidgetManager {
     if (!isWidgetEnabled(decision.widgetType, this.settings))
       return result("suppressed", "merchant_disabled");
     const payload = decision.payload || {};
-    if (this.getDismissedWidgets().includes(decision.widgetType))
+    if (
+      !this.agentCore &&
+      this.getDismissedWidgets().includes(decision.widgetType)
+    )
       return result("suppressed", "shopper_dismissed");
 
     const offerId = String(payload.offerId || "");
@@ -156,8 +218,13 @@ export class WidgetManager {
       const path = location.pathname;
       this.getAdaptive()
         .then(async (engine) => {
-          if (revision !== this.adaptiveRevision || path !== location.pathname)
+          if (
+            revision !== this.adaptiveRevision ||
+            path !== location.pathname
+          ) {
+            settled?.({ status: "suppressed", reason: "cancelled" });
             return;
+          }
           const outcome = await engine.mount({
             ...payload,
             cartUiHint:
@@ -173,13 +240,19 @@ export class WidgetManager {
               status: outcome.verified ? "mounted" : "suppressed",
               reason: outcome.reason,
             };
+          settled?.(
+            revision === this.adaptiveRevision
+              ? this.lastPlacement!
+              : { status: "suppressed", reason: "cancelled" },
+          );
         })
-        .catch(() => {
+        .catch((error) => {
           if (revision === this.adaptiveRevision)
             this.lastPlacement = {
               status: "suppressed",
               reason: "theme_engine_unavailable",
             };
+          if (failed) failed(error);
         });
       return result("pending", "adaptive_placement_pending");
     }
@@ -224,6 +297,7 @@ export class WidgetManager {
       return result("suppressed", "one_contextual_notice_per_page");
     }
     if (
+      !this.agentCore &&
       ["toast", "exit_intent"].includes(decision.widgetType) &&
       (this.chatWidget?.widget.isMounted() ||
         this.overlayWidget?.widget.isMounted() ||
@@ -247,7 +321,12 @@ export class WidgetManager {
       this.overlayWidget?.widget.destroy();
       this.overlayWidget = null;
     }
-    widget.mount(placement.target);
+    try {
+      widget.mount(placement.target);
+    } catch (error) {
+      if (this.agentCore) widget.destroy();
+      throw error;
+    }
     if (!widget.isMounted())
       return result("suppressed", "widget_has_no_renderable_content");
     this.saveMounted(placement.zone, decision.widgetType, {
@@ -268,6 +347,32 @@ export class WidgetManager {
     this.cartReattachTimer = undefined;
     this.inlineWidgets.get("upsell_drawer")?.widget.destroy();
     this.inlineWidgets.delete("upsell_drawer");
+  }
+
+  getProviderElement(type: string): HTMLElement | null {
+    return document.querySelector<HTMLElement>(
+      `[data-aovboost-widget='${type}']`,
+    );
+  }
+
+  unmountProvider(type: string): void {
+    if (type === "upsell_drawer") {
+      this.clearCartRecommendation();
+      return;
+    }
+    if (type === "chat") {
+      this.chatWidget?.widget.destroy();
+      this.chatWidget = null;
+    } else if (type === "countdown_banner") {
+      this.bannerWidget?.widget.destroy();
+      this.bannerWidget = null;
+    } else if (["toast", "exit_intent"].includes(type)) {
+      this.overlayWidget?.widget.destroy();
+      this.overlayWidget = null;
+    } else {
+      this.inlineWidgets.get(type)?.widget.destroy();
+      this.inlineWidgets.delete(type);
+    }
   }
 
   private watchCartPlacement(decision: OfferDecision, widget: BaseWidget) {
@@ -326,6 +431,7 @@ export class WidgetManager {
   }
 
   resetPageContext(): void {
+    this.agentCore?.navigation();
     this.nativeRedirectMutation = "";
     this.clearCartRecommendation();
     this.pagePath = window.location.pathname;
@@ -342,6 +448,8 @@ export class WidgetManager {
   }
 
   getDismissedWidgets(): string[] {
+    if (this.agentCore?.getDismissedWidgets)
+      return this.agentCore.getDismissedWidgets();
     try {
       const parsed = JSON.parse(localStorage.getItem(DISMISSED_KEY) || "[]");
       if (!Array.isArray(parsed)) return [];
@@ -435,6 +543,14 @@ function getWidgetIdentity(
 }
 
 function createWidget(widgetType: string, payload: WidgetPayload) {
+  if (typeof payload.agentFactory === "function")
+    return payload.agentFactory({
+      BaseWidget,
+      ChatWidget,
+      text,
+      cartUrl,
+      mutateShopifyCart,
+    });
   switch (widgetType) {
     case "chat":
       return new ChatWidget(payload);

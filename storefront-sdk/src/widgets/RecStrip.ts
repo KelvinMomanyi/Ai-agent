@@ -122,6 +122,7 @@ export class RecStrip extends BaseWidget {
             variant.id,
             1,
             this.payload.offerId,
+            "aov_strip",
           );
           if (!added) throw new Error("Cart add failed");
           this.track("recommendation_added", {

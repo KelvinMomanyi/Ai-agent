@@ -4,6 +4,53 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatWidget } from "./ChatWidget";
 
 describe("ChatWidget", () => {
+  it("bounds a flagged stalled chat request and feeds health failure without leaving Send disabled", async () => {
+    vi.useFakeTimers();
+    const health = vi.fn();
+    const fetchMock = vi.fn(
+      async (url: RequestInfo | URL, init?: RequestInit) => {
+        if (String(url) === "/cart.js")
+          return new Response('{"items":[],"item_count":0,"currency":"KES"}');
+        if (String(url) === "/apps/aovboost/chat")
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          });
+        return new Response("{}");
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const widget = new ChatWidget({
+      agentHealthResult: health,
+      agentChatTimeoutMs: 30_000,
+    });
+    try {
+      widget.mount();
+      document.dispatchEvent(new CustomEvent("aovboost:open-chat"));
+      const root = document.querySelector(
+        "[data-aovboost-widget='chat']",
+      )!.shadowRoot!;
+      const input = root.querySelector<HTMLInputElement>("[data-input]")!;
+      input.value = "Show me a product";
+      root.querySelector<HTMLButtonElement>("[data-send]")!.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(
+        root.querySelector<HTMLButtonElement>("[data-send]")!.disabled,
+      ).toBe(true);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(health).toHaveBeenCalledWith(false);
+      expect(
+        root.querySelector<HTMLButtonElement>("[data-send]")!.disabled,
+      ).toBe(false);
+      expect(root.textContent).toContain("I had trouble connecting");
+    } finally {
+      widget.destroy();
+      vi.useRealTimers();
+    }
+  });
   beforeEach(() => {
     document.body.innerHTML = "";
     localStorage.clear();

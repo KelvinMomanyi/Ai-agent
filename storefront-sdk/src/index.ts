@@ -10,8 +10,14 @@ import { themePreviewToken, readThemeIdentity } from "./theme/identity";
 import { defaultThemeConfig } from "../../shared/themeCompatibility";
 import { loadThemeEngine } from "./theme/loader";
 import "./styles/widgets.css";
+import { agentCoreEnabled } from "./agent/flag";
+import { loadAgentCore } from "./agent/loader";
 
 type AovBoostConfig = {
+  agent_holdout_percent?: number;
+  agentFacts?: import("./agent/OfferFacts").AgentFactsConfig;
+  campaign?: unknown;
+  agent_core_enabled?: boolean;
   shop?: string;
   currency?: string;
   currencyCode?: string;
@@ -22,6 +28,7 @@ type AovBoostConfig = {
   apiBase?: string;
   settings?: {
     trackingConsentRequired?: boolean;
+    agent_core_enabled?: boolean;
   };
 };
 
@@ -111,6 +118,47 @@ async function start(): Promise<void> {
     const liveUpdates = new LiveUpdates({ apiBase, sessionManager });
     const measurementLink = new MeasurementCartLink(sessionManager, eventBus);
     measurementLink.init();
+    const coreEnabled = agentCoreEnabled(settings);
+    const agent = coreEnabled
+      ? await loadAgentCore()
+          .then((module) =>
+            module.createAgentCore({
+              shop,
+              apiBase,
+              settings,
+              visitorId: sessionManager.anonymousId,
+              measurement: () => sessionManager.getMeasurement(),
+              serverHoldout: () =>
+                sessionManager.getSettings().holdout === true,
+              analyticsEnabled: () =>
+                sessionManager.getSettings().analyticsEnabled !== false,
+              bridge: widgetManager,
+              enabled: (type) => widgetManager.isProviderEnabled(type),
+              track: (type, data) => eventBus.track(type, data),
+              trigger: (type, data) => triggerRouter.trigger(type, data),
+            }),
+          )
+          .catch(() => null)
+      : undefined;
+    if (coreEnabled) {
+      if (agent) eventBus.setAgentTelemetry(agent.telemetryEvent);
+      // Also expose a session-supplied flag to the cart helpers. No setting
+      // schema or merchant-facing label is changed.
+      window.AOVBoost = { ...config, agent_core_enabled: true };
+      widgetManager.setAgentCore(
+        agent || {
+          offer: () => ({
+            status: "suppressed",
+            reason: "agent_core_unavailable",
+          }),
+          navigation: () => {},
+          setHoldout: () => {},
+        },
+      );
+      agent?.init();
+      if (agent?.recommendations)
+        offerPoller.setRecommendationService(agent.recommendations);
+    }
 
     window.AOVBoostSDK = {
       shop,
@@ -128,6 +176,7 @@ async function start(): Promise<void> {
         offerPoller.requestOffer(trigger, payload),
       diagnose: () => offerPoller.getStatus(),
       destroy: () => {
+        agent?.destroy();
         measurementLink.destroy();
         eventBus.destroy();
         liveUpdates.destroy();

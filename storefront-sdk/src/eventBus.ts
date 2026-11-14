@@ -1,6 +1,7 @@
 import type { SessionManager } from "./sessionManager";
 import { hasTrackingConsent } from "./consent";
 import { newMutationId } from "./cartState";
+import { agentCoreEnabled, cartSource } from "./agent/flag";
 
 type EventPayload = Record<string, unknown>;
 
@@ -21,6 +22,14 @@ type EventBusOptions = {
 };
 
 export class EventBus {
+  private agentTelemetry?: (
+    event: Record<string, unknown>,
+  ) => Record<string, unknown> | null;
+  setAgentTelemetry(
+    project: (event: Record<string, unknown>) => Record<string, unknown> | null,
+  ): void {
+    this.agentTelemetry = project;
+  }
   private queue: AovboostEvent[] = [];
   private flushTimer: number | undefined;
   private scrollDepths = new Set<number>();
@@ -68,6 +77,16 @@ export class EventBus {
       }) as EventListener,
       { signal: this.listeners.signal },
     );
+    if (agentCoreEnabled(this.options.sessionManager.getSettings?.())) {
+      document.addEventListener(
+        "aovboost:cart-mutation",
+        ((event: CustomEvent) => {
+          const detail = normalizePayload(event.detail);
+          this.track(String(detail.type), detail);
+        }) as EventListener,
+        { signal: this.listeners.signal },
+      );
+    }
     window.addEventListener("pagehide", this.handlePageHide);
     document.addEventListener("visibilitychange", this.handleVisibility);
     this.heartbeatTimer = window.setInterval(() => {
@@ -104,7 +123,7 @@ export class EventBus {
           );
       }
     }
-    const event: AovboostEvent = {
+    let event: AovboostEvent = {
       ts: now,
       sessionId: this.options.sessionManager.anonymousId,
       shop: this.options.shop,
@@ -114,6 +133,11 @@ export class EventBus {
       // Derived events may carry an older event's payload; keep the new name.
       type,
     };
+    if (this.agentTelemetry) {
+      const projected = this.agentTelemetry(event);
+      if (!projected) return;
+      event = projected as AovboostEvent;
+    }
 
     this.options.sessionManager.recordEvent(event);
     if (
@@ -388,18 +412,17 @@ export class EventBus {
       const response = await this.originalFetch!(...args);
 
       try {
+        const headers = new Headers(
+          init?.headers ||
+            (args[0] instanceof Request ? args[0].headers : undefined),
+        );
         if (
-          new Headers(
-            init?.headers ||
-              (args[0] instanceof Request ? args[0].headers : undefined),
-          ).get("X-AOVBoost-Measurement") === "1"
+          headers.get("X-AOVBoost-Measurement") === "1" ||
+          (agentCoreEnabled(this.options.sessionManager.getSettings?.()) &&
+            headers.has("X-AOVBoost-Source"))
         )
           return response;
         if (method === "POST" && isCartAddUrl(requestUrl) && response.ok) {
-          const headers = new Headers(
-            init?.headers ||
-              (args[0] instanceof Request ? args[0].headers : undefined),
-          );
           void Promise.all([bodyCopy, readCartAddResponse(response)])
             .then(([requestBody, responsePayload]) => {
               const requestPayload = getCartPayload(requestBody);
@@ -418,6 +441,17 @@ export class EventBus {
                 recommendationOrigin:
                   headers.get("X-AOVBoost-Recommendation") === "1" ||
                   requestPayload.recommendationOrigin === true,
+                ...(agentCoreEnabled(
+                  this.options.sessionManager.getSettings?.(),
+                )
+                  ? {
+                      cartSource: cartSource({
+                        recommendationOrigin:
+                          headers.get("X-AOVBoost-Recommendation") === "1" ||
+                          requestPayload.recommendationOrigin === true,
+                      }),
+                    }
+                  : {}),
               });
             })
             .catch(() => {});
@@ -462,7 +496,12 @@ export class EventBus {
     }
 
     const trackVerifiedAdd = (payload: EventPayload) =>
-      this.track("add_to_cart", payload);
+      this.track(
+        "add_to_cart",
+        agentCoreEnabled(this.options.sessionManager.getSettings?.())
+          ? { ...payload, cartSource: cartSource(payload) }
+          : payload,
+      );
     const trackVerifiedMutation = (type: string, payload: EventPayload) =>
       this.track(type, payload);
     const prototype = XMLHttpRequest.prototype;

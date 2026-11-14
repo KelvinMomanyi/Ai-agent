@@ -9,6 +9,7 @@ import {
 import { readShopifyCart } from "./cartState";
 import { cartUrl } from "./shopifyCart";
 import { hydrateCartCardPrices } from "./cartCardPricing";
+import type { RecommendationService } from "./agent/RecommendationService";
 
 type OfferPollerOptions = {
   shop: string;
@@ -60,9 +61,13 @@ export class OfferPoller {
   private abortController = new AbortController();
   private requestController: AbortController | undefined;
   private options: OfferPollerOptions;
+  private recommendations?: RecommendationService;
 
   constructor(options: OfferPollerOptions) {
     this.options = options;
+  }
+  setRecommendationService(service: RecommendationService): void {
+    this.recommendations = service;
   }
 
   init(): void {
@@ -118,10 +123,46 @@ export class OfferPoller {
       pendingTriggers: Array.from(this.pendingRequests.keys()),
       recentDecisions: [...this.runtimeHistory],
       widgets: this.options.widgetManager.getStatus(),
+      ...(this.recommendations
+        ? { recommendations: this.recommendations.getStatus() }
+        : {}),
     };
   }
 
-  async requestOffer(
+  requestOffer(
+    trigger = "manual",
+    triggerPayload: Record<string, unknown> = {},
+  ): Promise<OfferDecision | null> {
+    const cartAdd = ["cart_item_added", "add_to_cart"].includes(trigger);
+    const share =
+      cartAdd ||
+      (["initial", "navigation", "manual", "poll"].includes(trigger) &&
+        Object.keys(triggerPayload).length === 0);
+    if (!this.recommendations || !share)
+      return this.performRequest(trigger, triggerPayload);
+    const requestedPage = location.pathname;
+    const requestedVersion = this.pageVersion;
+    const key = JSON.stringify([
+      trigger,
+      location.pathname,
+      this.pageVersion,
+      cartAdd ? null : this.mutationVersion,
+      triggerPayload.mutationId,
+      triggerPayload.productId,
+      triggerPayload.variantId,
+      triggerPayload.confirmed,
+      triggerPayload.recommendationOrigin,
+      triggerPayload.cartSource,
+    ]);
+    return this.recommendations.coalesceOffer(key, () =>
+      requestedPage === location.pathname &&
+      requestedVersion === this.pageVersion
+        ? this.performRequest(trigger, triggerPayload)
+        : Promise.resolve(null),
+    );
+  }
+
+  private async performRequest(
     trigger = "manual",
     triggerPayload: Record<string, unknown> = {},
   ): Promise<OfferDecision | null> {
@@ -149,13 +190,17 @@ export class OfferPoller {
     const pagePath = window.location.pathname;
     const pageVersion = this.pageVersion;
     const mutationVersion = this.mutationVersion;
+    let recommendationScope: string | undefined;
     const isCurrentPage = () =>
       !this.stopped &&
       pagePath === window.location.pathname &&
       pageVersion === this.pageVersion &&
       mutationVersion === this.mutationVersion;
+    const isCurrentScope = () =>
+      !recommendationScope ||
+      recommendationScope === this.recommendations?.scopeKey();
     const fallback = (reasoning: string, httpStatus?: number) =>
-      isCurrentPage()
+      isCurrentPage() && isCurrentScope()
         ? this.mountLocalFallback(
             trigger,
             triggerPayload,
@@ -189,8 +234,9 @@ export class OfferPoller {
         );
       }
       const currency = getStorefrontCurrency();
-      const currentProductId = await getCurrentProductId();
-      if (!isCurrentPage()) return null;
+      recommendationScope = this.recommendations?.scopeKey();
+      const currentProductId = await getCurrentProductId(this.recommendations);
+      if (!isCurrentPage() || !isCurrentScope()) return null;
 
       const body = {
         ...auth,
@@ -241,7 +287,7 @@ export class OfferPoller {
       let decision = (await response.json()) as OfferDecision & {
         measurement?: unknown;
       };
-      if (!isCurrentPage()) return null;
+      if (!isCurrentPage() || !isCurrentScope()) return null;
       if ("measurement" in decision) {
         this.options.sessionManager.applyMeasurement?.(decision.measurement);
         this.options.widgetManager.setHoldout?.(
@@ -274,12 +320,15 @@ export class OfferPoller {
           decision.payload?.mutationId !== triggerPayload.mutationId)
       )
         return null;
-      if (cartAdd) {
+      if (cartAdd && !this.recommendations) {
         decision = await hydrateCartCardPrices(decision);
         if (!isCurrentPage() || !decision.widgetType) return null;
       }
 
-      const placement = this.options.widgetManager.mountDecision(decision);
+      const placement = this.options.widgetManager.mountDecision(
+        decision,
+        trigger,
+      );
       this.recordRuntime({
         trigger,
         outcome: placement.status,
@@ -488,7 +537,10 @@ export class OfferPoller {
       return null;
     }
 
-    const placement = this.options.widgetManager.mountDecision(decision);
+    const placement = this.options.widgetManager.mountDecision(
+      decision,
+      trigger,
+    );
     this.recordRuntime({
       trigger,
       outcome:
@@ -756,7 +808,7 @@ function getToastBody(trigger: string) {
   return "I can help find the right product or useful add-on.";
 }
 
-async function getCurrentProductId() {
+async function getCurrentProductId(recommendations?: RecommendationService) {
   const product =
     (window as any).Shopify?.product ||
     (window as any).ShopifyAnalytics?.meta?.product ||
@@ -766,6 +818,7 @@ async function getCurrentProductId() {
 
   const handle = window.location.pathname.match(/\/products\/([^/?#]+)/)?.[1];
   if (!handle) return undefined;
+  if (recommendations) return recommendations.resolveProductId(handle);
 
   const controller = new AbortController();
   const timeout = window.setTimeout(

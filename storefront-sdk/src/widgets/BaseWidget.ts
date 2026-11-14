@@ -1,4 +1,10 @@
 export type WidgetPayload = {
+  agentOnDestroy?: () => void;
+  agentHealthResult?: (ok: boolean) => void;
+  agentChatTimeoutMs?: number;
+  agentManaged?: boolean;
+  agentIdentity?: import("../agent/AgentVoice").AgentIdentity;
+  agentFactory?: import("../agent/experienceTypes").ExperienceFactory;
   offerId?: string;
   copy?: Record<string, unknown>;
   [key: string]: unknown;
@@ -70,6 +76,11 @@ export abstract class BaseWidget {
       mount.childElementCount === 0
     )
       mount.remove();
+    try {
+      this.payload.agentOnDestroy?.();
+    } catch {
+      /* A runtime hook must not break the theme. */
+    }
   }
 
   isMounted(): boolean {
@@ -199,6 +210,9 @@ export abstract class BaseWidget {
   protected injectStyles(): void {
     const style = document.createElement("style");
     style.textContent = BASE_WIDGET_CSS;
+    if (this.payload.agentOnDestroy)
+      style.textContent +=
+        "\n@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.toast,.drawer{transform:none!important;opacity:1!important}}";
     this.root.appendChild(style);
   }
 
@@ -266,6 +280,15 @@ export abstract class BaseWidget {
     const wrapper = document.createElement("div");
     wrapper.setAttribute("data-aovboost-content", "true");
     wrapper.innerHTML = markup;
+    const identity = this.payload.agentIdentity;
+    if (identity && !wrapper.querySelector("[data-agent-identity]")) {
+      const badge = document.createElement("div");
+      badge.setAttribute("data-agent-identity", "");
+      badge.style.cssText =
+        "font:inherit;font-size:11px;color:var(--aovboost-muted);margin-bottom:6px";
+      badge.textContent = `${identity.avatar} · ${identity.name}`;
+      wrapper.querySelector(".card,aside,section")?.prepend(badge);
+    }
     this.root.appendChild(wrapper);
   }
 }
@@ -603,6 +626,7 @@ export async function addVariantToCart(
   variantId: unknown,
   quantity = 1,
   offerId?: unknown,
+  source?: import("../agent/flag").AgentCartSource,
 ) {
   if (
     !variantId ||
@@ -613,11 +637,15 @@ export async function addVariantToCart(
     return null;
   const numericId = String(variantId).split("/").pop();
   if (!numericId || !/^\d+$/.test(numericId)) return null;
-  return mutateShopifyCart("add", {
-    id: numericId,
-    quantity,
-    properties: offerLineProperties(offerId),
-  });
+  return mutateShopifyCart(
+    "add",
+    {
+      id: numericId,
+      quantity,
+      properties: offerLineProperties(offerId),
+    },
+    source,
+  );
 }
 
 export async function addManyToCart(
@@ -644,7 +672,7 @@ export async function addManyToCart(
     )
   )
     return null;
-  return mutateShopifyCart("add", { items: cartItems });
+  return mutateShopifyCart("add", { items: cartItems }, "aov_bundle");
 }
 
 function offerLineProperties(

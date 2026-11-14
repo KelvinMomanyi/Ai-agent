@@ -39,7 +39,7 @@ type CartAction = {
   expectedQuantity?: number;
 };
 
-type Message = {
+export type Message = {
   role: "user" | "assistant";
   content: string;
   productCards?: ProductCard[];
@@ -72,15 +72,17 @@ type LiveCartContext = {
 };
 
 export class ChatWidget extends BaseWidget {
-  private messages: Message[] = [];
-  private expanded = false;
-  private sending = false;
+  protected messages: Message[] = [];
+  protected expanded = false;
+  protected sending = false;
   private initialMessageTracked = false;
+  private agentRequest?: AbortController;
 
   constructor(payload: WidgetPayload) {
     super(payload);
     this.root.addEventListener("click", this.handleProductCardClick);
-    document.addEventListener("aovboost:open-chat", this.handleOpenChat);
+    if (!payload.agentManaged)
+      document.addEventListener("aovboost:open-chat", this.handleOpenChat);
     const copy = payload.copy as Record<string, unknown> | undefined;
     const greeting = String(
       copy?.greeting ||
@@ -110,6 +112,7 @@ export class ChatWidget extends BaseWidget {
   }
 
   destroy(): void {
+    this.agentRequest?.abort();
     this.root.removeEventListener("click", this.handleProductCardClick);
     document.removeEventListener("aovboost:open-chat", this.handleOpenChat);
     super.destroy();
@@ -257,7 +260,7 @@ export class ChatWidget extends BaseWidget {
     }
   }
 
-  private renderChatUi() {
+  protected renderChatUi() {
     return `
       <div class="messages" role="log" aria-live="polite" aria-relevant="additions text" data-messages>
         ${this.messages.map((message) => this.renderMessage(message)).join("")}
@@ -279,7 +282,7 @@ export class ChatWidget extends BaseWidget {
     }, 0);
   };
 
-  private renderMessage(message: Message) {
+  protected renderMessage(message: Message) {
     return `
       <div class="bubble ${message.role}">
         ${this.renderMessageContent(message)}
@@ -287,7 +290,7 @@ export class ChatWidget extends BaseWidget {
     `;
   }
 
-  private renderMessageContent(message: Message) {
+  protected renderMessageContent(message: Message) {
     return `
       ${text(message.content)}
       ${
@@ -473,7 +476,12 @@ export class ChatWidget extends BaseWidget {
     button.disabled = true;
     button.textContent = "Adding";
     try {
-      const result = await addVariantToCart(variantId, 1, this.payload.offerId);
+      const result = await this.addChatVariant(
+        variantId,
+        1,
+        this.payload.offerId,
+        "aov_chat",
+      );
       if (!result) throw new Error("Cart add failed");
       button.textContent = "Added";
       this.showCartConfirmation(card, "Added to your cart.");
@@ -619,7 +627,7 @@ export class ChatWidget extends BaseWidget {
     );
   }
 
-  private async sendMessage() {
+  protected async sendMessage() {
     if (this.sending) return;
 
     const input = this.root.querySelector(
@@ -644,7 +652,7 @@ export class ChatWidget extends BaseWidget {
         new CustomEvent("aovboost:trigger", {
           detail: {
             type: "price_sensitive_chat",
-            message: value,
+            ...(!this.payload.agentManaged ? { message: value } : {}),
           },
         }),
       );
@@ -654,13 +662,25 @@ export class ChatWidget extends BaseWidget {
       this.messages.push({ role: "assistant", content: "" }) - 1;
     const assistantEl = this.appendMessage({ role: "assistant", content: "" });
     this.showTyping();
+    const controller = this.payload.agentChatTimeoutMs
+      ? new AbortController()
+      : undefined;
+    this.agentRequest = controller;
+    const timeout = controller
+      ? window.setTimeout(
+          () => controller.abort(),
+          this.payload.agentChatTimeoutMs,
+        )
+      : undefined;
 
+    let completed = false;
+    let cartActionHandled = false;
     try {
-      let response = await this.requestChat(value);
+      let response = await this.requestChat(value, controller?.signal);
       if (response.status === 401) {
         const recovered = await this.applyRecoverySession(response);
         if (!recovered) await (window as any).AOVBoostSDK?.refreshSession?.();
-        response = await this.requestChat(value);
+        response = await this.requestChat(value, controller?.signal);
       }
 
       if (!response.ok) throw new Error(`Server returned ${response.status}`);
@@ -670,7 +690,6 @@ export class ChatWidget extends BaseWidget {
       const decoder = new TextDecoder();
       let buffer = "";
       let started = false;
-      let cartActionHandled = false;
 
       for (;;) {
         const { done, value: chunk } = await reader.read();
@@ -734,7 +753,10 @@ export class ChatWidget extends BaseWidget {
           this.messages[assistantIndex].productCards?.length,
         ),
       });
+      completed = started;
+      if (!this.isDestroyed()) this.payload.agentHealthResult?.(started);
     } catch {
+      if (!this.isDestroyed()) this.payload.agentHealthResult?.(false);
       this.removeTyping();
       this.messages[assistantIndex].content =
         this.messages[assistantIndex].content ||
@@ -744,12 +766,31 @@ export class ChatWidget extends BaseWidget {
       );
       this.persistConversation();
     } finally {
+      window.clearTimeout(timeout);
+      if (this.agentRequest === controller) this.agentRequest = undefined;
       this.sending = false;
       if (button) button.disabled = false;
+      if (!this.isDestroyed())
+        this.onChatRequestFinished(value, completed, cartActionHandled);
     }
   }
 
-  private async requestChat(value: string) {
+  protected onChatRequestFinished(
+    _value: string,
+    _ok: boolean,
+    _cartActionHandled: boolean,
+  ): void {}
+  protected getStorefrontContext() {
+    return getCurrentStorefrontContext();
+  }
+  protected addChatVariant(...args: Parameters<typeof addVariantToCart>) {
+    return addVariantToCart(...args);
+  }
+  protected changeChatLine(...args: Parameters<typeof mutateShopifyCart>) {
+    return mutateShopifyCart(...args);
+  }
+
+  private async requestChat(value: string, signal?: AbortSignal) {
     const config = (window as any).AOVBoost || {};
     const sdk = (window as any).AOVBoostSDK;
     const apiBase = normalizeProxyApiBase(config.apiBase).replace(/\/$/, "");
@@ -766,6 +807,7 @@ export class ChatWidget extends BaseWidget {
       Boolean(cartCurrency) && cartCurrency !== currency.code;
 
     return fetch(`${apiBase}/chat`, {
+      ...(signal ? { signal } : {}),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -786,7 +828,7 @@ export class ChatWidget extends BaseWidget {
           ? undefined
           : currency.moneyWithCurrencyFormat,
         locale: currency.locale,
-        storefrontContext: getCurrentStorefrontContext(),
+        storefrontContext: this.getStorefrontContext(),
         cartContext,
       }),
     });
@@ -821,10 +863,14 @@ export class ChatWidget extends BaseWidget {
             "Cart changed. Please check your cart and request the change again.",
           );
         }
-        const result = await mutateShopifyCart("change", {
-          id: action.lineId,
-          quantity,
-        });
+        const result = await this.changeChatLine(
+          "change",
+          {
+            id: action.lineId,
+            quantity,
+          },
+          "aov_chat",
+        );
         if (!result)
           throw new Error(
             "Shopify could not confirm that change. Please check your cart.",
@@ -852,10 +898,11 @@ export class ChatWidget extends BaseWidget {
     if (action.type !== "add_to_cart" || !action.variantId) return;
 
     try {
-      const result = await addVariantToCart(
+      const result = await this.addChatVariant(
         action.variantId,
         Number(action.quantity || 1),
         this.payload.offerId,
+        "aov_chat",
       );
       if (!result) throw new Error("Cart add failed");
       this.messages[assistantIndex].content =
@@ -924,7 +971,7 @@ export class ChatWidget extends BaseWidget {
     }
   }
 
-  private showTyping() {
+  protected showTyping() {
     const container = this.root.querySelector("[data-messages]");
     if (!container) return;
     const el = document.createElement("div");
@@ -945,7 +992,7 @@ export class ChatWidget extends BaseWidget {
     if (container) container.scrollTop = container.scrollHeight;
   }
 
-  private dismiss() {
+  protected dismiss() {
     this.track("chat_closed", { dismissed: true });
     const latestUpsell = this.messages
       .flatMap((message) => message.productCards || [])
@@ -979,7 +1026,7 @@ export class ChatWidget extends BaseWidget {
     });
   }
 
-  private persistConversation() {
+  protected persistConversation() {
     try {
       window.sessionStorage.setItem(
         this.conversationStorageKey(),
@@ -997,7 +1044,7 @@ export class ChatWidget extends BaseWidget {
     }
   }
 
-  private restoreConversation(): Message[] {
+  protected restoreConversation(): Message[] {
     try {
       const value = JSON.parse(
         window.sessionStorage.getItem(this.conversationStorageKey()) || "[]",

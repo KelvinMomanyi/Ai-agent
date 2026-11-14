@@ -1,4 +1,5 @@
 import { getProducts, type WidgetPayload } from "./BaseWidget";
+import { AGENT_LIMITS } from "../agent/constants";
 import { cartDrawerSlot } from "./cartDrawerPlacement";
 import { isElementVisible as isVisible } from "./visibility";
 
@@ -187,7 +188,14 @@ export function resolveWidgetPlacement(
         }
       : deny("post_purchase_requires_explicit_slot");
   }
-  if (page === "checkout" || page === "thankyou" || page === "other")
+  const managedSearch =
+    type === "chat" &&
+    payload.agentManaged &&
+    /\/search(?:\/|$)/.test(location.pathname);
+  if (
+    (page === "checkout" || page === "thankyou" || page === "other") &&
+    !managedSearch
+  )
     return deny("protected_or_nonshopping_page");
   if (type === "chat")
     return {
@@ -212,6 +220,28 @@ export function resolveWidgetPlacement(
   }
   if (!main) return deny("no_main_content");
   const slot = findSlot(main, type);
+  if (payload.agentManaged && payload.agentFactType === type) {
+    if (type === "discount_nudge" && page !== "cart")
+      return deny("cart_goal_requires_cart_page");
+    if (["inline_alert", "social_proof"].includes(type) && page !== "product")
+      return deny("notice_requires_product_page");
+    if (!slot) return deny("fact_requires_reserved_slot");
+    const rect = slot.getBoundingClientRect();
+    const minHeight = Number(payload.agentMinHeight);
+    if (
+      !Number.isFinite(minHeight) ||
+      minHeight <= 0 ||
+      rect.width < AGENT_LIMITS.FACT_SLOT_MIN_WIDTH ||
+      rect.height < minHeight
+    )
+      return deny("fact_slot_not_reserved");
+    return {
+      target: slot,
+      zone: type === "countdown_banner" ? "campaign" : "notice",
+      reason: "reserved_fact_slot",
+      inline: true,
+    };
+  }
   const place = (
     anchor: HTMLElement,
     key: string,
@@ -378,7 +408,11 @@ export function resolveWidgetPlacement(
     };
   }
   if (type === "toast" || type === "exit_intent") {
-    if (window.innerWidth < 900 || hasBlockingSurface())
+    if (
+      (window.innerWidth < 900 &&
+        !(type === "exit_intent" && payload.agentManaged)) ||
+      hasBlockingSurface()
+    )
       return deny("avoid_competing_overlay");
     return {
       target: document.body,

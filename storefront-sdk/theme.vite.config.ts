@@ -9,8 +9,9 @@ export default defineConfig({
     minify: true,
     emptyOutDir: false,
     outDir: assets,
-    lib: { entry: resolve(__dirname, "src/theme/engine.ts"), formats: ["es"] },
     rollupOptions: {
+      input: resolve(__dirname, "src/theme/engine.ts"),
+      preserveEntrySignatures: "strict",
       output: { entryFileNames: "aovboost-theme-engine-[hash].js" },
     },
   },

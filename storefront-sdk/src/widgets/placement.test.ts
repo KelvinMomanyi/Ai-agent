@@ -24,6 +24,17 @@ afterEach(() => {
 });
 
 describe("theme placement boundaries", () => {
+  it("allows only the flagged assistant on a search page", () => {
+    history.replaceState({}, "", "/en-ke/search");
+    expect(resolveWidgetPlacement("chat", {}).target).toBeNull();
+    expect(resolveWidgetPlacement("chat", { agentManaged: true }).target).toBe(
+      document.body,
+    );
+    history.replaceState({}, "", "/en-ke/pages/about");
+    expect(
+      resolveWidgetPlacement("chat", { agentManaged: true }).target,
+    ).toBeNull();
+  });
   it("protects non-shopping routes even when theme metadata is stale", () => {
     document.body.dataset.template = "product";
     window.history.replaceState({}, "", "/en-ke/pages/about");

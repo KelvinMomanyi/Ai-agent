@@ -1,4 +1,6 @@
 import { discoverCartSections, refreshCartSections } from "./cartSections";
+import { agentCoreEnabled, type AgentCartSource } from "./agent/flag";
+import { newMutationId } from "./cartState";
 
 /** Shopify Ajax cart mutations, using locale-aware URLs and bundled sections.
  * https://shopify.dev/docs/api/ajax/reference/cart#bundled-section-rendering
@@ -15,7 +17,11 @@ export function cartUrl(resource: "add" | "change" | "read" | "update") {
 export async function mutateShopifyCart(
   resource: "add" | "change",
   payload: Record<string, unknown>,
+  source: AgentCartSource = "aov_postadd",
+  metadata?: { undo?: boolean },
 ) {
+  const tagged = agentCoreEnabled();
+  const mutationId = tagged ? newMutationId() : "";
   const nativeDrawer = (Array.from(
     document.querySelectorAll<HTMLElement>("cart-drawer"),
   ).find((drawer) =>
@@ -70,6 +76,7 @@ export async function mutateShopifyCart(
       headers: {
         "Content-Type": "application/json",
         "X-AOVBoost-Recommendation": "1",
+        ...(tagged ? { "X-AOVBoost-Source": source } : {}),
       },
       body: JSON.stringify({
         ...payload,
@@ -174,6 +181,39 @@ export async function mutateShopifyCart(
       );
     } catch {
       /* Theme adapters are best effort; Shopify already accepted the mutation. */
+    }
+    if (tagged) {
+      // Publish only after section refresh (including its read-only retry).
+      // The fetch observer skips these writes so one acceptance has one ID.
+      const item = (
+        Array.isArray(payload.items) ? payload.items[0] : payload
+      ) as Record<string, unknown>;
+      document.dispatchEvent(
+        new CustomEvent("aovboost:cart-mutation", {
+          detail: {
+            type:
+              resource === "add"
+                ? "add_to_cart"
+                : Number(payload.quantity) === 0
+                  ? "remove_from_cart"
+                  : "quantity_changed",
+            variantId: String(item?.id || ""),
+            quantity: Number(item?.quantity ?? 1),
+            confirmed: true,
+            mutationId,
+            recommendationOrigin: true,
+            source: "verified_fetch_response",
+            cartSource: source,
+            offerId:
+              typeof (item?.properties as Record<string, unknown>)
+                ?._aovboost_offer_id === "string"
+                ? (item.properties as Record<string, unknown>)
+                    ._aovboost_offer_id
+                : undefined,
+            ...(metadata?.undo ? { undo: true } : {}),
+          },
+        }),
+      );
     }
     return result;
   } finally {

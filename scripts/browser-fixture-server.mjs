@@ -14,6 +14,28 @@ const product = (id) => ({
   price: id === 1 ? 2000 : 1200,
   variant: id === 1 ? 101 : 102,
 });
+function catalogCard(id) {
+  const p = product(id);
+  return {
+    productId: `gid://shopify/Product/${id}`,
+    reason: "Selected from the fixture catalog.",
+    product: {
+      id: `gid://shopify/Product/${id}`,
+      handle: p.handle,
+      title: p.title,
+      price: (p.price / 100).toFixed(2),
+      variantId: `gid://shopify/ProductVariant/${p.variant}`,
+      variants: [
+        {
+          id: `gid://shopify/ProductVariant/${p.variant}`,
+          title: "Default",
+          price: (p.price / 100).toFixed(2),
+          availableForSale: true,
+        },
+      ],
+    },
+  };
+}
 function reset(options = {}) {
   state = {
     mode: ["drawer", "popup", "floating", "redirect", "velour"].includes(
@@ -22,6 +44,23 @@ function reset(options = {}) {
       ? options.mode
       : "drawer",
     holdout: options.holdout === true,
+    measurementEnabled: options.measurement !== false,
+    agentCore: options.agentCore === true,
+    chatEnabled: options.chatEnabled === true,
+    factSlots: options.factSlots === true,
+    unreservedFacts: options.unreservedFacts === true,
+    currency: ["USD", "KES", "JPY"].includes(options.currency)
+      ? options.currency
+      : "USD",
+    catalogWidget: ["bundle", "rec_strip"].includes(options.catalogWidget)
+      ? options.catalogWidget
+      : "",
+    aiDecision: options.aiDecision === true,
+    planDenied: options.planDenied === true,
+    offerDelayMs: Math.min(
+      1000,
+      Math.max(0, Number(options.offerDelayMs) || 0),
+    ),
     failOffer: options.failOffer === true,
     soldOut: options.soldOut === true,
     lines: options.restored ? [{ id: 101, quantity: 1 }] : [],
@@ -29,6 +68,8 @@ function reset(options = {}) {
     offers: [],
     events: [],
     reports: [],
+    catalogReads: [],
+    nativeRecommendations: [],
   };
 }
 reset();
@@ -48,7 +89,7 @@ function cart() {
   });
   return {
     token: "synthetic-cart",
-    currency: "USD",
+    currency: state.currency,
     items,
     item_count: items.reduce((sum, item) => sum + item.quantity, 0),
     total_price: items.reduce(
@@ -66,16 +107,19 @@ const theme = () => ({
   preference: "auto",
   appearance: { accentColor: null, radius: null, font: "inherit" },
 });
-const measurement = () => ({
-  arm: state.holdout ? "holdout" : "exposed",
-  version: 1,
-  percent: 10,
-  link: "synthetic-measurement-link",
-});
+const measurement = () =>
+  state.measurementEnabled
+    ? {
+        arm: state.holdout ? "holdout" : "exposed",
+        version: 1,
+        percent: 10,
+        link: "synthetic-measurement-link",
+      }
+    : null;
 const settings = () => ({
-  focusedMode: true,
+  focusedMode: !state.chatEnabled && !state.catalogWidget && !state.factSlots,
   upsellEnabled: true,
-  chatEnabled: false,
+  chatEnabled: state.chatEnabled,
   analyticsEnabled: true,
   liveEventsEnabled: false,
   holdout: state.holdout,
@@ -130,6 +174,18 @@ async function page(path) {
   }
   if (isCart && state.mode === "velour")
     markup = `${velourSection("sections--88__header")}<main>${velourSection("template--77__cart")}</main>`;
+  if (state.catalogWidget && !isCart)
+    markup = markup.replace(
+      "</main>",
+      `<div data-aovboost-slot="${state.catalogWidget}"></div></main>`,
+    );
+  if (state.chatEnabled && !isCart)
+    markup = markup.replace("</main>", '<p class="price">$20.00</p></main>');
+  if (state.factSlots)
+    markup = markup.replace(
+      "</main>",
+      `${(isCart ? ["discount_nudge", "countdown_banner"] : ["inline_alert", "social_proof", "countdown_banner"]).map((type) => `<div data-aovboost-slot="${type}" style="height:${state.unreservedFacts ? 0 : 200}px;position:relative;width:100%"></div>`).join("")}<p id="after-facts">After reserved offer placements</p></main>`,
+    );
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AOVBoost local browser simulation</title>
@@ -145,8 +201,9 @@ async function page(path) {
     <h1>Local simulated store</h1>${markup}
     <output id="cart-count">${cart().item_count}</output>
     <script>
-      window.Shopify={shop:${JSON.stringify(shop)},routes:{root:'/'},currency:{active:'USD'},theme:{id:123,name:'Dawn',schema_name:'Dawn'}};
-      window.AOVBoost={shop:${JSON.stringify(shop)},apiBase:'/apps/aovboost',currency:'USD'};
+      window.Shopify={shop:${JSON.stringify(shop)},routes:{root:'/'},currency:{active:${JSON.stringify(state.currency)}},theme:{id:123,name:'Dawn',schema_name:'Dawn'}};
+      if (${JSON.stringify(Boolean(state.catalogWidget || state.chatEnabled || state.factSlots))} && ${JSON.stringify(!isCart)}) window.Shopify.product = {id:1,handle:'shampoo',title:'Shampoo'};
+      window.AOVBoost={shop:${JSON.stringify(shop)},apiBase:'/apps/aovboost',currency:${JSON.stringify(state.currency)},agent_core_enabled:${JSON.stringify(state.agentCore)}};
       const mode=${JSON.stringify(state.mode)};
       const form=document.querySelector('form[action*="/cart/add"]');
       if(form){
@@ -200,7 +257,7 @@ const server = createServer(async (req, res) => {
       return json(res, { ...state, cart: cart(), simulation: true });
     if (path.startsWith("/assets/")) {
       const name = path.slice("/assets/".length);
-      if (!/^aovboost-(?:sdk|theme-engine-[\w-]+)\.js$/.test(name))
+      if (!/^aovboost-(?:sdk|(?:theme-engine|agent)-[\w-]+)\.js$/.test(name))
         return json(res, { error: "Unknown asset" }, 404);
       res.writeHead(200, { "Content-Type": "application/javascript" });
       return res.end(await readFile(resolve(assets, name)));
@@ -249,7 +306,9 @@ const server = createServer(async (req, res) => {
     }
     if (path === "/cart/change.js" && req.method === "POST") {
       const data = await body(req);
-      const line = state.lines[Number(data.line) - 1];
+      const line = data.id
+        ? state.lines.find((line) => `line-${line.id}` === data.id)
+        : state.lines[Number(data.line) - 1];
       if (!line || !Number.isInteger(data.quantity) || data.quantity < 0)
         return json(res, { error: "Invalid synthetic line" }, 422);
       line.quantity = data.quantity;
@@ -264,9 +323,12 @@ const server = createServer(async (req, res) => {
       path === "/products/shampoo.js" ||
       path === "/products/conditioner.js"
     ) {
+      state.catalogReads.push(path);
       const p = product(path.includes("conditioner") ? 2 : 1);
       return json(res, {
         id: p.id,
+        title: p.title,
+        handle: p.handle,
         variants: [
           {
             id: p.variant,
@@ -275,6 +337,13 @@ const server = createServer(async (req, res) => {
           },
         ],
       });
+    }
+    if (path === "/recommendations/products.json") {
+      state.nativeRecommendations.push({
+        productId: url.searchParams.get("product_id"),
+        intent: url.searchParams.get("intent"),
+      });
+      return json(res, { products: [{ id: 999 }, { id: 2 }] });
     }
     if (path === "/apps/aovboost/session")
       return json(res, {
@@ -291,6 +360,8 @@ const server = createServer(async (req, res) => {
         theme: theme(),
         measurement: measurement(),
       });
+    if (path === "/apps/aovboost/chat" && req.method === "GET")
+      return json(res, { ok: true });
     if (path === "/apps/aovboost/offer") {
       const data = await body(req);
       state.offers.push({
@@ -298,6 +369,8 @@ const server = createServer(async (req, res) => {
         mutationId: data.triggerPayload?.mutationId,
         cartProductIds: data.cartProductIds,
       });
+      if (state.offerDelayMs)
+        await new Promise((resolve) => setTimeout(resolve, state.offerDelayMs));
       if (state.failOffer)
         return json(res, { error: "Simulated offer outage" }, 503);
       if (state.holdout)
@@ -306,10 +379,52 @@ const server = createServer(async (req, res) => {
           reasoning: "holdout_assigned",
           measurement: measurement(),
         });
+      if (state.planDenied)
+        return json(res, {
+          widgetType: null,
+          reasoning: "plan_display_allowance",
+        });
+      if (
+        state.catalogWidget &&
+        !["cart_item_added", "add_to_cart"].includes(data.trigger)
+      )
+        return json(res, {
+          widgetType: state.catalogWidget,
+          aiProvider: "heuristic",
+          payload: {
+            offerId: `synthetic-catalog-${state.offers.length}`,
+            currentProductId: "gid://shopify/Product/1",
+            products:
+              state.catalogWidget === "bundle"
+                ? [catalogCard(1), catalogCard(2)]
+                : [catalogCard(2)],
+            ...(state.catalogWidget === "bundle"
+              ? {
+                  bundle: {
+                    id: "configured-fixture-bundle",
+                    discountVersion: 1,
+                    discountType: "percentage",
+                    discountValue: 10,
+                  },
+                }
+              : {}),
+          },
+        });
+      if (
+        state.chatEnabled &&
+        !["cart_item_added", "add_to_cart"].includes(data.trigger)
+      )
+        return json(res, {
+          widgetType: "chat",
+          payload: {
+            offerId: "synthetic-chat",
+            greeting: "Welcome to the local test store.",
+          },
+        });
       const p = product(2);
       return json(res, {
         widgetType: "upsell_drawer",
-        aiProvider: "heuristic",
+        aiProvider: state.aiDecision ? "gemini" : "heuristic",
         payload: {
           offerId: `synthetic-offer-${state.offers.length}`,
           triggerType: "cart_item_added",
@@ -346,6 +461,20 @@ const server = createServer(async (req, res) => {
           verified: event.verified,
           strategy: event.strategy,
           recommendationOrigin: event.recommendationOrigin,
+          cartSource: event.cartSource,
+          provider_id: event.provider_id,
+          reason: event.reason,
+          trigger_signal: event.trigger_signal,
+          surface_class: event.surface_class,
+          session_id: event.session_id,
+          holdout: event.holdout,
+          holdout_source: event.holdout_source,
+          holdout_version: event.holdout_version,
+          holdout_percent: event.holdout_percent,
+          ai_healthy: event.ai_healthy,
+          offer_id: event.offer_id,
+          mutation_id: event.mutation_id,
+          cart_source: event.cart_source,
         });
       return json(res, { ok: true });
     }

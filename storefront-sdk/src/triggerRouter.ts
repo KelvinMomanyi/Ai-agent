@@ -4,6 +4,8 @@ import type { SessionManager } from "./sessionManager";
 import { setStorefrontCurrency } from "./widgets/BaseWidget";
 import { readShopifyCart } from "./cartState";
 import { NativeCartContinuation } from "./nativeCartContinuation";
+import { agentCoreEnabled, cartSource } from "./agent/flag";
+import { AGENT_LIMITS } from "./agent/constants";
 
 type TriggerDefinition = {
   category: string;
@@ -416,6 +418,11 @@ export class TriggerRouter {
     document.addEventListener(
       "mouseleave",
       (event) => {
+        if (
+          agentCoreEnabled(this.options.sessionManager.getSettings()) &&
+          window.innerWidth < AGENT_LIMITS.DESKTOP_MIN_WIDTH
+        )
+          return;
         const mouseEvent = event as MouseEvent;
         if (mouseEvent.clientY <= 8) {
           this.fire("exit_intent", {
@@ -630,11 +637,19 @@ export class TriggerRouter {
           return;
         setStorefrontCurrency(cart.currency);
         this.nativeCart.remember(cart);
-        const payload = { ...basePayload, ...cart };
+        const payload = {
+          ...basePayload,
+          ...cart,
+          ...(agentCoreEnabled(this.options.sessionManager.getSettings())
+            ? { cartMutationType: basePayload.type }
+            : {}),
+        };
         this.options.eventBus.track("cart_update", payload);
         if (
           trigger === "cart_item_added" &&
           basePayload.recommendationOrigin !== true &&
+          (!agentCoreEnabled(this.options.sessionManager.getSettings()) ||
+            cartSource(basePayload) === "shopper") &&
           cart.cartItemCount > 0
         )
           this.fire(trigger, payload);

@@ -42,6 +42,7 @@ type StoredStorefrontSession = {
 };
 
 export type StorefrontSettings = {
+  agent_core_enabled?: boolean;
   themeCompatibility?: ThemeRuntimeConfig;
   holdout?: boolean;
   focusedMode?: boolean;

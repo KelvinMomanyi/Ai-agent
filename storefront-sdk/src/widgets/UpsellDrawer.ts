@@ -186,6 +186,7 @@ export class UpsellDrawer extends BaseWidget {
             variant.id,
             1,
             this.payload.offerId,
+            "aov_upsell",
           );
           if (!added) throw new Error("Cart add failed");
           this.track("recommendation_added", {
