@@ -27,6 +27,7 @@ const req = (intent = "upgrade") =>
 beforeEach(() => {
   vi.resetAllMocks();
   PLAN_CONFIG.billingTestMode = false;
+  vi.stubEnv("AOVBOOST_BILLING_PAUSED", "false");
   vi.stubEnv("NODE_ENV", "test");
   vi.stubEnv("VERCEL_ENV", undefined);
   vi.stubEnv("VERCEL", undefined);
@@ -43,6 +44,44 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 describe("explicit plan actions", () => {
+  it("blocks production subscription creation and hosted pricing while paused, with truthful Admin status", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("AOVBOOST_BILLING_PAUSED", "true");
+    vi.stubEnv("AOVBOOST_QA_LOCAL_AI_LIMITS", "true");
+    PLAN_CONFIG.billingSource = "admin_api";
+    PLAN_CONFIG.upgradeMode = "billing_api";
+    PLAN_CONFIG.proRecurringPrice = {
+      amount: 7,
+      currencyCode: "USD",
+      interval: "EVERY_30_DAYS",
+      test: false,
+    } as any;
+    const response = (await upgradeAction(req())) as any;
+    expect(response.init.status).toBe(409);
+    expect(response.data.error).toContain("Billing is paused for QA");
+    PLAN_CONFIG.upgradeMode = "shopify_hosted";
+    expect(((await upgradeAction(req())) as any).init.status).toBe(409);
+    expect(((await upgradeAction(req("refresh"))) as any).data).toEqual({
+      ok: true,
+    });
+    const { loader } = await import("./routes/app.plan");
+    const loaded = (await loader(req())) as any;
+    expect(loaded.data).toMatchObject({
+      billingPaused: true,
+      localAiLimits: true,
+      canUpgrade: false,
+      entitlement: { state: "test" },
+      usage: { totalsKnown: false },
+    });
+    expect(loaded.init.headers["Cache-Control"]).toBe("no-store");
+    expect(mocks.graphql).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.invalidate).not.toHaveBeenCalled();
+    vi.stubEnv("AOVBOOST_BILLING_PAUSED", "false");
+    await upgradeAction(req());
+    expect(mocks.redirect).toHaveBeenCalledTimes(1);
+  });
   it("authenticates but never creates a charge or invalidates billing while test mode is active", async () => {
     PLAN_CONFIG.billingTestMode = true;
     PLAN_CONFIG.billingSource = "admin_api";

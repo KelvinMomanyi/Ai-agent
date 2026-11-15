@@ -1,5 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
+import { billingPaused } from "../qa-mode.server";
 import {
   billingSource,
   billingUpgradeMode,
@@ -54,7 +55,11 @@ export async function upgradeAction({ request }: ActionFunctionArgs) {
     return new Response("Unknown action", { status: 400 });
   if (billingTestModeEnabled())
     return data(
-      { error: "Billing test mode is active. No subscription is required." },
+      {
+        error: billingPaused()
+          ? "Billing is paused for QA. New subscriptions are disabled."
+          : "Billing test mode is active. No subscription is required.",
+      },
       { status: 409 },
     );
   const hosted = hostedUpgradeUrl(session.shop);

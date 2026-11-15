@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import config from "../config/plans.json";
 import prisma from "../db.server";
 import { billingRedis } from "../redis.server";
+import { billingPaused } from "../qa-mode.server";
 import {
   billingSource,
   billingUpgradeMode,
@@ -46,6 +47,7 @@ const configVersion = () =>
 export const entitlementCacheKey = (shop: string) => `entitlement:${shop}`;
 
 export function billingTestModeEnabled() {
+  if (billingPaused()) return true;
   if (config.billingTestMode !== true) return false;
   // Vercel previews also run production builds; use the deployment environment.
   // Unknown/custom deployments and missing Vercel metadata fail closed.
@@ -102,7 +104,12 @@ export function mapSubscriptions(
 }
 export function limitsFor(entitlement: Entitlement) {
   if (entitlement.state === "test")
-    return { ...config.tiers.pro, label: "Pro (test mode)" };
+    return {
+      ...config.tiers.pro,
+      label: billingPaused()
+        ? "Pro (billing paused for QA)"
+        : "Pro (test mode)",
+    };
   if (entitlement.tier === "unverified")
     return {
       ...config.tiers.pro,
@@ -290,6 +297,7 @@ export async function invalidateEntitlements(shop: string) {
 }
 export function hostedUpgradeUrl(shop: string) {
   if (
+    billingTestModeEnabled() ||
     billingUpgradeMode() !== "shopify_hosted" ||
     !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop) ||
     !/^[a-z0-9-]+$/.test(config.appHandle)

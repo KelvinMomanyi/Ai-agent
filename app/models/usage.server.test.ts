@@ -44,6 +44,7 @@ const free = {
 } as const;
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubEnv("AOVBOOST_BILLING_PAUSED", "false");
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-11-05T12:00:00Z"));
   mocks.find.mockResolvedValue({ displayed: 400, aiCalls: 80 });
@@ -51,8 +52,50 @@ beforeEach(() => {
   mocks.entitlement.mockResolvedValue(free);
   mocks.settings.mockResolvedValue({ analyticsEnabled: true });
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
 describe("monthly shared usage", () => {
+  it("pauses monthly reads and writes for QA without erasing saved usage, then restores enforcement", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("AOVBOOST_BILLING_PAUSED", "true");
+    mocks.entitlement.mockResolvedValue({
+      ...free,
+      tier: "pro",
+      state: "test",
+    });
+    expect(await monthlyAiAvailable(shop)).toBe(true);
+    expect(await reserveMonthlyAiCall(shop)).toBe(true);
+    expect(await reserveMonthlyAiCall()).toBe(false);
+    expect(await reserveOfferDisplay(shop, "offer", free)).toBe(true);
+    await recordDisplayedOffers(shop, "session", ["offer"]);
+    expect(await getUsage(shop)).toMatchObject({
+      available: false,
+      totalsKnown: false,
+    });
+    expect((await getPlanStatus(shop)).notice).toContain(
+      "Billing is paused for QA",
+    );
+    for (const operation of [
+      mocks.find,
+      mocks.eval,
+      mocks.execute,
+      mocks.offers,
+    ])
+      expect(operation).not.toHaveBeenCalled();
+    vi.stubEnv("AOVBOOST_BILLING_PAUSED", "false");
+    mocks.entitlement.mockResolvedValue(free);
+    mocks.eval.mockResolvedValue([0, 500, 100, 0, 0]);
+    expect(await getUsage(shop)).toMatchObject({
+      displayed: 500,
+      aiCalls: 100,
+      totalsKnown: true,
+    });
+    expect(await monthlyAiAvailable(shop)).toBe(false);
+    expect(await reserveMonthlyAiCall(shop)).toBe(false);
+    expect(await reserveOfferDisplay(shop, "offer", free)).toBe(false);
+  });
   it("does not claim zero usage when the durable seed cannot be read", async () => {
     mocks.find.mockRejectedValue(new Error("database offline"));
     expect(await getUsage(shop)).toMatchObject({

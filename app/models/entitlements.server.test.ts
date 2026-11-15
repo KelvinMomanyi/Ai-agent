@@ -47,6 +47,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-11-05T00:00:00Z"));
   PLAN_CONFIG.billingSource = "admin_api";
   PLAN_CONFIG.billingTestMode = false;
+  vi.stubEnv("AOVBOOST_BILLING_PAUSED", "false");
   vi.stubEnv("NODE_ENV", "test");
   vi.stubEnv("VERCEL_ENV", undefined);
   vi.stubEnv("VERCEL", undefined);
@@ -132,6 +133,37 @@ describe("managed billing entitlement integration", () => {
   });
 });
 describe("billing test override", () => {
+  it("allows an explicit production QA pause without persisting access and restores billing immediately", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("AOVBOOST_BILLING_PAUSED", "true");
+    PLAN_CONFIG.upgradeMode = "shopify_hosted";
+    const entitlement = await getEntitlements(shop, admin);
+    expect(entitlement).toMatchObject({
+      tier: "pro",
+      state: "test",
+      subscriptionName: null,
+    });
+    expect(limitsFor(entitlement).label).toBe("Pro (billing paused for QA)");
+    expect(hostedUpgradeUrl(shop)).toBeNull();
+    for (const operation of [
+      mocks.get,
+      mocks.set,
+      mocks.find,
+      mocks.save,
+      mocks.graphql,
+    ])
+      expect(operation).not.toHaveBeenCalled();
+    vi.stubEnv("AOVBOOST_BILLING_PAUSED", "false");
+    mocks.graphql.mockResolvedValue(subscriptions([]));
+    expect(await getEntitlements(shop, admin)).toMatchObject({
+      tier: "free",
+      state: "verified",
+    });
+    expect(mocks.graphql).toHaveBeenCalledTimes(1);
+    expect(hostedUpgradeUrl(shop)).toContain("pricing_plans");
+  });
   it.each([
     ["development", undefined, undefined, true],
     ["test", undefined, undefined, true],

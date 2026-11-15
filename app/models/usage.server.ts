@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { billingRedis } from "../redis.server";
+import { billingPaused } from "../qa-mode.server";
 import { reportDependencyFailure } from "../utils/dependencyFailure.server";
 import { getAppSettings } from "./settings.server";
 import {
@@ -148,6 +149,15 @@ export async function getUsage(
   shop: string,
   month = usageMonth(),
 ): Promise<Usage> {
+  // Leave normal monthly counters untouched, including reads that trigger rollups.
+  if (billingPaused())
+    return {
+      displayed: 0,
+      aiCalls: 0,
+      pending: 0,
+      available: false,
+      totalsKnown: false,
+    };
   try {
     return await operation(shop, "read", "", -1, month);
   } catch (error) {
@@ -178,8 +188,9 @@ export async function getPlanStatus(shop: string, admin?: BillingAdmin) {
     entitlement,
     usage,
     plan,
-    notice:
-      entitlement.state === "test"
+    notice: billingPaused()
+      ? "Billing is paused for QA. Pro access is enabled; new app subscriptions and monthly usage counters are paused. AI provider costs and operational limits still apply. Existing Shopify subscriptions are not cancelled."
+      : entitlement.state === "test"
         ? "Billing test mode is active. Pro features are enabled without a Shopify subscription. AI usage limits still apply."
         : displayLimitReached
           ? "Your monthly recommendation allowance is used or reserved. New offers pause until capacity resets or you upgrade."
@@ -197,6 +208,7 @@ export async function reserveOfferDisplay(
   offerId: string,
   entitlement?: Entitlement,
 ) {
+  if (billingPaused()) return true;
   const plan = limitsFor(entitlement || (await getEntitlements(shop)));
   if (plan.monthlyDisplays === null) return true;
   try {
@@ -208,6 +220,7 @@ export async function reserveOfferDisplay(
 }
 export async function reserveMonthlyAiCall(shop?: string) {
   if (!shop) return process.env.NODE_ENV !== "production";
+  if (billingPaused()) return true;
   try {
     const entitlement = await getEntitlements(shop);
     const cap = limitsFor(entitlement).monthlyAiCalls;
@@ -218,6 +231,7 @@ export async function reserveMonthlyAiCall(shop?: string) {
   }
 }
 export async function monthlyAiAvailable(shop: string) {
+  if (billingPaused()) return Boolean(shop);
   try {
     const cap = limitsFor(await getEntitlements(shop)).monthlyAiCalls;
     if (cap <= 0) return false;
@@ -232,6 +246,7 @@ export async function recordDisplayedOffers(
   sessionId: string,
   ids: string[],
 ) {
+  if (billingPaused()) return;
   const unique = [...new Set(ids)]
     .filter((id) => /^[a-zA-Z0-9_-]{1,128}$/.test(id))
     .slice(0, 100);

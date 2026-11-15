@@ -1,5 +1,10 @@
 # Billing test mode
 
+For the explicit Production QA pause added on 15 November 2026, use
+[Production QA with app billing paused](production-qa-mode.md). The historical
+local/preview switch documented below retains its original environment guard and
+monthly limits when the new Production QA flags are off.
+
 Implemented 9 November 2026. The boolean `billingTestMode` in
 `app/config/plans.json` enables testing of the implemented Pro features without a
 Shopify subscription. It is currently `true`. Set it to `false` and restart or

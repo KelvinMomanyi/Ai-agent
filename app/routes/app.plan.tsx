@@ -16,6 +16,7 @@ import {
   Text,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
+import { billingPaused, qaLocalAiLimitsEnabled } from "../qa-mode.server";
 import {
   getEntitlements,
   limitsFor,
@@ -46,6 +47,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       usage,
       plan: limitsFor(entitlement),
       month: usageMonth().toISOString(),
+      billingPaused: billingPaused(),
+      localAiLimits: qaLocalAiLimitsEnabled(),
       canUpgrade: Boolean(
         entitlement.state !== "test" &&
         (hostedUpgradeUrl(session.shop) ||
@@ -58,8 +61,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 }
 export default function PlanAndUsage() {
-  const { entitlement, usage, plan, month, canUpgrade } =
-    useLoaderData<typeof loader>();
+  const {
+    entitlement,
+    usage,
+    plan,
+    month,
+    canUpgrade,
+    billingPaused,
+    localAiLimits,
+  } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const navigation = useNavigation();
   const error = result && "error" in result ? result.error : null;
@@ -70,7 +80,16 @@ export default function PlanAndUsage() {
     <Page title="Plan & usage">
       <BlockStack gap="400">
         {error ? <Banner tone="critical">{error}</Banner> : null}
-        {entitlement.state === "test" ? (
+        {billingPaused ? (
+          <Banner tone="warning" title="Billing paused for QA">
+            Pro access is enabled. New app subscriptions and monthly usage
+            counters are paused. Existing Shopify subscriptions are not
+            cancelled. AI provider usage can still incur charges.{" "}
+            {localAiLimits
+              ? "AI daily and concurrency limits run per server instance; they reset on instance restart."
+              : "AI daily and concurrency limits still require Redis."}
+          </Banner>
+        ) : entitlement.state === "test" ? (
           <Banner tone="info" title="Billing test mode is active">
             Pro features are enabled for this test environment without a Shopify
             subscription. AI usage limits still apply. No charges are created by
@@ -111,7 +130,7 @@ export default function PlanAndUsage() {
             upgrade. Checkout continues normally.
           </Banner>
         ) : null}
-        {!usage.available ? (
+        {!billingPaused && !usage.available ? (
           <Banner tone="warning">
             Usage storage is temporarily unavailable.{" "}
             {usage.totalsKnown
@@ -132,8 +151,9 @@ export default function PlanAndUsage() {
               </Text>
             ) : null}
             <Text as="p">
-              Calendar month beginning {month.slice(0, 10)} UTC. No overage
-              charges are created by these counters.
+              {billingPaused
+                ? "Monthly counters are not read or updated during QA. Existing totals are preserved for when billing resumes."
+                : `Calendar month beginning ${month.slice(0, 10)} UTC. No overage charges are created by these counters.`}
             </Text>
             <DataTable
               columnContentTypes={["text", "numeric", "text"]}
@@ -141,27 +161,44 @@ export default function PlanAndUsage() {
               rows={[
                 [
                   "Displayed recommendations",
-                  usage.totalsKnown ? usage.displayed : "Unavailable",
-                  plan.monthlyDisplays === null
-                    ? "Unlimited"
-                    : plan.monthlyDisplays,
+                  billingPaused
+                    ? "Paused for QA"
+                    : usage.totalsKnown
+                      ? usage.displayed
+                      : "Unavailable",
+                  billingPaused
+                    ? "Paused for QA"
+                    : plan.monthlyDisplays === null
+                      ? "Unlimited"
+                      : plan.monthlyDisplays,
                 ],
                 [
                   "AI provider attempts",
-                  usage.totalsKnown ? usage.aiCalls : "Unavailable",
-                  plan.monthlyAiCalls,
+                  billingPaused
+                    ? "Paused for QA"
+                    : usage.totalsKnown
+                      ? usage.aiCalls
+                      : "Unavailable",
+                  billingPaused ? "Paused for QA" : plan.monthlyAiCalls,
                 ],
               ]}
             />
             <Text as="p" tone="subdued">
-              {plan.monthlyDisplays !== null
-                ? "Free offers require analytics to count visible impressions. "
-                : ""}
-              One offer counts once when visibly displayed, even if it contains
-              multiple products. {usage.pending} delivery reservations are
-              pending for up to ten minutes. AI usage includes ranking, setup
-              and chat attempts, including provider fallbacks. Reaching the AI
-              allowance uses deterministic recommendations.
+              {billingPaused ? (
+                "QA events and orders still use this deployment's configured database. Authentication, merchant settings and operational limits remain active."
+              ) : (
+                <>
+                  {plan.monthlyDisplays !== null
+                    ? "Free offers require analytics to count visible impressions. "
+                    : ""}
+                  One offer counts once when visibly displayed, even if it
+                  contains multiple products. {usage.pending} delivery
+                  reservations are pending for up to ten minutes. AI usage
+                  includes ranking, setup and chat attempts, including provider
+                  fallbacks. Reaching the AI allowance uses deterministic
+                  recommendations.
+                </>
+              )}
             </Text>
             <Form method="post">
               <input type="hidden" name="intent" value="refresh" />

@@ -2,6 +2,8 @@ import { Redis } from "@upstash/redis";
 import { randomUUID } from "node:crypto";
 import { reportDependencyFailure } from "./utils/dependencyFailure.server";
 import { redisConnection } from "./redis-configuration.server.mjs";
+import { qaLocalAiLimitsEnabled } from "./qa-mode.server";
+import { reserveLocalQaAiAttempt } from "./qa-ai-limits.server";
 
 const connection = redisConnection();
 const upstash =
@@ -215,6 +217,13 @@ const localAiLeases = new Map<string, { shop: string; expiresAt: number }>();
 export async function reserveAiAttempt(
   shop?: string,
 ): Promise<(() => Promise<void>) | null> {
+  const limits = [
+    boundedEnv("AOVBOOST_AI_GLOBAL_DAILY_LIMIT", 1000),
+    boundedEnv("AOVBOOST_AI_SHOP_DAILY_LIMIT", 200),
+    boundedEnv("AOVBOOST_AI_GLOBAL_CONCURRENCY", 8),
+    boundedEnv("AOVBOOST_AI_SHOP_CONCURRENCY", 2),
+  ] as const;
+  if (qaLocalAiLimitsEnabled()) return reserveLocalQaAiAttempt(shop, limits);
   if (
     process.env.NODE_ENV === "production" &&
     (!shop || !upstash || Date.now() < redisRetryAt)
@@ -230,12 +239,6 @@ export async function reserveAiAttempt(
     `aovboost:{ai}:daily:${date}:${scope}`,
     "aovboost:{ai}:active",
     `aovboost:{ai}:active:${scope}`,
-  ];
-  const limits = [
-    boundedEnv("AOVBOOST_AI_GLOBAL_DAILY_LIMIT", 1000),
-    boundedEnv("AOVBOOST_AI_SHOP_DAILY_LIMIT", 200),
-    boundedEnv("AOVBOOST_AI_GLOBAL_CONCURRENCY", 8),
-    boundedEnv("AOVBOOST_AI_SHOP_CONCURRENCY", 2),
   ];
   const id = randomUUID();
   if (upstash) {
