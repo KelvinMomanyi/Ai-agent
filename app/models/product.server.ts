@@ -356,7 +356,10 @@ export async function incrementOrderAffinities(
                   knownSet.has(line.productId) &&
                   line.variantId.startsWith("gid://shopify/ProductVariant/"),
               )
-              .map((line) => [line.variantId, line]),
+              .map(({ productId, variantId }) => [
+                variantId,
+                { productId, variantId },
+              ]),
           ).values(),
         );
         if (variants.length) {

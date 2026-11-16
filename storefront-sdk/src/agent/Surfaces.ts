@@ -1,3 +1,4 @@
+import style from "../styles/agent-surfaces.css?inline";
 import type { WidgetPayload } from "../widgets/BaseWidget";
 import type { AgentContext } from "./types";
 import type {
@@ -8,15 +9,6 @@ import type {
 import { AGENT_LIMITS as L } from "./constants";
 import { activeControl, trapDialog } from "./dialog";
 
-const style = `
-  .agent-id{display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:10px}
-  .avatar{display:inline-grid;place-items:center;border-radius:50%;width:28px;height:28px;background:var(--aovboost-action);color:var(--aovboost-action-text)}
-  .attention{width:100%;box-sizing:border-box}
-  .dismiss{float:right}.backdrop{position:fixed;inset:0;background:#0006;z-index:10000;display:grid;place-items:center;padding:18px}
-  .offer{max-width:420px;width:100%;box-sizing:border-box}.offer h3{margin-top:0}.actions{display:flex;flex-wrap:wrap;gap:8px}
-  @media(max-width:899px){.backdrop{align-items:end;padding:0}.offer{max-width:none;border-radius:16px 16px 0 0;padding-bottom:max(24px,env(safe-area-inset-bottom))}}
-  @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
-`;
 function identity(deps: WidgetDependencies, experience: Experience) {
   const { name, avatar } = experience.voice.identity;
   return `<div class="agent-id" data-agent-identity><span class="avatar" aria-hidden="true">${deps.text(avatar)}</span><span>${deps.text(name)}</span></div>`;

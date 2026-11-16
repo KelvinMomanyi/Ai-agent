@@ -85,7 +85,7 @@ function productPurchaseArea(main: HTMLElement) {
     main.querySelectorAll<HTMLElement>("form[action*='/cart/add']"),
   )
     .filter(isUsableAnchor)
-    .filter((form) => !form.id.includes("installment"));
+    .filter((form) => !(form.getAttribute("id") || "").includes("installment"));
   const primary = forms.filter((form) => form.closest(PRIMARY_PRODUCT));
   const scoped = forms.filter((form) => form.closest(INFO));
   const candidates = primary.length ? primary : scoped.length ? scoped : forms;
@@ -221,12 +221,17 @@ export function resolveWidgetPlacement(
   if (!main) return deny("no_main_content");
   const slot = findSlot(main, type);
   if (payload.agentManaged && payload.agentFactType === type) {
+    const factSlot =
+      slot ||
+      document.querySelector<HTMLElement>(
+        `[data-aovboost-auto-slot='${type}']`,
+      );
     if (type === "discount_nudge" && page !== "cart")
       return deny("cart_goal_requires_cart_page");
     if (["inline_alert", "social_proof"].includes(type) && page !== "product")
       return deny("notice_requires_product_page");
-    if (!slot) return deny("fact_requires_reserved_slot");
-    const rect = slot.getBoundingClientRect();
+    if (!factSlot) return deny("fact_requires_reserved_slot");
+    const rect = factSlot.getBoundingClientRect();
     const minHeight = Number(payload.agentMinHeight);
     if (
       !Number.isFinite(minHeight) ||
@@ -236,7 +241,7 @@ export function resolveWidgetPlacement(
     )
       return deny("fact_slot_not_reserved");
     return {
-      target: slot,
+      target: factSlot,
       zone: type === "countdown_banner" ? "campaign" : "notice",
       reason: "reserved_fact_slot",
       inline: true,

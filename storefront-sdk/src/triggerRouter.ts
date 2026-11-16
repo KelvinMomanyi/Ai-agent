@@ -371,6 +371,7 @@ export class TriggerRouter {
 
   private scheduleProductDwell(productId?: string): void {
     this.clearTimer("product_dwell");
+    if (agentCoreEnabled(this.options.sessionManager.getSettings())) return;
     if (!productId || !isProductPage()) return;
 
     const configuredDelay = Number(
@@ -390,6 +391,7 @@ export class TriggerRouter {
   }
 
   private handleRepeatedProductView(productId: string): void {
+    if (agentCoreEnabled(this.options.sessionManager.getSettings())) return;
     if (!productId) return;
     const counts = normalizePayload(
       this.options.sessionManager.getSnapshot().context.productViewCounts,
@@ -436,6 +438,7 @@ export class TriggerRouter {
   }
 
   private installPriceHoverTracking(): void {
+    if (agentCoreEnabled(this.options.sessionManager.getSettings())) return;
     document.addEventListener(
       "mouseover",
       (event) => {

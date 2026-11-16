@@ -1,6 +1,8 @@
 import { cartUrl } from "./shopifyCart";
+import { agentCoreEnabled } from "./agent/flag";
 
 export type CartSnapshot = {
+  cartHasSubscriptions?: boolean;
   cartToken: string;
   cartProductIds: string[];
   cartVariantIds: string[];
@@ -56,6 +58,14 @@ export async function readShopifyCart(): Promise<CartSnapshot | null> {
     // Oversized carts cannot be represented safely by a truncated eligibility set.
     if (cart.items.length > 100) return null;
     return {
+      ...(agentCoreEnabled()
+        ? {
+            cartHasSubscriptions: cart.items.some(
+              (item: Record<string, unknown>) =>
+                Boolean(item.selling_plan_allocation),
+            ),
+          }
+        : {}),
       cartToken: String(cart.token || ""),
       cartProductIds: [
         ...new Set(

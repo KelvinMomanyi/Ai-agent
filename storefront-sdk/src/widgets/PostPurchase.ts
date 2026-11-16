@@ -1,3 +1,4 @@
+import WIDGET_CSS from '../styles/post-purchase.css?inline';
 import {
   BaseWidget,
   addVariantToCart,
@@ -21,11 +22,9 @@ export class PostPurchase extends BaseWidget {
     const product = getProducts(this.payload)[0] || this.payload.product || {};
 
     this.html(`
-      <style>
-        .post { margin: 18px 0; box-shadow: none; }
-      </style>
+      <style>${WIDGET_CSS}</style>
       <section class="post card">
-        <h3 class="title">${text(copy.headline || "Complete your purchase")}</h3>
+        <h3 class="title">${text(copy.headline || "For your next cart")}</h3>
         <article class="product-card">
           ${(product as any).imageUrl ? `<img src="${text((product as any).imageUrl)}" alt="${text((product as any).title)}" loading="lazy">` : "<span></span>"}
           <div class="stack">
@@ -34,7 +33,7 @@ export class PostPurchase extends BaseWidget {
               <span class="price">${text((product as any).price ? money((product as any).price) : "")}</span>
             </div>
             <p class="reason">${text(copy.oneLineReason || "A useful add-on for what you just bought.")}</p>
-            <button type="button" class="primary" data-add>${text(copy.ctaText || "Add to my order")}</button>
+            <button type="button" class="primary" data-add>${text(copy.ctaText || "Add to cart")}</button>
           </div>
         </article>
       </section>

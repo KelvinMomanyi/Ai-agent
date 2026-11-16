@@ -1,3 +1,4 @@
+import WIDGET_CSS from '../styles/exit-intent.css?inline';
 import { BaseWidget, text } from "./BaseWidget";
 
 export class ExitIntent extends BaseWidget {
@@ -23,10 +24,7 @@ export class ExitIntent extends BaseWidget {
     const copy = (this.payload.copy || {}) as Record<string, unknown>;
     const hasCart = this.payload.cartHasItems === true;
     this.html(`
-      <style>
-        .backdrop { position: fixed; inset: 0; z-index: 9998; background: rgba(17, 24, 39, .38); }
-        .modal { position: fixed; inset: 50% auto auto 50%; z-index: 9999; width: min(420px, calc(100vw - 32px)); transform: translate(-50%, -50%); border-radius: 8px; padding: 18px; }
-      </style>
+      <style>${WIDGET_CSS}</style>
       <div class="backdrop" data-dismiss></div>
       <section class="modal">
         <h3 class="title">${text(copy.headline || "Wait before you go")}</h3>

@@ -1,0 +1,15 @@
+.pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          border-radius: 999px;
+          box-shadow: none;
+          padding: 8px 10px;
+          font-size: 12px;
+          font-weight: 700;
+          color: var(--aovboost-ink);
+          background: var(--aovboost-surface);
+          margin: 10px 0;
+          max-width: 100%;
+        }
+        .dot { width: 8px; height: 8px; flex-shrink: 0; border-radius: 999px; background: var(--aovboost-accent); }

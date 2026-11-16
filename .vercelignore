@@ -1,0 +1,17 @@
+.git
+.vercel
+.aws
+.codex
+.agents
+.env
+.env.*
+!.env.example
+node_modules
+build
+tmp
+test-results
+playwright-report
+playwright/.auth
+**/*.pem
+**/*.key
+**/*.log

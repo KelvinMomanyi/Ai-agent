@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { callAI } from "./client.server";
+let callAI: typeof import("./client.server").callAI;
 vi.mock("../models/usage.server", () => ({
   monthlyAiAvailable: async () => true,
   reserveMonthlyAiCall: async () => true,
@@ -47,7 +47,9 @@ describe("AI gateway grounding contract", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ callAI } = await import("./client.server"));
     process.env.GOOGLE_API_KEY = "test-key";
     process.env.GOOGLE_AI_MODEL = "gemini-test-model";
     delete process.env.MISTRAL_API_KEY;
@@ -135,21 +137,145 @@ describe("AI gateway grounding contract", () => {
       message: "Model returned invalid JSON",
     });
   });
-  it("uses the configured reasoning profile without changing the ordinary model", async () => {
-    vi.stubEnv("GOOGLE_AI_REASONING_MODEL", "reasoning-test-model");
+  it("uses minimal Gemini thinking and joins final text parts without exposing thought summaries", async () => {
+    vi.stubEnv("GOOGLE_AI_MODEL", "gemini-3.6-flash");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              finishReason: "STOP",
+              content: {
+                parts: [
+                  { thought: true, text: "private reasoning" },
+                  { text: '{"reply":' },
+                  { text: '"Grounded answer"}' },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await callAI({
+      triggerName: "chat:test",
+      systemPrompt: "rules",
+      userPrompt: "message",
+      schemaType: "json",
+      maxTokens: 1200,
+    });
+    expect(result).toMatchObject({
+      content: '{"reply":"Grounded answer"}',
+      fallbackUsed: false,
+    });
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain("key=");
+    expect(fetchMock.mock.calls[0][1].headers["x-goog-api-key"]).toBe(
+      "test-key",
+    );
+    expect(
+      JSON.parse(fetchMock.mock.calls[0][1].body).generationConfig,
+    ).toMatchObject({
+      maxOutputTokens: 1200,
+      thinkingConfig: { thinkingLevel: "minimal" },
+    });
+  });
+  it("discards token-truncated JSON and reaches the current Groq fallback", async () => {
+    vi.stubEnv("GROQ_API_KEY", "synthetic");
     const fetchMock = vi
       .fn()
-      .mockImplementation(
-        async () =>
-          new Response(
-            JSON.stringify({
-              candidates: [
-                { content: { parts: [{ text: '{"pairings":[]}' }] } },
-              ],
-            }),
-            { status: 200 },
-          ),
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                finishReason: "MAX_TOKENS",
+                content: { parts: [{ text: '{"reply":"incomplete"}' }] },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { content: '{"reply":"Complete"}' },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
       );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await callAI({
+      triggerName: "chat:test",
+      systemPrompt: "rules",
+      userPrompt: "message",
+      schemaType: "json",
+      maxTokens: 1200,
+    });
+    expect(result).toMatchObject({
+      provider: "groq",
+      modelVersion: "qwen/qwen3.8-27b",
+      fallbackUsed: false,
+      content: '{"reply":"Complete"}',
+    });
+    expect(result.errors[0].message).toBe("Model output token limit reached");
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body).toMatchObject({
+      model: "qwen/qwen3.8-27b",
+      max_completion_tokens: 1200,
+      reasoning_effort: "none",
+      reasoning_format: "hidden",
+    });
+    expect(body.max_tokens).toBeUndefined();
+  });
+  it("backs off malformed provider output rather than retrying it on the next shopper message", async () => {
+    vi.stubEnv("GROQ_API_KEY", "synthetic");
+    const fetchMock = vi.fn().mockImplementation(
+      async (url: string) =>
+        new Response(
+          JSON.stringify(
+            url.includes("googleapis")
+              ? {
+                  candidates: [{ content: { parts: [{ text: "not json" }] } }],
+                }
+              : { choices: [{ message: { content: '{"reply":"ok"}' } }] },
+          ),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = {
+      triggerName: "chat:test",
+      systemPrompt: "rules",
+      userPrompt: "message",
+      schemaType: "json" as const,
+    };
+    expect((await callAI(request)).provider).toBe("groq");
+    expect((await callAI(request)).provider).toBe("groq");
+    expect(
+      fetchMock.mock.calls.filter(([url]) =>
+        String(url).includes("googleapis"),
+      ),
+    ).toHaveLength(1);
+  });
+  it("uses the configured reasoning profile without changing the ordinary model", async () => {
+    vi.stubEnv("GOOGLE_AI_REASONING_MODEL", "reasoning-test-model");
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: '{"pairings":[]}' }] } }],
+          }),
+          { status: 200 },
+        ),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const result = await callAI({
       triggerName: "pairing:test",

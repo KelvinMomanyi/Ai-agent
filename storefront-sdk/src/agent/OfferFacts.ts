@@ -16,6 +16,8 @@ export type AgentFactsConfig = {
     startsAt?: string;
     endsAt?: string;
     code?: string;
+    verifiedUntil?: string;
+    oneTimeOnly?: boolean;
   };
   proof?: Array<{
     productId: string;
@@ -183,11 +185,18 @@ export class OfferFacts {
       )
         return deny("configured_reward_required");
       if (
+        reward.verifiedUntil !== undefined &&
+        !(factTime(reward.verifiedUntil) > now)
+      )
+        return deny("reward_verification_expired");
+      if (
         !ctx.cart.known ||
         !Number.isFinite(ctx.cart.subtotal) ||
         ctx.cart.subtotal < 0
       )
         return deny("verified_cart_required");
+      if (reward.oneTimeOnly === true && ctx.cart.hasSubscriptions !== false)
+        return deny("reward_cart_eligibility_required");
       const currency = String(reward.currency || "");
       if (!/^[A-Z]{3}$/.test(currency) || currency !== ctx.cart.currency)
         return deny("reward_currency_mismatch");
@@ -243,9 +252,28 @@ export class OfferFacts {
           currency,
           code,
           expiresAt:
-            reward.endsAt === undefined ? undefined : factTime(reward.endsAt),
+            reward.verifiedUntil === undefined
+              ? reward.endsAt === undefined
+                ? undefined
+                : factTime(reward.endsAt)
+              : Math.min(
+                  factTime(reward.verifiedUntil),
+                  reward.endsAt === undefined
+                    ? Infinity
+                    : factTime(reward.endsAt),
+                ),
           minHeight: L.REWARD_SLOT_MIN_HEIGHT,
-          key: factHash(JSON.stringify(reward)),
+          key: factHash(
+            JSON.stringify({
+              id: reward.id,
+              description: reward.description,
+              threshold: reward.threshold,
+              currency: reward.currency,
+              code: reward.code,
+              startsAt: reward.startsAt,
+              endsAt: reward.endsAt,
+            }),
+          ),
         },
       };
     }

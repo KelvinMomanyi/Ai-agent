@@ -1,0 +1,17 @@
+.backdrop { position: fixed; inset: 0; z-index: 9998; background: rgba(17, 24, 39, .28); }
+        .drawer {
+          position: fixed;
+          top: 0;
+          right: 0;
+          z-index: 9999;
+          width: min(400px, 100vw);
+          height: 100dvh;
+          padding: 18px;
+          transform: translateX(100%);
+          animation: drawer-in 200ms ease-out forwards;
+          overflow: auto;
+        }
+        @keyframes drawer-in { to { transform: translateX(0); } }
+        .head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+        .added-note { margin: 12px 0; border-radius: 8px; background: #ecfdf5; color: #047857; font-size: 13px; font-weight: 700; padding: 9px 11px; }
+        .status { min-height: 16px; color: var(--aovboost-accent); font-size: 12px; font-weight: 650; }

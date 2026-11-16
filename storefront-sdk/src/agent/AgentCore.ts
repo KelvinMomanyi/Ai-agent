@@ -18,6 +18,8 @@ import { MobileExitSignals } from "./MobileExitSignals";
 import { OfferFacts, FACT_TYPES } from "./OfferFacts";
 import { createFactSurface } from "./FactSurfaces";
 import { Holdout } from "./Holdout";
+import { ProductHesitation, productDom } from "./ProductHesitation";
+import { FactFeed, type FactSnapshot } from "./FactFeed";
 import type { Experience } from "./experienceTypes";
 import type { StorefrontSettings } from "../sessionManager";
 import type { OfferDecision, PlacementOutcome } from "../widgets/widgetManager";
@@ -29,6 +31,7 @@ import type {
 } from "./types";
 
 type Options = {
+  auth?: () => Promise<Record<string, unknown> | null>;
   shop: string;
   apiBase: string;
   settings: StorefrontSettings;
@@ -69,7 +72,12 @@ const positive = (value: unknown) =>
   Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
 
 export class AgentCore implements WidgetCoordinator {
-  private facts = new OfferFacts();
+  private feed?: FactFeed;
+  private factKeys = new Map<string, string>();
+  private facts = new OfferFacts(
+    () => (this.feed ? this.feed.data.agentFacts : window.AOVBoost?.agentFacts),
+    () => (this.feed ? this.feed.data.campaign : window.AOVBoost?.campaign),
+  );
   readonly store: SessionStore;
   readonly signals: SignalBus;
   readonly health: AgentHealth;
@@ -99,8 +107,7 @@ export class AgentCore implements WidgetCoordinator {
   readonly telemetryEvent = (event: Record<string, unknown>) =>
     this.telemetry.project(event);
   private path = location.pathname;
-  private productStartedAt = 0;
-  private dwellTimer?: ReturnType<typeof setTimeout>;
+  private hesitation: ProductHesitation;
   private seenMutations = new Set<string>();
   private destroyed = false;
   constructor(private options: Options) {
@@ -143,15 +150,8 @@ export class AgentCore implements WidgetCoordinator {
       memory: { messages: [] },
       handoff: (trigger) => {
         const ctx = this.context();
-        const forms = document.querySelectorAll(
-          "main form[action*='/cart/add']",
-        );
         const value =
-          forms.length === 1
-            ? forms[0].querySelector<HTMLSelectElement | HTMLInputElement>(
-                "[name='id']",
-              )?.value
-            : undefined;
+          ctx.page.type === "product" ? productDom().variantId : undefined;
         const variantId = /^\d+$/.test(value || "")
           ? `gid://shopify/ProductVariant/${value}`
           : undefined;
@@ -179,6 +179,30 @@ export class AgentCore implements WidgetCoordinator {
       this.store,
       this.telemetry,
       this.debug,
+    );
+    this.hesitation = new ProductHesitation(
+      () =>
+        Boolean(this.productId) &&
+        pageType() === "product" &&
+        this.options.enabled("toast") &&
+        this.options.settings.hesitationDetectionEnabled !== false &&
+        this.options.settings.proactiveMessagesEnabled !== false &&
+        this.health.isHealthy &&
+        !this.store.snapshot().chatOpen &&
+        !this.store.snapshot().checkoutStarted,
+      (elapsed) => {
+        this.store.update((session) => {
+          session.dwellOnProductMs = elapsed;
+        });
+        this.signals.publish("price_hesitation");
+        if (innerWidth >= L.DESKTOP_MIN_WIDTH)
+          this.options.trigger("price_hesitation", {
+            productId: this.productId,
+            dwellSeconds: elapsed / 1000,
+            viewCount:
+              this.store.snapshot().returnsToProduct[this.productId] || 0,
+          });
+      },
     );
     if (
       options.bridge.getRecommendationProducts &&
@@ -291,9 +315,19 @@ export class AgentCore implements WidgetCoordinator {
       this.moments.add(signal.name);
       aovDebug("signal", { name: signal.name, source: signal.data.source });
       this.arbiter.evaluate(signal);
+      this.hesitation.refresh();
+      if (["page_view", "product_view", "cart_change"].includes(signal.name))
+        this.feed?.refresh();
     });
   }
   init(): void {
+    if (this.options.settings.agent_core_enabled === true && this.options.auth)
+      this.feed = new FactFeed(
+        this.options.apiBase,
+        this.options.auth,
+        () => this.context(),
+        (value) => this.applyFacts(value),
+      );
     document.addEventListener(
       "aovboost:measurement-updated",
       () => {
@@ -348,6 +382,23 @@ export class AgentCore implements WidgetCoordinator {
       config: JSON.parse(JSON.stringify(this.options.settings)),
     });
   }
+  private applyFacts(value: FactSnapshot): void {
+    for (const type of FACT_TYPES) {
+      const adapter = this.adapters.get(type)!;
+      const next = value.offers.find((offer) => offer.widgetType === type);
+      const result =
+        next && this.facts.evaluate(type, next.payload || {}, this.context());
+      const key = result?.ok ? result.view.key : "";
+      if (this.arbiter.isActive(adapter.id) && this.factKeys.get(type) !== key)
+        this.arbiter.release(adapter.id, "superseded");
+      if (!next) {
+        this.arbiter.release(adapter.id, "suppressed");
+        adapter.consume?.();
+      } else adapter.update(next, "verified_fact");
+      this.factKeys.set(type, key);
+    }
+    this.signals.publish("offer_ready");
+  }
   offer(decision: OfferDecision, trigger: string): PlacementOutcome {
     const adapter = this.adapters.get(decision.widgetType || "");
     if (!adapter || this.destroyed)
@@ -386,8 +437,7 @@ export class AgentCore implements WidgetCoordinator {
     this.productTitle = "";
     this.productHandle = "";
     this.collectionId = "";
-    this.productStartedAt = 0;
-    clearTimeout(this.dwellTimer);
+    this.hesitation.stop();
     this.mobile.navigation();
   }
   private ensureLauncher(): void {
@@ -430,7 +480,8 @@ export class AgentCore implements WidgetCoordinator {
       this.productId = safeProductId(detail.productId);
       if (!this.productId) return;
       this.productTitle =
-        typeof detail.title === "string" ? detail.title.slice(0, 160) : "";
+        (typeof detail.title === "string" ? detail.title.slice(0, 160) : "") ||
+        productDom().title;
       this.productHandle =
         typeof detail.handle === "string" ? detail.handle.slice(0, 255) : "";
       this.store.update((session) => {
@@ -439,28 +490,10 @@ export class AgentCore implements WidgetCoordinator {
         session.returnsToProduct[this.productId] =
           (session.returnsToProduct[this.productId] || 0) + 1;
       });
-      this.productStartedAt = Date.now();
-      clearTimeout(this.dwellTimer);
-      this.dwellTimer = setTimeout(() => {
-        if (pageType() !== "product" || document.visibilityState === "hidden")
-          return;
-        const price = document.querySelector<HTMLElement>(
-          "main .price, main [data-product-price], main [data-price]",
-        );
-        const rect = price?.getBoundingClientRect();
-        if (
-          !rect ||
-          rect.height <= 0 ||
-          rect.bottom <= 0 ||
-          rect.top >= innerHeight
-        )
-          return;
-        this.store.update((session) => {
-          session.dwellOnProductMs = Date.now() - this.productStartedAt;
-        });
-        publish("price_hesitation");
-        this.options.trigger("price_hesitation", { productId: this.productId });
-      }, L.HESITATION_DWELL_MS);
+      this.hesitation.reset(
+        (this.store.snapshot().returnsToProduct[this.productId] || 0) >=
+          L.HESITATION_RETURNS,
+      );
       publish("product_view");
     } else if (type === "collection_viewed") {
       this.collectionId = /^\d+$/.test(String(detail.collectionId))
@@ -470,6 +503,10 @@ export class AgentCore implements WidgetCoordinator {
       this.recommendations?.invalidate();
       const source = cartSource(detail);
       this.cart = {
+        hasSubscriptions:
+          typeof detail.cartHasSubscriptions === "boolean"
+            ? detail.cartHasSubscriptions
+            : undefined,
         known:
           typeof detail.cartValue === "number" &&
           Number.isFinite(detail.cartValue) &&
@@ -544,8 +581,7 @@ export class AgentCore implements WidgetCoordinator {
         this.store.snapshot().returnsToProduct[this.productId] || 0;
       if (
         pageType() === "product" &&
-        ((this.productStartedAt &&
-          Date.now() - this.productStartedAt >= L.HESITATION_DWELL_MS) ||
+        (this.store.snapshot().dwellOnProductMs >= L.HESITATION_DWELL_MS ||
           returns >= L.HESITATION_RETURNS)
       )
         publish("price_hesitation");
@@ -573,10 +609,11 @@ export class AgentCore implements WidgetCoordinator {
     }
   };
   destroy(): void {
+    this.feed?.destroy();
     this.mobile.destroy();
     this.recommendations?.destroy();
     this.destroyed = true;
-    clearTimeout(this.dwellTimer);
+    this.hesitation.destroy();
     this.listeners.abort();
     this.health.destroy();
     this.arbiter.destroy();

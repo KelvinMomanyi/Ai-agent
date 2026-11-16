@@ -1,3 +1,4 @@
+import WIDGET_CSS from '../styles/bundle-widget.css?inline';
 import {
   BaseWidget,
   addManyToCart,
@@ -33,15 +34,7 @@ export class BundleWidget extends BaseWidget {
     const pricing = getBundlePricing(total, bundle);
 
     this.html(`
-      <style>
-        .bundle { margin: 18px 0; box-shadow: none; }
-        .tiles { display: flex; gap: 10px; overflow-x: auto; padding: 4px 0; }
-        .tile { flex: 0 0 128px; border: 1px solid var(--aovboost-line); border-radius: 8px; padding: 8px; }
-        .totals { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-        .original { color: var(--aovboost-muted); text-decoration: line-through; }
-        .discounted { color: var(--aovboost-accent); font-size: 1.08em; }
-        .savings { color: var(--aovboost-accent); font-size: 13px; font-weight: 700; }
-      </style>
+      <style>${WIDGET_CSS}</style>
       <section class="bundle card">
         <div class="stack">
           <div>

@@ -1,3 +1,4 @@
+import WIDGET_CSS from '../styles/social-proof.css?inline';
 import { BaseWidget, getProducts, text } from "./BaseWidget";
 
 export class SocialProof extends BaseWidget {
@@ -22,23 +23,7 @@ export class SocialProof extends BaseWidget {
     }
 
     this.html(`
-      <style>
-        .pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          border-radius: 999px;
-          box-shadow: none;
-          padding: 8px 10px;
-          font-size: 12px;
-          font-weight: 700;
-          color: var(--aovboost-ink);
-          background: var(--aovboost-surface);
-          margin: 10px 0;
-          max-width: 100%;
-        }
-        .dot { width: 8px; height: 8px; flex-shrink: 0; border-radius: 999px; background: var(--aovboost-accent); }
-      </style>
+      <style>${WIDGET_CSS}</style>
       <div class="pill" role="status"><span class="dot"></span><span data-message>${text(messages[0])}</span></div>
     `);
 

@@ -1,12 +1,14 @@
 import { defineConfig } from "vite";
 import { resolve, join, dirname } from "node:path";
 import { writeFileSync, readdirSync, unlinkSync } from "node:fs";
+import { compactWidgetMarkup } from "./compactWidgetMarkup";
 const assets = resolve(__dirname, "../extensions/aovboost-storefront/assets");
 export default defineConfig({
   publicDir: false,
   build: {
     target: "es2020",
-    minify: true,
+    minify: "terser",
+    terserOptions: { compress: { passes: 2 }, format: { comments: false } },
     emptyOutDir: false,
     outDir: assets,
     rollupOptions: {
@@ -16,6 +18,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    compactWidgetMarkup(),
     {
       name: "theme-engine-asset",
       writeBundle(_options, bundle) {

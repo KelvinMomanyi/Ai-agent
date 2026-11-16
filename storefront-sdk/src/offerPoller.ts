@@ -10,6 +10,7 @@ import { readShopifyCart } from "./cartState";
 import { cartUrl } from "./shopifyCart";
 import { hydrateCartCardPrices } from "./cartCardPricing";
 import type { RecommendationService } from "./agent/RecommendationService";
+import { agentCoreEnabled } from "./agent/flag";
 
 type OfferPollerOptions = {
   shop: string;
@@ -240,6 +241,9 @@ export class OfferPoller {
 
       const body = {
         ...auth,
+        ...(agentCoreEnabled(this.options.sessionManager.getSettings())
+          ? { agent_core_enabled: true }
+          : {}),
         currentProductId,
         currentPageType: getCurrentPageType(),
         cartProductIds,

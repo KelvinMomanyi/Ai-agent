@@ -1,5 +1,10 @@
 # aovboost Phase 2 report
 
+Later live follow-up: [15 November architecture verification](live-architecture-verification-2026-11-15.md).
+It distinguishes deployed code, browser-only flag activation, positive flows,
+failures and coverage gaps. The implementation results below remain historical
+local results; they are not a live sign-off.
+
 13 November 2026. Scope: **Phases 0–2 only**. The flag remains **off by default**. No deployment or live verification was performed. The supplied live-verification status remains the ground truth.
 
 ## 1. Changes by file
@@ -136,6 +141,10 @@ The existing initial-main raw ceiling remains **170000** bytes. The combined che
 6. **Storefront/checkout post-purchase mismatch remains architectural.** Flagged copy now describes cart behavior, but the widget still adds to a cart. Legacy flag-off copy is unchanged for parity. The separate checkout extension was not edited or order-tested.
 7. **Performance/accessibility coverage is incomplete.** No measured CLS/throttled-network budget pass, full-theme survey or all-widget keyboard audit. Existing signed-session/conversation storage predates this work and is not migrated; the new core store excludes tokens and message text. Unavailable-provider handling covers provider contract calls; legacy asynchronous widget internals still need their planned UX review.
 8. **Phase 6 experiment/telemetry QA remains.** No new stable-hash holdout assignment, merchant percentage setting/dashboard, code-use attribution or revenue claims. Existing server holdout is respected, but it can withhold candidates needed for would-have-shown data. Frontend backoff cannot override a stricter existing server dismissal policy.
+
+## Follow-up corrections — 16 November 2026
+
+The original Phase 2 report below remains historical. The later widget/Admin correction run, including exact validation results, bundle sizes, activation steps and remaining live verification, is documented in [widget-repair-2026-11-16.md](widget-repair-2026-11-16.md). These local results do not claim live release.
 
 ## 8. Recommended Phase 3 starting point
 

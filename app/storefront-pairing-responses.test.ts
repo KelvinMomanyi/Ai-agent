@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   entitlement: vi.fn(),
   usage: vi.fn(),
   reserve: vi.fn(),
+  proactiveReserve: vi.fn(),
 }));
 vi.mock("./db.server", () => ({
   default: {
@@ -43,6 +44,9 @@ vi.mock("./db.server", () => ({
 }));
 vi.mock("./jobs/pairingAutopilot.server", () => ({
   schedulePairingDrain: vi.fn(),
+}));
+vi.mock("./sales/proactiveEngine.server", () => ({
+  reserveProactiveMessage: mocks.proactiveReserve,
 }));
 vi.mock("./models/catalogCache.server", () => ({
   getCatalogProductsByIds: mocks.fresh,
@@ -259,11 +263,63 @@ beforeEach(() => {
   mocks.entitlement.mockResolvedValue({ tier: "pro", state: "verified" });
   mocks.usage.mockResolvedValue({ displayed: 0, pending: 0, available: true });
   mocks.reserve.mockResolvedValue(true);
+  mocks.proactiveReserve.mockResolvedValue(true);
   mocks.publicSettings.mockResolvedValue(toPublicAppSettings(settings));
 });
 afterEach(() => vi.unstubAllEnvs());
 
 describe("serialized storefront response privacy and pairing cache", () => {
+  it.each([true, false, undefined, "true"])(
+    "returns a toast only for an explicitly flagged visible-price moment (%s)",
+    async (flag) => {
+      mocks.cache.mockImplementation(async (key) =>
+        key === `settings:${shop}`
+          ? { ...settings, proactiveMessagesEnabled: true }
+          : null,
+      );
+      const result = (await offerAction(
+        post("/api/offer", {
+          shop,
+          sessionId: "session",
+          agent_core_enabled: flag,
+          currentPageType: "product",
+          currentProductId: "gid://shopify/Product/1",
+          trigger: "price_hesitation",
+          triggerPayload: { dwellSeconds: 20 },
+        }),
+      )) as any;
+      expect(result.data.widgetType).toBe(
+        flag === true ? "toast" : "rec_strip",
+      );
+      expect(mocks.createOffer.mock.lastCall?.[0].decision.widgetType).toBe(
+        flag === true ? "toast" : "rec_strip",
+      );
+      expect(mocks.proactiveReserve).toHaveBeenCalledTimes(
+        flag === true ? 1 : 0,
+      );
+      expect(mocks.decision).toHaveBeenCalledTimes(flag === true ? 0 : 1);
+    },
+  );
+  it("does not turn an early or malformed flagged hesitation into a toast", async () => {
+    mocks.cache.mockImplementation(async (key) =>
+      key === `settings:${shop}`
+        ? { ...settings, proactiveMessagesEnabled: true }
+        : null,
+    );
+    for (const dwellSeconds of [19, "20", null]) {
+      const result = (await offerAction(
+        post("/api/offer", {
+          shop,
+          sessionId: "session",
+          agent_core_enabled: true,
+          currentPageType: "product",
+          trigger: "price_hesitation",
+          triggerPayload: { dwellSeconds },
+        }),
+      )) as any;
+      expect(result.data.widgetType).toBe("rec_strip");
+    }
+  });
   it("honors the cart placement off switch before ranking or offer creation while retaining measurement", async () => {
     mocks.cache.mockImplementation(async (key) =>
       key === `settings:${shop}`

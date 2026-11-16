@@ -20,6 +20,7 @@ export function evaluateProactiveMessage(input: {
   scrollDepth: number;
   intentScore: number;
   hesitationScore: number;
+  priceHesitationObserved?: boolean;
   salesState: SalesState;
   promptCount: number;
   dismissed: boolean;
@@ -60,7 +61,10 @@ export function evaluateProactiveMessage(input: {
   }
   if (
     input.settings.hesitationDetectionEnabled &&
-    input.hesitationScore >= 55
+    (input.hesitationScore >= 55 ||
+      (input.triggerType === "price_hesitation" &&
+        input.pageType === "product" &&
+        input.priceHesitationObserved === true))
   ) {
     confidence = 0.86;
     messageType = "hesitation_help";

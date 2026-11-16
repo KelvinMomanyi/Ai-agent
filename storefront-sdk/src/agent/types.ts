@@ -54,6 +54,7 @@ export type AgentContext = {
     currency: string;
     lastChangeSource: CartSource;
     known?: boolean;
+    hasSubscriptions?: boolean;
   }>;
   readonly session: Readonly<SessionState>;
   readonly device: Readonly<{

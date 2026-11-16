@@ -1,3 +1,4 @@
+import WIDGET_CSS from '../styles/inline-alert.css?inline';
 import { BaseWidget, text } from "./BaseWidget";
 
 export class InlineAlert extends BaseWidget {
@@ -15,15 +16,7 @@ export class InlineAlert extends BaseWidget {
       "A relevant product update is available.";
 
     this.html(`
-      <style>
-        .alert {
-          margin: 10px 0;
-          box-shadow: none;
-          border-color: var(--aovboost-line);
-          background: var(--aovboost-surface);
-        }
-        .head { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
-      </style>
+      <style>${WIDGET_CSS}</style>
       <aside class="alert card" role="status">
         <div class="head">
           <div>

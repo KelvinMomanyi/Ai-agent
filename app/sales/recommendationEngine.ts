@@ -32,6 +32,26 @@ export const DEFAULT_RECOMMENDATION_WEIGHTS: RecommendationWeights = {
   mismatchPenalty: 35,
 };
 
+export function buildRecommendationQuery(input: {
+  message: string;
+  previousMessage?: string;
+  searchQueries: string[];
+  viewedProduct?: Pick<CatalogCacheProduct, "title"> | null;
+}) {
+  const refersToProduct =
+    /\b(?:(?:this|current) (?:product|item)|(?:product|item) (?:i am |i'm )?(?:viewing|looking at))\b/i.test(
+      input.message,
+    );
+  return [
+    input.previousMessage,
+    input.message,
+    ...input.searchQueries,
+    refersToProduct ? input.viewedProduct?.title : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function rankProductRecommendations(input: {
   products: CatalogCacheProduct[];
   query: string;
@@ -248,6 +268,18 @@ function matchRatio(needles: string[], haystack: string[]) {
 }
 
 function tokens(value: string) {
+  const plurals: Record<string, string> = {
+    bags: "bag",
+    scarves: "scarf",
+    shoes: "shoe",
+    shirts: "shirt",
+    socks: "sock",
+    sandals: "sandal",
+    dresses: "dress",
+    accessories: "accessory",
+    batteries: "battery",
+    bottles: "bottle",
+  };
   const stopWords = new Set([
     "the",
     "and",
@@ -289,6 +321,7 @@ function tokens(value: string) {
     new Set(
       normalize(value)
         .split(/[^a-z0-9]+/)
+        .map((token) => plurals[token] || token)
         .filter(
           (token) =>
             token.length > 2 && !/^\d+$/.test(token) && !stopWords.has(token),

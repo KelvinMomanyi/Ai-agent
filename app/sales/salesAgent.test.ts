@@ -12,7 +12,10 @@ import {
 } from "./intentScoring";
 import { classifyObjection } from "./objectionEngine";
 import { evaluateProactiveMessage } from "./proactiveEngine";
-import { rankProductRecommendations } from "./recommendationEngine";
+import {
+  buildRecommendationQuery,
+  rankProductRecommendations,
+} from "./recommendationEngine";
 import { determineSalesState } from "./salesStateMachine";
 import {
   emptyShopperProfile,
@@ -32,6 +35,51 @@ import { resolveSalesCartIntent } from "./cartIntent";
 import { resolveCartLineIntent } from "./cartLineIntent";
 
 describe("AI sales control modules", () => {
+  it("grounds references to the viewed product and matches plural catalog nouns without relaxing hard constraints", () => {
+    const bag = {
+      ...product("bag", "Amazing Aluminum Bag Collection1", 499, []),
+      productType: "Bag",
+      category: "Bags",
+    };
+    const unavailable = { ...bag, id: "unavailable", availableForSale: false };
+    const profile = emptyShopperProfile();
+    const input = {
+      products: [bag, unavailable],
+      profile,
+      settings,
+      currencyCode: "USD",
+    };
+    expect(
+      rankProductRecommendations({ ...input, query: "Show me bags." }).map(
+        (r) => r.product.id,
+      ),
+    ).toEqual([bag.id]);
+    expect(
+      rankProductRecommendations({ ...input, query: "Show me bicycles." }),
+    ).toEqual([]);
+    const query = buildRecommendationQuery({
+      message: "Tell me about the product I am viewing.",
+      searchQueries: [],
+      viewedProduct: bag,
+    });
+    expect(rankProductRecommendations({ ...input, query })[0].product.id).toBe(
+      bag.id,
+    );
+    expect(
+      buildRecommendationQuery({
+        message: "Show me scarves instead.",
+        searchQueries: [],
+        viewedProduct: bag,
+      }),
+    ).not.toContain(bag.title);
+    expect(
+      rankProductRecommendations({
+        ...input,
+        query: "Show me bags.",
+        profile: { ...profile, budgetMax: 10 },
+      }),
+    ).toEqual([]);
+  });
   it("keeps budgets, sizes and preference corrections separate", () => {
     expect(
       extractProfileUpdates("My budget is under 100").preferredSizes,
@@ -491,6 +539,32 @@ describe("AI sales control modules", () => {
       now: 1_000_000,
     };
     expect(evaluateProactiveMessage(base).allowed).toBe(true);
+    const priceMoment = {
+      ...base,
+      triggerType: "price_hesitation",
+      intentScore: 0,
+      hesitationScore: 0,
+      priceHesitationObserved: true,
+    };
+    expect(evaluateProactiveMessage(priceMoment)).toMatchObject({
+      allowed: true,
+      messageType: "hesitation_help",
+    });
+    expect(
+      evaluateProactiveMessage({
+        ...priceMoment,
+        priceHesitationObserved: false,
+      }).allowed,
+    ).toBe(false);
+    expect(
+      evaluateProactiveMessage({ ...priceMoment, dismissed: true }).allowed,
+    ).toBe(false);
+    expect(
+      evaluateProactiveMessage({
+        ...priceMoment,
+        promptCount: settings.maxProactivePrompts,
+      }).allowed,
+    ).toBe(false);
     expect(evaluateProactiveMessage({ ...base, dismissed: true }).reason).toBe(
       "shopper_dismissed",
     );

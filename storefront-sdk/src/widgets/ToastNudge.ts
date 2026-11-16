@@ -1,3 +1,4 @@
+import WIDGET_CSS from '../styles/toast-nudge.css?inline';
 import { BaseWidget, text } from "./BaseWidget";
 
 export class ToastNudge extends BaseWidget {
@@ -17,20 +18,7 @@ export class ToastNudge extends BaseWidget {
     const cta = copy.ctaText || this.payload.ctaText || "Open assistant";
 
     this.html(`
-      <style>
-        .toast {
-          position: fixed;
-          right: 18px;
-          bottom: 88px;
-          z-index: 9999;
-          width: min(340px, calc(100vw - 36px));
-          transform: translateY(16px);
-          opacity: 0;
-          animation: toast-in 180ms ease-out forwards;
-        }
-        @keyframes toast-in { to { transform: translateY(0); opacity: 1; } }
-        .head { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
-      </style>
+      <style>${WIDGET_CSS}</style>
       <aside class="toast card" role="status" aria-live="polite">
         <div class="head">
           <div>

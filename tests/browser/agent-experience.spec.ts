@@ -108,18 +108,66 @@ test("quiet launcher loads conversation on gesture, hands off product context an
   expect(assets).toHaveLength(1);
   expect(errors).toEqual([]);
 });
-test("real product dwell shows one desktop toast; focus pauses expiry and CTA opens the same conversation", async ({
+test("primary price dwell with sparse theme metadata shows one desktop toast and hands off the correct product", async ({
   page,
   isMobile,
+  request,
 }) => {
   test.skip(
     isMobile,
     "Toast remains explicitly desktop-only; mobile uses the launcher and exit bottom sheet.",
   );
+  await request.post("/__qa/reset", {
+    data: { agentCore: true, chatEnabled: true, sparseProductContext: true },
+  });
+  const offers: any[] = [],
+    messages: any[] = [],
+    errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("request", (request) => {
+    if (request.url().endsWith("/apps/aovboost/offer"))
+      offers.push(request.postDataJSON());
+  });
+  await page.route("**/apps/aovboost/chat", async (route) => {
+    if (route.request().method() === "GET")
+      return route.fulfill({ json: { ok: true } });
+    messages.push(route.request().postDataJSON());
+    await route.fulfill({
+      contentType: "text/event-stream",
+      body: stream("I can help with Shampoo."),
+    });
+  });
   await page.clock.install();
+  const health = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/apps/aovboost/chat") &&
+      response.request().method() === "GET",
+  );
   await start(page);
-  await page.clock.fastForward(20_100);
+  await health;
+  await page.clock.fastForward(15_100);
+  expect(
+    offers.some((offer) =>
+      ["long_product_dwell", "price_hesitation"].includes(offer.trigger),
+    ),
+  ).toBe(false);
+  await expect(toast(page)).toHaveCount(0);
+  await page.clock.fastForward(5_000);
+  // TriggerRouter deliberately delays the offer request after the moment signal.
+  await page.clock.runFor(250);
   await expect(toast(page)).toBeVisible();
+  expect(
+    offers.filter((offer) => offer.trigger === "price_hesitation"),
+  ).toEqual([
+    expect.objectContaining({
+      agent_core_enabled: true,
+      triggerPayload: expect.objectContaining({
+        productId: "gid://shopify/Product/1",
+        dwellSeconds: expect.any(Number),
+        viewCount: 1,
+      }),
+    }),
+  ]);
   await expect(toast(page)).toContainText("Shampoo");
   const cta = toast(page).getByRole("button", { name: "Ask the assistant" });
   await cta.focus();
@@ -130,6 +178,16 @@ test("real product dwell shows one desktop toast; focus pauses expiry and CTA op
   await expect(chat(page)).toContainText(
     "What would you like to know about Shampoo?",
   );
+  await chat(page)
+    .getByRole("textbox", { name: "Chat message" })
+    .fill("Tell me about this product");
+  await chat(page).getByRole("button", { name: "Send", exact: true }).click();
+  await expect(chat(page)).toContainText("I can help with Shampoo.");
+  expect(messages[0].storefrontContext).toMatchObject({
+    productId: "gid://shopify/Product/1",
+    variantId: "gid://shopify/ProductVariant/101",
+  });
+  expect(errors).toEqual([]);
 });
 test("engaged exit intent shows once, with a mobile bottom sheet and a real cart CTA", async ({
   page,
@@ -340,6 +398,7 @@ test("two toast dismissals silence later interruptive offers in this session", a
   await page.clock.install();
   await start(page);
   await page.clock.fastForward(20_100);
+  await page.clock.runFor(250);
   await expect(toast(page)).toBeVisible();
   await toast(page)
     .getByRole("button", { name: "Dismiss notification" })
@@ -366,16 +425,17 @@ test("two toast dismissals silence later interruptive offers in this session", a
 test("exit CTA hands the current product to chat without a blank conversation", async ({
   page,
 }) => {
+  // One earlier non-product page establishes engagement. The initial real PDP
+  // event supplies context without fabricating a second visit to this product.
+  await page.addInitScript(() => {
+    sessionStorage.setItem(
+      "aovboost_agent_session_v1:aovboost-browser-fixture.myshopify.com",
+      JSON.stringify({ version: 1, state: { pageViews: 1 } }),
+    );
+  });
   await start(page);
   await page.evaluate(() => {
     const sdk = (window as any).AOVBoostSDK;
-    sdk.track("page_view", {});
-    // Match EventBus.trackPageView: a page view is followed by product metadata.
-    sdk.track("product_viewed", {
-      productId: "gid://shopify/Product/1",
-      title: "Shampoo",
-      handle: "shampoo",
-    });
     sdk.trigger("exit_intent", { immediate: true });
   });
   await expect(exit(page).getByRole("dialog")).toBeVisible();

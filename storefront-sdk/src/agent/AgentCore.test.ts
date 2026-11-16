@@ -199,6 +199,8 @@ describe("legacy event bridge and providers", () => {
     expect(mount).toHaveBeenCalledTimes(1);
     expect(trigger).toHaveBeenCalledWith("price_hesitation", {
       productId: "gid://shopify/Product/1",
+      dwellSeconds: 20,
+      viewCount: 1,
     });
     core.offer({ widgetType: "toast" }, "price_hesitation");
     expect(mount).toHaveBeenCalledTimes(1);

@@ -12,12 +12,14 @@ const mocks = vi.hoisted(() => ({
   catalog: vi.fn(),
   fresh: vi.fn(),
   pick: vi.fn(),
+  bundle: vi.fn(),
 }));
 vi.mock("../db.server", () => ({
   default: {
     productRelationship: { findMany: mocks.relationships },
     productAffinity: { findMany: mocks.affinity },
     product: { findFirst: mocks.owned },
+    bundle: { findFirst: mocks.bundle },
   },
 }));
 vi.mock("./catalogCache.server", () => ({
@@ -113,6 +115,7 @@ function decision(products: unknown[]): OfferDecision {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.bundle.mockResolvedValue({ triggerProductIds: [gid(1)], items: [{ productId: gid(1) }, { productId: gid(2) }] });
   mocks.products = [1, 2, 3, 4, 5, 6].map((id) => product(id));
   mocks.catalogIds = mocks.products.map(({ id }) => id);
   mocks.rows = [];
@@ -342,6 +345,63 @@ describe("approved complement precedence", () => {
 });
 
 describe("last-mile pairing and cache guards", () => {
+  it("honors an exact active merchant bundle even when its products are similar, while retaining explicit denials", async () => {
+    mocks.products[0].title = "Bag 1";
+    mocks.products[1].title = "Bag 20";
+    mocks.products[0].productType = mocks.products[1].productType = "Bags";
+    const input = { shop, sourceProductId: gid(1), settings: rules, decision: {
+      ...decision([]), widgetType: "bundle", payload: { bundle: { id: "configured", items: [{ productId: gid(1) }, { productId: gid(2) }] }, products: [{ productId: gid(1) }, { productId: gid(2) }] },
+    } };
+    mocks.bundle.mockResolvedValue({ triggerProductIds: [gid(1)], items: [{ productId: gid(1) }, { productId: gid(2) }] });
+    expect((await enforcePairingDecisionPolicy(input)).widgetType).toBe("bundle");
+    expect(mocks.bundle).toHaveBeenCalledWith(expect.objectContaining({ where: { shop, id: "configured", isActive: true } }));
+    mocks.rows = [pair(2, "approved", "exclude")];
+    expect((await enforcePairingDecisionPolicy(input)).widgetType).toBeNull();
+    mocks.rows = []; mocks.bundle.mockResolvedValue(null);
+    expect((await enforcePairingDecisionPolicy(input)).widgetType).toBeNull();
+  });
+  it("keeps the owned PDP item in a bundle while still enforcing complement and merchant exclusions", async () => {
+    mocks.rows = [pair(2)];
+    const input = {
+      shop,
+      sourceProductId: gid(1),
+      settings: rules,
+      decision: {
+        ...decision([]),
+        widgetType: "bundle",
+        payload: {
+          bundle: {
+            id: "bundle",
+            items: [{ productId: gid(1) }, { productId: gid(2) }],
+          },
+          products: [{ productId: gid(1) }, { productId: gid(2) }],
+        },
+      },
+    };
+    const result = await enforcePairingDecisionPolicy(input);
+    expect(result.widgetType).toBe("bundle");
+    expect((result.payload.products as any[]).map((p) => p.productId)).toEqual([
+      gid(1),
+      gid(2),
+    ]);
+    expect(
+      (
+        await enforcePairingDecisionPolicy({
+          ...input,
+          settings: { ...rules, blockedProductIds: [gid(1)] },
+        })
+      ).widgetType,
+    ).toBeNull();
+    mocks.products[0].collectionIds = ["blocked-collection"];
+    expect(
+      (
+        await enforcePairingDecisionPolicy({
+          ...input,
+          settings: { ...rules, excludedCollectionIds: ["blocked-collection"] },
+        })
+      ).widgetType,
+    ).toBeNull();
+  });
   it("withholds autopilot when its current evidence or stricter threshold no longer supports approval", async () => {
     mocks.rows = [
       pair(2, "auto_approved", "complement", {

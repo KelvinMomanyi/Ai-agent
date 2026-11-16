@@ -126,6 +126,7 @@ async function start(): Promise<void> {
               shop,
               apiBase,
               settings,
+              auth: () => sessionManager.getSignedAuthPayload(),
               visitorId: sessionManager.anonymousId,
               measurement: () => sessionManager.getMeasurement(),
               serverHoldout: () =>

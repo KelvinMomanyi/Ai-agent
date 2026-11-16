@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   db: null as PGlite | null,
   failUpdate: false,
   reads: [] as unknown[],
+  variantWrites: [] as any[],
 }));
 
 vi.mock("../redis.server", () => ({
@@ -149,8 +150,26 @@ vi.mock("../db.server", () => {
       },
     },
     productVariantOrderStat: {
-      createMany: async () => {},
-      updateMany: async () => {},
+      createMany: async (input: any) => {
+        state.variantWrites.push(input);
+        for (const row of input.data)
+          if (
+            Object.keys(row).some(
+              (key) =>
+                !["shop", "productId", "variantId", "orderCount"].includes(key),
+            )
+          )
+            throw new Error("Unexpected Prisma input field");
+      },
+      updateMany: async (input: any) => {
+        for (const row of input.where.OR)
+          if (
+            Object.keys(row).some(
+              (key) => !["productId", "variantId"].includes(key),
+            )
+          )
+            throw new Error("Unexpected Prisma filter field");
+      },
     },
   };
   return {
@@ -533,6 +552,37 @@ describe("database-side performance work", () => {
     expect(state.reads).toEqual(
       Array.from({ length: 2 }, () => ({ shop, id: { in: ["p1", "p2"] } })),
     );
+  });
+
+  it("keeps extended order-line fields out of Prisma variant statistics and counts a variant once", async () => {
+    state.variantWrites = [];
+    await insert("Product", {
+      id: "p1",
+      shop,
+      title: "Item",
+      handle: "item",
+      price: "10",
+      updatedAt: from,
+    });
+    const line = {
+      productId: "p1",
+      variantId: "gid://shopify/ProductVariant/101",
+      quantity: 2,
+      price: 10,
+      offerId: "attribution",
+    };
+    await incrementOrderAffinities(shop, ["p1"], "order-with-lines", [
+      line,
+      line,
+    ]);
+    expect(state.variantWrites).toEqual([
+      {
+        data: [
+          { shop, productId: "p1", variantId: line.variantId, orderCount: 0 },
+        ],
+        skipDuplicates: true,
+      },
+    ]);
   });
 
   it("revalidates cached recommendations against fresh prices and availability", async () => {

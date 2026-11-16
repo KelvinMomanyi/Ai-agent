@@ -1,8 +1,10 @@
 import type { AppSettings } from "@prisma/client";
 import prisma from "../db.server";
 import { getJsonCache, setJsonCache } from "../redis.server";
+import { readStorefrontConfig } from "./storefrontConfig";
 
 export type PublicAppSettings = {
+  agent_core_enabled?: boolean;
   holdoutEnabled: boolean;
   focusedMode: boolean;
   chatEnabled: boolean;
@@ -49,6 +51,9 @@ export async function getPublicAppSettings(shop: string) {
 
 export function toPublicAppSettings(settings: AppSettings): PublicAppSettings {
   return {
+    ...(readStorefrontConfig(settings.storefrontConfig).agentCoreEnabled
+      ? { agent_core_enabled: true }
+      : {}),
     holdoutEnabled: settings.holdoutEnabled && settings.holdoutPercent > 0,
     focusedMode: settings.focusedMode,
     chatEnabled: settings.chatEnabled,

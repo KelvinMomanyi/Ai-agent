@@ -1,3 +1,5 @@
+import WIDGET_CSS from '../styles/upsell-drawer.css?inline';
+import INLINE_CSS0 from '../styles/upsell-drawer-inline.css?inline';
 import {
   BaseWidget,
   addVariantToCart,
@@ -31,26 +33,7 @@ export class UpsellDrawer extends BaseWidget {
     }
 
     this.html(`
-      <style>
-        .backdrop { position: fixed; inset: 0; z-index: 9998; background: rgba(17, 24, 39, .28); }
-        .drawer {
-          position: fixed;
-          top: 0;
-          right: 0;
-          z-index: 9999;
-          width: min(400px, 100vw);
-          height: 100dvh;
-          padding: 18px;
-          transform: translateX(100%);
-          animation: drawer-in 200ms ease-out forwards;
-          overflow: auto;
-        }
-        @keyframes drawer-in { to { transform: translateX(0); } }
-        .head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
-        .added-note { margin: 12px 0; border-radius: 8px; background: #ecfdf5; color: #047857; font-size: 13px; font-weight: 700; padding: 9px 11px; }
-        .status { min-height: 16px; color: var(--aovboost-accent); font-size: 12px; font-weight: 650; }
-        ${inline ? `.drawer { position: static; inset: auto; z-index: auto; width: 100%; height: auto; margin: 18px 0; transform: none; animation: none; overflow: visible; }` : ""}
-      </style>
+      <style>${WIDGET_CSS}${inline ? INLINE_CSS0 : ""}</style>
       ${inline ? "" : '<div class="backdrop" data-dismiss></div>'}
       <aside class="drawer" role="region" aria-label="Recommended cart additions">
         <div class="head">

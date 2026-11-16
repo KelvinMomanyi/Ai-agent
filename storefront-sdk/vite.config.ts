@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 import { readFileSync } from "node:fs";
+import { compactWidgetMarkup } from "./compactWidgetMarkup";
 const engine = JSON.parse(
   readFileSync(resolve(__dirname, ".theme-engine.json"), "utf8"),
 );
@@ -9,6 +10,7 @@ const agent = JSON.parse(
 );
 
 export default defineConfig({
+  plugins: [compactWidgetMarkup()],
   define: {
     __AOVBOOST_THEME_ENGINE_ASSET__: JSON.stringify(engine.file),
     __AOVBOOST_AGENT_CORE_ASSET__: JSON.stringify(agent.file),
@@ -16,7 +18,8 @@ export default defineConfig({
   publicDir: false,
   build: {
     target: "es2020",
-    minify: true,
+    minify: "terser",
+    terserOptions: { compress: { passes: 2 }, format: { comments: false } },
     emptyOutDir: false,
     cssCodeSplit: false,
     outDir: resolve(__dirname, "../extensions/aovboost-storefront/assets"),

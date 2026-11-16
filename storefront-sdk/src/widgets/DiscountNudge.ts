@@ -1,3 +1,5 @@
+import WIDGET_CSS from '../styles/discount-nudge.css?inline';
+import INLINE_CSS0 from '../styles/discount-nudge-inline.css?inline';
 import { BaseWidget, money, text } from "./BaseWidget";
 
 export class DiscountNudge extends BaseWidget {
@@ -27,24 +29,7 @@ export class DiscountNudge extends BaseWidget {
     const progress = threshold > 0 ? Math.min(cartValue / threshold, 1) : 0;
 
     this.html(`
-      <style>
-        .bar {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          z-index: 9998;
-          min-height: 48px;
-          border-left: 0;
-          border-right: 0;
-          border-top: 0;
-          padding: 8px 14px;
-        }
-        .label { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 700; }
-        .track { height: 6px; border-radius: 999px; overflow: hidden; background: #e5e7eb; margin-top: 6px; }
-        .track span { display: block; height: 100%; width: ${progress * 100}%; background: var(--aovboost-accent); transition: width 200ms ease; }
-        ${this.payload.presentation === "inline" ? `.bar { position: static; inset: auto; z-index: auto; margin: 16px 0; border: 1px solid var(--aovboost-line); padding: 14px; } .label { flex-wrap: wrap; } .label > span { flex: 1 1 160px; }` : ""}
-      </style>
+      <style>${WIDGET_CSS}${this.payload.presentation === "inline" ? INLINE_CSS0 : ""}</style>
       <div class="bar">
         <div class="label">
           <span>${
@@ -55,7 +40,7 @@ export class DiscountNudge extends BaseWidget {
           <button type="button" class="secondary" data-cta>${text(copy.ctaText || "View picks")}</button>
           <button type="button" class="icon" data-dismiss aria-label="Close">x</button>
         </div>
-        <div class="track" aria-hidden="true"><span></span></div>
+        <div class="track" aria-hidden="true"><span style="--aovboost-progress:${progress * 100}%"></span></div>
       </div>
     `);
 

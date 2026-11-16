@@ -47,7 +47,9 @@ function reset(options = {}) {
     measurementEnabled: options.measurement !== false,
     agentCore: options.agentCore === true,
     chatEnabled: options.chatEnabled === true,
+    sparseProductContext: options.sparseProductContext === true,
     factSlots: options.factSlots === true,
+    serverFacts: options.serverFacts === true,
     unreservedFacts: options.unreservedFacts === true,
     currency: ["USD", "KES", "JPY"].includes(options.currency)
       ? options.currency
@@ -117,7 +119,8 @@ const measurement = () =>
       }
     : null;
 const settings = () => ({
-  focusedMode: !state.chatEnabled && !state.catalogWidget && !state.factSlots,
+  focusedMode: !state.chatEnabled && !state.catalogWidget && !state.factSlots && !state.serverFacts,
+  ...(state.serverFacts ? {agent_core_enabled:true} : {}),
   upsellEnabled: true,
   chatEnabled: state.chatEnabled,
   analyticsEnabled: true,
@@ -180,7 +183,10 @@ async function page(path) {
       `<div data-aovboost-slot="${state.catalogWidget}"></div></main>`,
     );
   if (state.chatEnabled && !isCart)
-    markup = markup.replace("</main>", '<p class="price">$20.00</p></main>');
+    markup = markup.replace(
+      "<main>",
+      `<main><h1>Shampoo</h1>${state.sparseProductContext ? '<section class="product-card"><p class="price">$1.00</p><form action="/cart/add"><input name="id" value="999"><button type="submit">Quick add another product</button></form></section>' : ""}<p class="product-price__current">$20.00</p>`,
+    );
   if (state.factSlots)
     markup = markup.replace(
       "</main>",
@@ -202,10 +208,13 @@ async function page(path) {
     <output id="cart-count">${cart().item_count}</output>
     <script>
       window.Shopify={shop:${JSON.stringify(shop)},routes:{root:'/'},currency:{active:${JSON.stringify(state.currency)}},theme:{id:123,name:'Dawn',schema_name:'Dawn'}};
-      if (${JSON.stringify(Boolean(state.catalogWidget || state.chatEnabled || state.factSlots))} && ${JSON.stringify(!isCart)}) window.Shopify.product = {id:1,handle:'shampoo',title:'Shampoo'};
+      if (${JSON.stringify(Boolean(state.catalogWidget || state.chatEnabled || state.factSlots || state.serverFacts))} && ${JSON.stringify(!isCart)}) {
+        if (${JSON.stringify(state.sparseProductContext)}) window.ShopifyAnalytics = {meta:{product:{id:1}}};
+        else window.Shopify.product = {id:1,handle:'shampoo',title:'Shampoo'};
+      }
       window.AOVBoost={shop:${JSON.stringify(shop)},apiBase:'/apps/aovboost',currency:${JSON.stringify(state.currency)},agent_core_enabled:${JSON.stringify(state.agentCore)}};
       const mode=${JSON.stringify(state.mode)};
-      const form=document.querySelector('form[action*="/cart/add"]');
+      const form=document.querySelector('main > form[action*="/cart/add"]') || document.querySelector('form[action*="/cart/add"]');
       if(form){
         form.action='/cart/add'; form.method='post';
         form.querySelector('button').textContent='Add Shampoo';
@@ -362,6 +371,21 @@ const server = createServer(async (req, res) => {
       });
     if (path === "/apps/aovboost/chat" && req.method === "GET")
       return json(res, { ok: true });
+    if (path === "/apps/aovboost/experience") {
+      const input = await body(req);
+      if (!state.serverFacts) return json(res, { agentFacts:{version:1}, offers:[], campaign:null, automaticPlacements:false });
+      const campaign = {enabled:true,headline:"Configured fixture campaign",body:"Supplied campaign details",endsAt:new Date(Date.now()+60000).toISOString()};
+      const agentFacts = {version:1};
+      const offers = [{widgetType:"countdown_banner",payload:{offerId:"facts-campaign"}}];
+      if(input.pageType === "product") {
+        agentFacts.alerts = [{id:"real-fixture-notice",productId:"gid://shopify/Product/1",body:"Supplied fixture notice"}];
+        offers.push({widgetType:"inline_alert",payload:{offerId:"facts-notice"}});
+      } else if(input.pageType === "cart") {
+        agentFacts.reward = {id:"real-fixture-code",configured:true,description:"10% off",threshold:30,currency:state.currency,code:"FIXTURE10",oneTimeOnly:true,verifiedUntil:new Date(Date.now()+60000).toISOString()};
+        offers.push({widgetType:"discount_nudge",payload:{offerId:"facts-reward"}});
+      }
+      return json(res,{agentFacts,campaign,offers,automaticPlacements:true});
+    }
     if (path === "/apps/aovboost/offer") {
       const data = await body(req);
       state.offers.push({

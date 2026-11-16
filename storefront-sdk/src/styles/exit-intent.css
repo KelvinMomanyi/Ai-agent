@@ -1,0 +1,2 @@
+.backdrop { position: fixed; inset: 0; z-index: 9998; background: rgba(17, 24, 39, .38); }
+        .modal { position: fixed; inset: 50% auto auto 50%; z-index: 9999; width: min(420px, calc(100vw - 32px)); transform: translate(-50%, -50%); border-radius: 8px; padding: 18px; }

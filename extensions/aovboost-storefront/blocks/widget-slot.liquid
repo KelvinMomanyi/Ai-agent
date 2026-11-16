@@ -1,5 +1,12 @@
-{% comment %} Deliberate inline placement; offers are supplied by the AOVBoost app embed. {% endcomment %}
-<div data-aovboost-slot="{{ block.settings.widget_type | escape }}" {{ block.shopify_attributes }}>
+{% comment %} Deliberate app-owned placement with space reserved before the SDK loads. {% endcomment %}
+{% assign reserved_height = 0 %}
+{% case block.settings.widget_type %}
+  {% when 'countdown_banner' %}{% assign reserved_height = 144 %}
+  {% when 'discount_nudge' %}{% assign reserved_height = 160 %}
+  {% when 'social_proof' %}{% assign reserved_height = 112 %}
+  {% when 'inline_alert' %}{% assign reserved_height = 136 %}
+{% endcase %}
+<div data-aovboost-slot="{{ block.settings.widget_type | escape }}" {% if reserved_height > 0 %}style="height: {{ reserved_height }}px; position: relative; width: 100%;"{% endif %} {{ block.shopify_attributes }}>
   {% if request.design_mode %}
     <p style="padding: 1rem; border: 1px dashed currentColor; font: inherit;">
       AOVBoost: eligible {{ block.settings.widget_type | replace: '_', ' ' | escape }} offers appear here.
@@ -24,7 +31,8 @@
         { "value": "discount_nudge", "label": "Cart goal" },
         { "value": "inline_alert", "label": "Product update" },
         { "value": "social_proof", "label": "Product social proof" },
-        { "value": "countdown_banner", "label": "Campaign countdown" }
+        { "value": "countdown_banner", "label": "Campaign countdown" },
+        { "value": "post_purchase", "label": "Next-cart product picks" }
       ]
     },
     {

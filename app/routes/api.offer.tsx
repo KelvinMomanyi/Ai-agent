@@ -54,11 +54,13 @@ import {
   buildCartRecommendation,
   noCartOffer,
 } from "../models/cartRecommendations.server";
+import { AGENT_LIMITS } from "../../storefront-sdk/src/agent/constants";
 
 // Forward client disconnects to cancellable UI work on Vercel.
 export const config = { runtime: "nodejs", supportsCancellation: true };
 
 type OfferBody = {
+  agent_core_enabled?: boolean;
   sessionId?: string;
   sessionToken?: string;
   shop?: string;
@@ -281,8 +283,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json(noCartOffer("cart_waits_for_confirmed_add"), {
         headers: withCors(),
       });
-    const proactiveTrigger = isProactiveChatTrigger(body);
     const sessionContext = asRecord(snapshot.context);
+    const corePriceHesitation =
+      body.agent_core_enabled === true &&
+      body.trigger === "price_hesitation" &&
+      normalizePageType(body.currentPageType) === "product" &&
+      settings.hesitationDetectionEnabled &&
+      ((typeof body.triggerPayload?.dwellSeconds === "number" &&
+        Number.isFinite(body.triggerPayload.dwellSeconds) &&
+        body.triggerPayload.dwellSeconds >=
+          AGENT_LIMITS.HESITATION_DWELL_MS / 1000) ||
+        (typeof body.triggerPayload?.viewCount === "number" &&
+          Number.isSafeInteger(body.triggerPayload.viewCount) &&
+          body.triggerPayload.viewCount >= AGENT_LIMITS.HESITATION_RETURNS));
+    const proactiveTrigger =
+      corePriceHesitation || isProactiveChatTrigger(body);
     const proactiveDecision = proactiveTrigger
       ? evaluateProactiveMessage({
           triggerType: body.trigger || "manual",
@@ -295,6 +310,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           ),
           intentScore: snapshot.intentScore,
           hesitationScore: snapshot.hesitationScore,
+          priceHesitationObserved: corePriceHesitation,
           salesState: normalizeSalesState(snapshot.salesState),
           promptCount: Number(sessionContext.proactivePromptCount || 0),
           dismissed: (body.dismissedWidgets || []).includes("chat"),
@@ -386,7 +402,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const rawDecision: OfferDecision = proactiveDecision
       ? {
-          widgetType: "chat",
+          widgetType: corePriceHesitation ? "toast" : "chat",
           payload: {
             triggerType: body.trigger,
             proactive: true,

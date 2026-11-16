@@ -31,12 +31,14 @@ type AiService = {
   headers: Record<string, string>;
   buildBody: (request: AiGatewayRequest) => unknown;
   extractContent: (data: any) => string | null;
+  outputTruncated: (data: any) => boolean;
 };
 
 let lastAiProvider: AiProvider = "none";
 
 const MODEL_COOLDOWN_MS = 30_000;
 const modelHealth = new Map<string, { downUntil: number }>();
+const GROQ_DEFAULT_MODEL = "qwen/qwen3.8-27b";
 
 const TIMEOUT_MS = {
   urgent: Number(process.env.AOVBOOST_AI_TIMEOUT_URGENT_MS || 2500),
@@ -74,7 +76,16 @@ function makeOpenAiService(
         { role: "system", content: request.systemPrompt },
         { role: "user", content: request.userPrompt },
       ],
-      max_tokens: request.maxTokens || 400,
+      ...(name === "groq"
+        ? { max_completion_tokens: request.maxTokens || 400 }
+        : { max_tokens: request.maxTokens || 400 }),
+      ...(name === "groq" && model === GROQ_DEFAULT_MODEL
+        ? {
+            reasoning_effort:
+              request.jobClass === "pairing_reasoning" ? "medium" : "none",
+            reasoning_format: "hidden",
+          }
+        : {}),
       ...(request.jobClass === "pairing_reasoning" && name === "mistral"
         ? { reasoning_effort: "high" }
         : {}),
@@ -98,7 +109,25 @@ function makeOpenAiService(
               .join("")
           : null;
     },
+    outputTruncated: (data: any) =>
+      data.choices?.[0]?.finish_reason === "length",
   };
+}
+
+function googleThinking(model: string, reasoning: boolean) {
+  // Preserve the reasoning profile. Ordinary storefront replies need their
+  // small output allowance for JSON rather than hidden reasoning tokens.
+  if (reasoning) return undefined;
+  if (
+    /^gemini-(3\.6-flash|3\.5-flash-lite|3\.1-flash-lite|3-flash-preview)$/.test(
+      model,
+    )
+  )
+    return { thinkingLevel: "minimal" };
+  if (/^gemini-(3\.8-flash|3(?:\.\d+)?-pro(?:-|$)|4-)/.test(model))
+    return { thinkingLevel: "low" };
+  if (/^gemini-2\.5-flash(?:-|$)/.test(model)) return { thinkingBudget: 0 };
+  return undefined;
 }
 
 function getAiServices(request?: AiGatewayRequest): AiService[] {
@@ -111,8 +140,11 @@ function getAiServices(request?: AiGatewayRequest): AiService[] {
       ? {
           name: "gemini" as const,
           modelVersion: googleModel,
-          url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(googleModel)}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
-          headers: { "Content-Type": "application/json" },
+          url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(googleModel)}:generateContent`,
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": process.env.GOOGLE_API_KEY,
+          },
           buildBody: (request: AiGatewayRequest) => ({
             systemInstruction: {
               parts: [{ text: request.systemPrompt }],
@@ -127,10 +159,19 @@ function getAiServices(request?: AiGatewayRequest): AiService[] {
               maxOutputTokens: request.maxTokens || 400,
               responseMimeType:
                 request.schemaType === "json" ? "application/json" : undefined,
+              thinkingConfig: googleThinking(googleModel, reasoning),
             },
           }),
           extractContent: (data: any) =>
-            data.candidates?.[0]?.content?.parts?.[0]?.text ?? null,
+            data.candidates?.[0]?.content?.parts
+              ?.filter(
+                (part: any) =>
+                  part.thought !== true && typeof part.text === "string",
+              )
+              .map((part: any) => part.text)
+              .join("") || null,
+          outputTruncated: (data: any) =>
+            data.candidates?.[0]?.finishReason === "MAX_TOKENS",
         }
       : null,
     process.env.MISTRAL_API_KEY
@@ -151,8 +192,8 @@ function getAiServices(request?: AiGatewayRequest): AiService[] {
           reasoning
             ? process.env.GROQ_AI_REASONING_MODEL ||
                 process.env.GROQ_AI_MODEL ||
-                "llama-3.3-70b-versatile"
-            : process.env.GROQ_AI_MODEL || "llama-3.3-70b-versatile",
+                GROQ_DEFAULT_MODEL
+            : process.env.GROQ_AI_MODEL || GROQ_DEFAULT_MODEL,
         )
       : null,
     process.env.DEEPSEEK_API_KEY
@@ -273,11 +314,14 @@ export async function callAI(
       }
 
       const data = await response.json();
+      if (service.outputTruncated(data))
+        throw new Error("Model output token limit reached");
       const content = service.extractContent(data);
       if (content) {
         if (request.schemaType === "json" && !isJsonObject(content)) {
           const message = "Model returned invalid JSON";
           errors.push({ provider: service.name, message });
+          markModelDown(service);
           logGatewayAttempt(request, service.name, startedAt, false, message);
           continue;
         }

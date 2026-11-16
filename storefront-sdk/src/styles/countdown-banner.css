@@ -1,0 +1,22 @@
+.banner {
+          position: sticky;
+          top: 0;
+          z-index: 9998;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto auto auto;
+          align-items: center;
+          gap: 12px;
+          min-height: 48px;
+          border-left: 0;
+          border-right: 0;
+          border-top: 0;
+          border-radius: 0;
+          padding: 9px 14px;
+        }
+        .copy { min-width: 0; }
+        .timer { font-size: 13px; font-weight: 800; white-space: nowrap; }
+        
+        @media (max-width: 520px) {
+          .banner { grid-template-columns: minmax(0, 1fr) auto; }
+          .timer { grid-column: 1 / -1; }
+        }

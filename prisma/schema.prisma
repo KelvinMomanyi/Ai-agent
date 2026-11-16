@@ -343,6 +343,7 @@ model AppSettings {
   aiTone                     String   @default("friendly")
   brandVoice                 String?
   storeKnowledge             String?
+  storefrontConfig           Json?
   blockedProductIds          String[] @default([])
   excludedCollectionIds      String[] @default([])
   preferredProductIds        String[] @default([])

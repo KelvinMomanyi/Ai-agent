@@ -1,3 +1,4 @@
+import FACT_CSS from '../styles/fact-surfaces.css?inline';
 import type { WidgetPayload } from "../widgets/BaseWidget";
 import type { AgentVoice } from "./AgentVoice";
 import type { FactView } from "./OfferFacts";
@@ -70,15 +71,18 @@ export function createFactSurface(
       }
       const copy = options.voice.fact(view, options.locale()),
         text = deps.text;
-      this.html(`<style>
-        .fact{height:100%;width:100%;margin:0;padding:12px;overflow:auto;box-shadow:none;display:flex;flex-direction:column;gap:6px;scrollbar-gutter:stable}
-        .head{display:flex;justify-content:space-between;gap:8px;align-items:start;flex-shrink:0}.body,.detail{margin:0;overflow-wrap:anywhere}.body{flex:1;min-height:3em;overflow:auto}.detail{font-size:11px;color:var(--aovboost-muted);flex-shrink:0}.fact>[data-agent-identity]{flex-shrink:0}
-        .timer{font-variant-numeric:tabular-nums;min-width:10ch;white-space:nowrap}.track{flex-shrink:0;height:6px;overflow:hidden;background:var(--aovboost-line);border-radius:4px}.fill{height:100%;background:var(--aovboost-accent)}
-        @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
-      </style><aside class="fact card" tabindex="0" aria-label="${text(copy.headline)}"><div class="head"><strong>${text(copy.headline)}</strong><button type="button" class="icon" data-dismiss aria-label="${text(options.voice.ui.dismissNotification)}">×</button></div>
+      const cartPath = deps.cartUrl("read").replace(/\.js$/, "");
+      const applyCode =
+        view.type === "discount_nudge" && view.code && view.remaining === 0
+          ? view.code
+          : "";
+      const cartLink = applyCode
+        ? `/discount/${encodeURIComponent(applyCode)}?redirect=${encodeURIComponent(cartPath)}`
+        : cartPath;
+      this.html(`<style>${FACT_CSS}</style><aside class="fact card" tabindex="0" aria-label="${text(copy.headline)}"><div class="head"><strong>${text(copy.headline)}</strong><button type="button" class="icon" data-dismiss aria-label="${text(options.voice.ui.dismissNotification)}">×</button></div>
         <p class="body" role="status" tabindex="0" data-body>${text(copy.body)}</p><p class="detail" data-detail ${copy.detail ? "" : "hidden"}>${text(copy.detail)}</p>
         ${view.type === "countdown_banner" ? `<span class="timer" role="timer" aria-live="off" data-timer></span>` : ""}
-        ${view.type === "discount_nudge" ? `<div class="track" role="progressbar" aria-label="${text(copy.headline)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${view.progress}" data-progress><div class="fill" style="width:${view.progress}%" data-fill></div></div><a href="${text(deps.cartUrl("read").replace(/\.js$/, ""))}" data-cart>${text(options.voice.ui.reviewCart)}</a>` : ""}
+        ${view.type === "discount_nudge" ? `<div class="track" role="progressbar" aria-label="${text(copy.headline)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${view.progress}" data-progress><div class="fill" style="width:${view.progress}%" data-fill></div></div><a href="${text(cartLink)}" data-cart>${text(applyCode ? "Apply code" : options.voice.ui.reviewCart)}</a>` : ""}
       </aside>`);
       this.root
         .querySelector("[data-dismiss]")
@@ -117,6 +121,17 @@ export function createFactSurface(
             ?.setAttribute("aria-valuenow", String(view.progress));
           const fill = this.root.querySelector<HTMLElement>("[data-fill]");
           if (fill) fill.style.width = `${view.progress}%`;
+          const link =
+            this.root.querySelector<HTMLAnchorElement>("[data-cart]");
+          if (link) {
+            const code = view.code && view.remaining === 0 ? view.code : "";
+            link.href = code
+              ? `/discount/${encodeURIComponent(code)}?redirect=${encodeURIComponent(deps.cartUrl("read").replace(/\.js$/, ""))}`
+              : deps.cartUrl("read").replace(/\.js$/, "");
+            link.textContent = code
+              ? "Apply code"
+              : options.voice.ui.reviewCart;
+          }
         }
         if (view.type === "countdown_banner") {
           const remaining = Math.max(

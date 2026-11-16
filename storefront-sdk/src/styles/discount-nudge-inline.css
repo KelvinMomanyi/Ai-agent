@@ -1,0 +1,1 @@
+.bar { position: static; inset: auto; z-index: auto; margin: 16px 0; border: 1px solid var(--aovboost-line); padding: 14px; } .label { flex-wrap: wrap; } .label > span { flex: 1 1 160px; }

@@ -450,6 +450,22 @@ export async function enforcePairingDecisionPolicy(input: {
   const sourceId = input.sourceProductId
     ? productGid(input.sourceProductId)
     : undefined;
+  const bundleId = guarded.widgetType === "bundle" &&
+    guarded.payload.bundle && typeof guarded.payload.bundle === "object"
+      ? String((guarded.payload.bundle as Record<string, unknown>).id || "")
+      : "";
+  const configuredBundle = bundleId && sourceId
+    ? await prisma.bundle.findFirst({
+        where: { shop: input.shop, id: bundleId, isActive: true },
+        select: { triggerProductIds: true, items: { select: { productId: true } } },
+      })
+    : null;
+  const configuredIds = new Set(configuredBundle?.items.map((item) => item.productId));
+  const explicitBundle = Boolean(configuredBundle && sourceId &&
+    configuredBundle.triggerProductIds.some((id) => productGid(id) === sourceId) &&
+    configuredIds.size === ids.size && [...ids].every((id) => configuredIds.has(id)));
+  if (guarded.widgetType === "bundle" && !explicitBundle)
+    return { ...guarded, widgetType: null, payload: {}, confidence: 0, reasoning: "The configured bundle is no longer available for this product." };
   const [denied, products, source, rows, affinities] = await Promise.all([
     getPairingDenials({ ...input, targetProductIds: [...ids] }),
     getCatalogProductsByIds(input.shop, [...ids]),
@@ -513,6 +529,8 @@ export async function enforcePairingDecisionPolicy(input: {
         input.settings.excludedCollectionIds.includes(id),
       ) ||
       (sourceId &&
+        !explicitBundle &&
+        !(guarded.widgetType === "bundle" && product.id === sourceId) &&
         (!source ||
           (rows.find((row) => row.targetProductId === product.id)?.status !==
             "approved" &&

@@ -37,6 +37,8 @@ export default function App() {
         <Link to="/app/analytics">Revenue Dashboard</Link>
         <Link to="/app/pairings">Product pairings</Link>
         <Link to="/app/settings">Recommendations</Link>
+        <Link to="/app/storefront">Storefront offers</Link>
+        <Link to="/app/bundles">Bundles</Link>
         <Link to="/app/plan">Plan &amp; usage</Link>
       </NavMenu>
       <Outlet />

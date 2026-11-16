@@ -1,3 +1,5 @@
+import WIDGET_CSS from '../styles/countdown-banner.css?inline';
+import INLINE_CSS0 from '../styles/countdown-banner-inline.css?inline';
 import { BaseWidget, text } from "./BaseWidget";
 
 export class CountdownBanner extends BaseWidget {
@@ -18,30 +20,7 @@ export class CountdownBanner extends BaseWidget {
       "Relevant bundles and add-ons are available for this session.";
 
     this.html(`
-      <style>
-        .banner {
-          position: sticky;
-          top: 0;
-          z-index: 9998;
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) auto auto auto;
-          align-items: center;
-          gap: 12px;
-          min-height: 48px;
-          border-left: 0;
-          border-right: 0;
-          border-top: 0;
-          border-radius: 0;
-          padding: 9px 14px;
-        }
-        .copy { min-width: 0; }
-        .timer { font-size: 13px; font-weight: 800; white-space: nowrap; }
-        ${this.payload.presentation === "inline" ? `.banner { position: static; top: auto; z-index: auto; border: 1px solid var(--aovboost-line); margin: 16px 0; }` : ""}
-        @media (max-width: 520px) {
-          .banner { grid-template-columns: minmax(0, 1fr) auto; }
-          .timer { grid-column: 1 / -1; }
-        }
-      </style>
+      <style>${WIDGET_CSS}${this.payload.presentation === "inline" ? INLINE_CSS0 : ""}</style>
       <aside class="banner card" role="status">
         <div class="copy">
           <h3 class="title">${text(headline)}</h3>
