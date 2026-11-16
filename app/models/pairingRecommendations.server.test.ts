@@ -115,7 +115,10 @@ function decision(products: unknown[]): OfferDecision {
 }
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.bundle.mockResolvedValue({ triggerProductIds: [gid(1)], items: [{ productId: gid(1) }, { productId: gid(2) }] });
+  mocks.bundle.mockResolvedValue({
+    triggerProductIds: [gid(1)],
+    items: [{ productId: gid(1) }, { productId: gid(2) }],
+  });
   mocks.products = [1, 2, 3, 4, 5, 6].map((id) => product(id));
   mocks.catalogIds = mocks.products.map(({ id }) => id);
   mocks.rows = [];
@@ -345,19 +348,82 @@ describe("approved complement precedence", () => {
 });
 
 describe("last-mile pairing and cache guards", () => {
+  it("checks the selected bundle's items, not trigger IDs, catalog metadata or other bundle candidates", async () => {
+    const bundle = {
+      id: "configured",
+      triggerProductIds: [gid(1), gid(3)],
+      items: [
+        { productId: gid(1), quantity: 1, product: mocks.products[0] },
+        { productId: gid(2), quantity: 1, product: mocks.products[1] },
+      ],
+    };
+    const input = {
+      shop,
+      sourceProductId: gid(1),
+      settings: rules,
+      decision: {
+        ...decision([]),
+        widgetType: "bundle",
+        payload: {
+          bundle,
+          bundles: [bundle, { id: "other", items: [{ productId: gid(4) }] }],
+          products: bundle.items,
+          currentProductId: gid(1),
+        },
+      },
+    };
+    mocks.bundle.mockResolvedValue({
+      triggerProductIds: [gid(1), gid(3)],
+      items: bundle.items,
+    });
+    const result = await enforcePairingDecisionPolicy(input);
+    expect(result.widgetType).toBe("bundle");
+    expect((result.payload.products as any[]).map((p) => p.productId)).toEqual([
+      gid(1),
+      gid(2),
+    ]);
+    mocks.bundle.mockResolvedValue({
+      triggerProductIds: [gid(1)],
+      items: [{ productId: gid(1) }, { productId: gid(5) }],
+    });
+    expect((await enforcePairingDecisionPolicy(input)).widgetType).toBeNull();
+  });
   it("honors an exact active merchant bundle even when its products are similar, while retaining explicit denials", async () => {
     mocks.products[0].title = "Bag 1";
     mocks.products[1].title = "Bag 20";
     mocks.products[0].productType = mocks.products[1].productType = "Bags";
-    const input = { shop, sourceProductId: gid(1), settings: rules, decision: {
-      ...decision([]), widgetType: "bundle", payload: { bundle: { id: "configured", items: [{ productId: gid(1) }, { productId: gid(2) }] }, products: [{ productId: gid(1) }, { productId: gid(2) }] },
-    } };
-    mocks.bundle.mockResolvedValue({ triggerProductIds: [gid(1)], items: [{ productId: gid(1) }, { productId: gid(2) }] });
-    expect((await enforcePairingDecisionPolicy(input)).widgetType).toBe("bundle");
-    expect(mocks.bundle).toHaveBeenCalledWith(expect.objectContaining({ where: { shop, id: "configured", isActive: true } }));
+    const input = {
+      shop,
+      sourceProductId: gid(1),
+      settings: rules,
+      decision: {
+        ...decision([]),
+        widgetType: "bundle",
+        payload: {
+          bundle: {
+            id: "configured",
+            items: [{ productId: gid(1) }, { productId: gid(2) }],
+          },
+          products: [{ productId: gid(1) }, { productId: gid(2) }],
+        },
+      },
+    };
+    mocks.bundle.mockResolvedValue({
+      triggerProductIds: [gid(1)],
+      items: [{ productId: gid(1) }, { productId: gid(2) }],
+    });
+    expect((await enforcePairingDecisionPolicy(input)).widgetType).toBe(
+      "bundle",
+    );
+    expect(mocks.bundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { shop, id: "configured", isActive: true },
+      }),
+    );
     mocks.rows = [pair(2, "approved", "exclude")];
     expect((await enforcePairingDecisionPolicy(input)).widgetType).toBeNull();
-    mocks.rows = []; mocks.bundle.mockResolvedValue(null);
+    mocks.rows = [];
+    mocks.bundle.mockResolvedValue(null);
     expect((await enforcePairingDecisionPolicy(input)).widgetType).toBeNull();
   });
   it("keeps the owned PDP item in a bundle while still enforcing complement and merchant exclusions", async () => {

@@ -3,7 +3,7 @@ import { AGENT_LIMITS as L } from "./constants";
 const EXCLUDED =
   "product-recommendations,.related-products,.recommendations,.product-card,[data-product-card],[data-product-recommendations],quick-add-modal,[data-quick-add],[data-aovboost-widget],header,footer,nav,[hidden],[inert],[aria-hidden='true']";
 const INFO =
-  "product-info,[data-product-info],[data-product-details],.product__info-container,.product-single__meta,[id^='MainProduct-'],[data-main-product]";
+  "product-info,.product-info,[data-product-info],[data-product-details],.product__info-container,.product-single__meta,[id^='MainProduct-'],[data-main-product]";
 
 /** Read only the primary purchase area; recommendation prices are not PDP prices. */
 export function productDom() {

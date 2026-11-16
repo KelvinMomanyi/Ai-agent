@@ -118,7 +118,12 @@ test("primary price dwell with sparse theme metadata shows one desktop toast and
     "Toast remains explicitly desktop-only; mobile uses the launcher and exit bottom sheet.",
   );
   await request.post("/__qa/reset", {
-    data: { agentCore: true, chatEnabled: true, sparseProductContext: true },
+    data: {
+      agentCore: true,
+      chatEnabled: true,
+      sparseProductContext: true,
+      mode: "velour",
+    },
   });
   const offers: any[] = [],
     messages: any[] = [],

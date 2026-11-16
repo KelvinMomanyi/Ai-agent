@@ -171,6 +171,32 @@ test("Velour-shaped dynamic sections update lines, totals and badge after one ac
   );
 });
 
+for (const agentCore of [false, true])
+  test(`native redirect recovers when the first destination cart read times out, without another cart write (Core ${agentCore})`, async ({
+    page,
+    request,
+  }) => {
+    await request.post("/__qa/reset", { data: { mode: "velour", agentCore } });
+    await start(page);
+    let failed = false;
+    await page.route("**/cart.js", async (route) => {
+      if (!failed && new URL(page.url()).pathname === "/cart") {
+        failed = true;
+        await route.abort("timedout");
+      } else await route.continue();
+    });
+    await page.getByRole("button", { name: "Add Shampoo" }).click();
+    await expect(page).toHaveURL(/\/cart$/);
+    await expect(surface(page)).toBeVisible();
+    expect(failed).toBe(true);
+    const state = await (await request.get("/__qa/state")).json();
+    expect(state.cart.item_count).toBe(1);
+    expect(state.offers).toHaveLength(1);
+    await page.reload();
+    await page.waitForTimeout(2500);
+    await expect(surface(page)).toHaveCount(0);
+  });
+
 test("waits for a native popup to close before using the floating fallback", async ({
   page,
   request,

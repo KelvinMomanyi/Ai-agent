@@ -6,6 +6,8 @@ export const NATIVE_CART_INTENT_TTL_MS = 30_000;
 export const NATIVE_CART_BASELINE_TTL_MS = 60_000;
 export const NATIVE_CART_REFRESH_MS = 5_000;
 const MAX_INTENT_BYTES = 24_000;
+const VARIANT_GID = /^gid:\/\/shopify\/ProductVariant\/\d{1,30}$/;
+const CURRENCY = /^[A-Z]{3}$/;
 type Identity = { shop: string; sessionId: string };
 type CartState = {
   quantities: Array<[string, number]>;
@@ -23,12 +25,11 @@ type Intent = Identity & {
 };
 
 function cartState(cart: CartSnapshot): CartState | null {
-  if (cart.cartItems.length > 100 || !/^[A-Z]{3}$/.test(cart.currency))
-    return null;
+  if (cart.cartItems.length > 100 || !CURRENCY.test(cart.currency)) return null;
   const quantities = new Map<string, number>();
   for (const item of cart.cartItems) {
     if (
-      !/^gid:\/\/shopify\/ProductVariant\/\d+$/.test(item.variantId) ||
+      !VARIANT_GID.test(item.variantId) ||
       !Number.isSafeInteger(item.quantity) ||
       item.quantity < 0
     )
@@ -215,6 +216,10 @@ export class NativeCartContinuation {
     };
   }
 
+  get pendingAdd() {
+    return this.pending && this.fresh(this.pending);
+  }
+
   destroy() {
     this.listeners.abort();
     this.readVersion++;
@@ -336,10 +341,11 @@ export class NativeCartContinuation {
     return owner?.shop === intent.shop && owner.sessionId === intent.sessionId;
   }
   private fresh(intent: Intent) {
+    const age = Date.now() - intent.createdAt;
     return (
-      Number.isFinite(intent.createdAt) &&
-      intent.createdAt <= Date.now() &&
-      Date.now() - intent.createdAt <= NATIVE_CART_INTENT_TTL_MS
+      typeof intent.createdAt === "number" &&
+      age >= 0 &&
+      age <= NATIVE_CART_INTENT_TTL_MS
     );
   }
   private read(): Intent | null {
@@ -353,7 +359,7 @@ export class NativeCartContinuation {
         !/^[\w-]{1,100}$/.test(v.mutationId) ||
         typeof v.sourcePath !== "string" ||
         typeof v.armed !== "boolean" ||
-        !/^gid:\/\/shopify\/ProductVariant\/\d{1,30}$/.test(v.variantId) ||
+        !VARIANT_GID.test(v.variantId) ||
         !Number.isSafeInteger(v.quantity) ||
         v.quantity < 1 ||
         v.quantity > 100 ||
@@ -362,12 +368,12 @@ export class NativeCartContinuation {
         v.before.quantities.length > 100 ||
         !Number.isSafeInteger(v.before.count) ||
         v.before.count < 0 ||
-        !/^[A-Z]{3}$/.test(v.before.currency) ||
+        !CURRENCY.test(v.before.currency) ||
         v.before.quantities.some(
           (entry) =>
             !Array.isArray(entry) ||
             entry.length !== 2 ||
-            !/^gid:\/\/shopify\/ProductVariant\/\d+$/.test(entry[0]) ||
+            !VARIANT_GID.test(entry[0]) ||
             !Number.isSafeInteger(entry[1]) ||
             entry[1] < 0,
         ) ||

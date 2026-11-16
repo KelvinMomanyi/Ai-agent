@@ -23,6 +23,20 @@ const kes = {
 };
 
 describe("chat response contract", () => {
+  it.each([
+    ["Show me Amazing Aluminum Bag Collection20.", "product_search"],
+    ["Show me three bags from this store with prices.", "product_search"],
+    ["Do you have a basket?", "product_availability"],
+    ["Compare these bags", "comparison"],
+    ["What is in my bag?", "cart_summary"],
+    ["Show my shopping basket", "cart_summary"],
+    ["Add this bag to my cart", "cart_action"],
+  ])(
+    "routes %s without confusing catalog bags with the shopping cart",
+    (message, intent) => {
+      expect(classifyMessageIntent(message)).toBe(intent);
+    },
+  );
   it("classifies the shopper intents that change response behavior", () => {
     expect(classifyMessageIntent("Do you have anything cheaper?")).toBe(
       "price_sensitive",

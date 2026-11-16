@@ -39,6 +39,21 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 describe("primary PDP context and visible-price hesitation", () => {
+  it("uses Velour's product-info and external quantity control, ignoring unrelated quick-add forms", () => {
+    document.body.innerHTML = `<main><div class="product-info"><h1>Amazing Aluminum Bag Collection1</h1>
+      <div class="product-block--price"><div id="product-price"><span class="product-price--sale">KSh499.44</span></div></div>
+      <input form="product-form-main" name="quantity" value="1">
+      <product-form><form id="product-form-main" method="post" action="/cart/add" enctype="multipart/form-data"><input name="id" value="101"><button name="add">Add to cart</button></form></product-form>
+      <form id="shop-pay-installments-1" action="/cart/add"><input name="id" value="101"></form>
+      </div><a class="card-banner"><form action="/cart/add"><input name="id" value="202"></form><data class="price">KSh1</data></a></main>`;
+    expect(productDom().variantId).toBe("101");
+    expect(productDom().prices.every((p) => p.closest(".product-info"))).toBe(
+      true,
+    );
+    sensor.reset();
+    vi.advanceTimersByTime(L.HESITATION_DWELL_MS);
+    expect(fire).toHaveBeenCalledExactlyOnceWith(L.HESITATION_DWELL_MS);
+  });
   it("ignores related prices and quick-add variants, using the actual title and purchase form", () => {
     const value = productDom();
     expect(value.title).toBe("Amazing Aluminum Bag Collection1");

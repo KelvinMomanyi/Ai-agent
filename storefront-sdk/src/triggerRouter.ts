@@ -20,6 +20,8 @@ type TriggerPayload = Record<string, unknown>;
 
 const CART_IDLE_MS = 10 * 60 * 1000;
 const INACTIVITY_MS = 5 * 60 * 1000;
+const NATIVE_CART_READ_RETRIES = 2;
+const NATIVE_CART_RETRY_MS = 500;
 
 const TRIGGERS = {
   collection_dwell: {
@@ -342,7 +344,7 @@ export class TriggerRouter {
       detail.type === "checkout_started"
     ) {
       this.fire("checkout_started", {
-        path: detail.path || window.location.pathname,
+        path: detail.path || location.pathname,
       });
     }
   };
@@ -406,12 +408,12 @@ export class TriggerRouter {
   }
 
   private installComparisonTracking(): void {
-    const text = `${window.location.pathname} ${document.title}`.toLowerCase();
+    const text = `${location.pathname} ${document.title}`.toLowerCase();
     if (
       /\b(compare|comparison|versus|vs|alternative|competitor)\b/.test(text)
     ) {
       window.setTimeout(() => {
-        this.fire("comparison_page_visit", { path: window.location.pathname });
+        this.fire("comparison_page_visit", { path: location.pathname });
       }, 800);
     }
   }
@@ -429,7 +431,7 @@ export class TriggerRouter {
         if (mouseEvent.clientY <= 8) {
           this.fire("exit_intent", {
             immediate: true,
-            path: window.location.pathname,
+            path: location.pathname,
           });
         }
       },
@@ -542,7 +544,7 @@ export class TriggerRouter {
         );
         window.setTimeout(
           () => {
-            this.fire("returning_shopper", { path: window.location.pathname });
+            this.fire("returning_shopper", { path: location.pathname });
           },
           Math.min(Math.max(delay, 10), 120) * 1000,
         );
@@ -550,25 +552,29 @@ export class TriggerRouter {
       }
       window.localStorage.setItem(key, "true");
       window.setTimeout(() => {
-        this.fire("first_time_visitor", { path: window.location.pathname });
+        this.fire("first_time_visitor", { path: location.pathname });
       }, 1800);
     } catch {
       // Storage failures should not break the SDK.
     }
   }
 
-  private installInitialCartTracking(): void {
+  private installInitialCartTracking(attempt = 0): void {
     const version = this.cartReadVersion;
     this.setTimer(
       "initial_cart",
       async () => {
         const cart = await readShopifyCart();
         if (
-          !cart ||
           version !== this.cartReadVersion ||
           this.abortController.signal.aborted
         )
           return;
+        if (!cart) {
+          if (this.nativeCart.pendingAdd && attempt < NATIVE_CART_READ_RETRIES)
+            this.installInitialCartTracking(attempt + 1);
+          return;
+        }
         setStorefrontCurrency(cart.currency);
         this.nativeCart.remember(cart);
         const continuedAdd = this.nativeCart.confirm(cart);
@@ -588,14 +594,14 @@ export class TriggerRouter {
         this.fire("cart_restored", payload);
         this.handleCartState(payload);
       },
-      100,
+      attempt ? NATIVE_CART_RETRY_MS * attempt : 100,
     );
   }
 
   private installPostPurchaseTracking(): void {
     if (!isThankYouPage()) return;
     window.setTimeout(() => {
-      this.fire("post_purchase_window", { path: window.location.pathname });
+      this.fire("post_purchase_window", { path: location.pathname });
     }, 1200);
   }
 
@@ -767,18 +773,18 @@ function markSessionTrigger(type: string) {
 
 function isProductPage() {
   return (
-    /\/products(?:\/|$)/.test(window.location.pathname) ||
+    /\/products(?:\/|$)/.test(location.pathname) ||
     Boolean(getCurrentProductId())
   );
 }
 
 function isCollectionPage() {
-  return /\/collections(?:\/|$)/.test(window.location.pathname);
+  return /\/collections(?:\/|$)/.test(location.pathname);
 }
 
 function isThankYouPage() {
   return (
-    /\/thank_you(?:\/|$)/.test(window.location.pathname) ||
+    /\/thank_you(?:\/|$)/.test(location.pathname) ||
     Boolean((window as any).Shopify?.checkout)
   );
 }

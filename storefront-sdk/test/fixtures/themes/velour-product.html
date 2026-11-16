@@ -1,0 +1,11 @@
+<!-- Synthetic purchase area matching the inspected Velour structure; no merchant HTML or credentials. -->
+<main>
+  <div class="product-info sticky-content--desktop">
+    <h1>Shampoo</h1>
+    <div class="product-block product-block--price"><div id="product-price" class="product-price-wrapper"><span class="product-price product-price--sale">$20.00</span></div></div>
+    <input type="number" form="product-form-main" name="quantity" value="1" aria-label="Quantity">
+    <div class="product-block product-block--buy-buttons"><product-form class="product-form"><form id="product-form-main" method="post" action="/cart/add" enctype="multipart/form-data"><input type="hidden" name="id" value="101"><button type="submit" name="add">Add to cart</button></form></product-form></div>
+    <div class="shop-pay-installments"><form id="shop-pay-installments-1" method="post" action="/cart/add"><input type="hidden" name="id" value="101"></form></div>
+  </div>
+  <section><a class="card-banner"><div class="card-price"><data class="price">$1.00</data></div><form action="/cart/add"><input type="hidden" name="id" value="999"><button type="submit">Quick add another product</button></form></a></section>
+</main>

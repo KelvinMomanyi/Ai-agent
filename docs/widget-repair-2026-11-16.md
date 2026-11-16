@@ -1,5 +1,9 @@
 # Storefront and Admin corrections — 16 November 2026
 
+Subsequent live results: [live-end-to-end-verification-2026-11-16.md](live-end-to-end-verification-2026-11-16.md). That run found a mixed release and remaining failures; the local results below are not a live sign-off.
+
+Follow-up repairs for the four failed/partial flows: [four-widget-fixes-2026-11-16.md](four-widget-fixes-2026-11-16.md). These also require a new release and live retest.
+
 ## Verification boundary
 
 **Implemented and tested locally; not released or verified live.** No production migration, backend/Shopify deployment, live merchant-setting change or new order was performed in this repair run. The earlier live verdicts in `live-remaining-widgets-verification-2026-11-15.md` remain historical evidence, not automatically upgraded by local tests.

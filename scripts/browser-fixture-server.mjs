@@ -119,8 +119,12 @@ const measurement = () =>
       }
     : null;
 const settings = () => ({
-  focusedMode: !state.chatEnabled && !state.catalogWidget && !state.factSlots && !state.serverFacts,
-  ...(state.serverFacts ? {agent_core_enabled:true} : {}),
+  focusedMode:
+    !state.chatEnabled &&
+    !state.catalogWidget &&
+    !state.factSlots &&
+    !state.serverFacts,
+  ...(state.serverFacts ? { agent_core_enabled: true } : {}),
   upsellEnabled: true,
   chatEnabled: state.chatEnabled,
   analyticsEnabled: true,
@@ -150,6 +154,12 @@ async function body(req) {
     text += chunk;
     if (text.length > 65_536) throw new Error("Fixture request too large");
   }
+  if (req.headers["content-type"]?.includes("multipart/form-data"))
+    return Object.fromEntries(
+      await new Response(text, {
+        headers: { "Content-Type": req.headers["content-type"] },
+      }).formData(),
+    );
   return req.headers["content-type"]?.includes(
     "application/x-www-form-urlencoded",
   )
@@ -163,7 +173,11 @@ async function page(path) {
   let markup = await readFile(
     resolve(
       "storefront-sdk/test/fixtures/themes",
-      isCart ? "cart-page.html" : "redirect-product.html",
+      isCart
+        ? "cart-page.html"
+        : state.mode === "velour"
+          ? "velour-product.html"
+          : "redirect-product.html",
     ),
     "utf8",
   );
@@ -182,7 +196,7 @@ async function page(path) {
       "</main>",
       `<div data-aovboost-slot="${state.catalogWidget}"></div></main>`,
     );
-  if (state.chatEnabled && !isCart)
+  if (state.chatEnabled && !isCart && state.mode !== "velour")
     markup = markup.replace(
       "<main>",
       `<main><h1>Shampoo</h1>${state.sparseProductContext ? '<section class="product-card"><p class="price">$1.00</p><form action="/cart/add"><input name="id" value="999"><button type="submit">Quick add another product</button></form></section>' : ""}<p class="product-price__current">$20.00</p>`,
@@ -373,18 +387,60 @@ const server = createServer(async (req, res) => {
       return json(res, { ok: true });
     if (path === "/apps/aovboost/experience") {
       const input = await body(req);
-      if (!state.serverFacts) return json(res, { agentFacts:{version:1}, offers:[], campaign:null, automaticPlacements:false });
-      const campaign = {enabled:true,headline:"Configured fixture campaign",body:"Supplied campaign details",endsAt:new Date(Date.now()+60000).toISOString()};
-      const agentFacts = {version:1};
-      const offers = [{widgetType:"countdown_banner",payload:{offerId:"facts-campaign"}}];
-      if(input.pageType === "product") {
-        agentFacts.alerts = [{id:"real-fixture-notice",productId:"gid://shopify/Product/1",body:"Supplied fixture notice"}];
-        offers.push({widgetType:"inline_alert",payload:{offerId:"facts-notice"}});
-      } else if(input.pageType === "cart") {
-        agentFacts.reward = {id:"real-fixture-code",configured:true,description:"10% off",threshold:30,currency:state.currency,code:"FIXTURE10",oneTimeOnly:true,verifiedUntil:new Date(Date.now()+60000).toISOString()};
-        offers.push({widgetType:"discount_nudge",payload:{offerId:"facts-reward"}});
+      if (!state.serverFacts)
+        return json(res, {
+          agentFacts: { version: 1 },
+          offers: [],
+          campaign: null,
+          automaticPlacements: false,
+        });
+      const campaign = {
+        enabled: true,
+        headline: "Configured fixture campaign",
+        body: "Supplied campaign details",
+        endsAt: new Date(Date.now() + 60000).toISOString(),
+      };
+      const agentFacts = { version: 1 };
+      const offers = [
+        {
+          widgetType: "countdown_banner",
+          payload: { offerId: "facts-campaign" },
+        },
+      ];
+      if (input.pageType === "product") {
+        agentFacts.alerts = [
+          {
+            id: "real-fixture-notice",
+            productId: "gid://shopify/Product/1",
+            body: "Supplied fixture notice",
+          },
+        ];
+        offers.push({
+          widgetType: "inline_alert",
+          payload: { offerId: "facts-notice" },
+        });
+      } else if (input.pageType === "cart") {
+        agentFacts.reward = {
+          id: "real-fixture-code",
+          configured: true,
+          description: "10% off",
+          threshold: 30,
+          currency: state.currency,
+          code: "FIXTURE10",
+          oneTimeOnly: true,
+          verifiedUntil: new Date(Date.now() + 60000).toISOString(),
+        };
+        offers.push({
+          widgetType: "discount_nudge",
+          payload: { offerId: "facts-reward" },
+        });
       }
-      return json(res,{agentFacts,campaign,offers,automaticPlacements:true});
+      return json(res, {
+        agentFacts,
+        campaign,
+        offers,
+        automaticPlacements: true,
+      });
     }
     if (path === "/apps/aovboost/offer") {
       const data = await body(req);

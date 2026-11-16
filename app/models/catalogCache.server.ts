@@ -168,7 +168,8 @@ export async function getChatCatalog(input: {
 }) {
   const tokens = tokenize(input.query || "")
     .filter((word) => word.length > 2)
-    .slice(0, 8);
+    .slice(0, 8)
+    .flatMap(tokenVariants);
   const predicates = tokens.map(
     (token) =>
       Prisma.sql`(p.title ILIKE ${`%${token}%`} OR p.handle ILIKE ${`%${token}%`} OR p."productType" ILIKE ${`%${token}%`} OR ${token} = ANY(p.tags))`,

@@ -803,7 +803,11 @@ export function classifyMessageIntent(value: string) {
   }
 
   if (
-    /\b(cart|bag|basket)\b/i.test(value) ||
+    /\bcart\b/i.test(value) ||
+    /\b(?:my|our|shopping)\s+(?:shopping\s+)?(?:bag|basket)\b/i.test(value) ||
+    /\b(?:what(?:'s| is)?|items?)\b[^.!?]*\bin\s+(?:the\s+)?(?:bag|basket)\b/i.test(
+      value,
+    ) ||
     /\b(?:what(?:'s| is)|how much)\b.*\b(?:my\s+)?(?:total|subtotal)\b/i.test(
       value,
     )
